@@ -1,0 +1,46 @@
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build output
+bin/
+bin-int/
+Build/
+
+# Premake generated files
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+
+# IDE
+.vscode/
+
+# ImGui ini
+imgui.ini
+
+# Debug/Release
+Debug/
+Release/
+x64/
+x86/
