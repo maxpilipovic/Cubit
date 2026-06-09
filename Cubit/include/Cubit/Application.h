@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Cubit.h"
+#include "Cubit/Core.h"
 
 class CB_API Application
 {

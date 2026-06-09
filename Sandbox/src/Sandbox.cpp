@@ -1,11 +1,11 @@
 #include <iostream>
-#include "Application.h"
+#include "Cubit/Cubit.h"
 
 int main()
 {
     Application app;
     app.Run();
 
-    std::cout << "Sandbox\n";
+    CB_INFO("Sandbox");
     return 0;
 }

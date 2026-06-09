@@ -20,14 +20,19 @@ project "Cubit"
     targetdir ("bin/" .. outputdir .. "/%{prj.name}")
     objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
 
+    pchheader "cub.h"
+    pchsource "Cubit/src/cub.cpp"
+
     files
     {
+        "Cubit/include/**.h",
         "Cubit/src/**.h",
         "Cubit/src/**.cpp"
     }
 
     includedirs
     {
+        "Cubit/include",
         "Cubit/src"
     }
 
@@ -70,7 +75,7 @@ project "Sandbox"
 
     includedirs
     {
-        "Cubit/src"
+        "Cubit/include"
     }
 
     links

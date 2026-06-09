@@ -15,16 +15,16 @@ Cubit is in the foundation stage. The current implementation is minimal:
 - `Cubit` builds as a shared library.
 - `Sandbox` builds as a console application.
 - `Sandbox` links against `Cubit`.
-- The engine exposes a basic `Application` class.
+- The engine exposes a basic `Application` class and client logger.
 - The sandbox creates an `Application` instance and runs it.
 - Premake generates the Visual Studio solution and project files.
 
-The current runtime behavior is simple console output:
+The current runtime behavior is simple logger output:
 
 ```text
-Application created
-Engine running
-Sandbox
+[CORE] [Info] Application created
+[CORE] [Info] Engine running
+[CLIENT] [Info] Sandbox
 ```
 
 Most systems described in the design document are planned scope, not implemented scope yet.
@@ -47,10 +47,18 @@ The guiding rule from the project documentation is: build only what the game nee
 ```text
 Cubit/
 +-- Cubit/                  Engine project
+|   +-- include/
+|   |   +-- Cubit/          Public API headers used by client code
+|   |       +-- Application.h
+|   |       +-- Core.h
+|   |       +-- Cubit.h
+|   |       +-- Logger.h
 |   +-- src/
+|       +-- Core/           Engine-only internal code
+|       |   +-- CoreLogger.cpp
+|       |   +-- CoreLogger.h
 |       +-- Application.cpp
-|       +-- Application.h
-|       +-- Cubit.h
+|       +-- Logger.cpp
 +-- Sandbox/                Test executable / startup project
 |   +-- src/
 |       +-- Sandbox.cpp
@@ -121,7 +129,7 @@ bin/
 
 ### Cubit
 
-`Cubit` is the engine library. It currently builds as a Windows DLL and exports engine symbols through `CB_API`:
+`Cubit` is the engine library. It currently builds as a Windows DLL and exports public engine symbols through `CB_API`:
 
 ```cpp
 #ifdef CB_PLATFORM_WINDOWS
@@ -134,6 +142,8 @@ bin/
     #define CB_API
 #endif
 ```
+
+Public headers live under `Cubit/include/Cubit`. Private engine-only code lives under `Cubit/src`, including `CoreLogger`. The sandbox only includes `Cubit/include`, so client code gets `CB_*` logging macros but not `CB_CORE_*` engine logging macros.
 
 The first exported engine type is `Application`, which is responsible for startup and the main run path.
 

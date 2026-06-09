@@ -1,12 +1,14 @@
-#include "Application.h"
-#include <iostream>
+#include "cub.h"
+
+#include "Cubit/Application.h"
+#include "Core/CoreLogger.h"
 
 Application::Application()
 {
-    std::cout << "Application created\n";
+    CB_CORE_INFO("Application created");
 }
 
 void Application::Run()
 {
-    std::cout << "Engine running\n";
+    CB_CORE_INFO("Engine running");
 }
