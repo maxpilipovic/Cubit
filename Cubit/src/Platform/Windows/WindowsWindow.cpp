@@ -61,3 +61,8 @@ void WindowsWindow::OnUpdate()
 {
     glfwPollEvents();
 }
+
+bool WindowsWindow::ShouldClose() const
+{
+    return glfwWindowShouldClose(m_Window) == GLFW_TRUE;
+}

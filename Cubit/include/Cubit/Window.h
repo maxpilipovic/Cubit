@@ -20,6 +20,7 @@ public:
 
     virtual void OnUpdate() = 0;
 
+    [[nodiscard]] virtual bool ShouldClose() const = 0;
     [[nodiscard]] virtual std::uint32_t GetWidth() const = 0;
     [[nodiscard]] virtual std::uint32_t GetHeight() const = 0;
     [[nodiscard]] virtual void* GetNativeWindow() const = 0;

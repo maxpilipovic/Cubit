@@ -15,6 +15,7 @@ public:
 
     void OnUpdate() override;
 
+    [[nodiscard]] bool ShouldClose() const override;
     [[nodiscard]] std::uint32_t GetWidth() const override { return m_Properties.Width; }
     [[nodiscard]] std::uint32_t GetHeight() const override { return m_Properties.Height; }
     [[nodiscard]] void* GetNativeWindow() const override { return m_Window; }
