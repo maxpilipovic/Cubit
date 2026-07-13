@@ -1,6 +1,7 @@
 #include "cub.h"
 
 #include "Cubit/Application.h"
+#include "Cubit/Logger.h"
 #include "Cubit/Window.h"
 #include "Core/CoreLogger.h"
 
@@ -12,14 +13,31 @@ struct ApplicationData
 };
 
 Application::Application()
-    : m_Data(new ApplicationData{ Window::Create() })
+    : m_Data(nullptr)
 {
-    CB_CORE_INFO("Application created");
+    CoreLogger::Init();
+    Logger::Init();
+
+    try
+    {
+        m_Data = new ApplicationData{ Window::Create() };
+        CB_CORE_INFO("Application created");
+    }
+    catch (...)
+    {
+        Logger::Shutdown();
+        CoreLogger::Shutdown();
+        throw;
+    }
 }
 
 Application::~Application()
 {
     delete m_Data;
+    CB_CORE_INFO("Application destroyed");
+
+    Logger::Shutdown();
+    CoreLogger::Shutdown();
 }
 
 void Application::Run()
