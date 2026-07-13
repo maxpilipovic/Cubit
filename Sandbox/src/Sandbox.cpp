@@ -1,6 +1,7 @@
 #include <iostream>
 #include "Cubit/Cubit.h"
 
+//Starts the Sandbox application and runs the engine loop.
 int main()
 {
     Application app;

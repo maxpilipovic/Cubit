@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-// Engine-only logging macros.
+//Engine-only logging macros.
 #define CB_CORE_TRACE(message) CoreLogger::Trace(message)
 #define CB_CORE_INFO(message) CoreLogger::Info(message)
 #define CB_CORE_WARN(message) CoreLogger::Warn(message)
@@ -12,15 +12,28 @@
 class CoreLogger
 {
 public:
+	//Prevents instances of the static core logger utility.
 	CoreLogger() = delete;
 
+	//Initializes the engine logging channel.
 	static void Init();
+
+	//Shuts down the engine logging channel.
 	static void Shutdown();
 
+	//Writes a trace-level engine message.
 	static void Trace(std::string_view message);
+
+	//Writes an informational engine message.
 	static void Info(std::string_view message);
+
+	//Writes a warning-level engine message.
 	static void Warn(std::string_view message);
+
+	//Writes an error-level engine message.
 	static void Error(std::string_view message);
+
+	//Writes a critical engine message.
 	static void Critical(std::string_view message);
 
 private:
@@ -33,5 +46,6 @@ private:
 		Critical
 	};
 
+	//Formats and writes a message for the requested channel and level.
 	static void Log(std::string_view channel, LogLevel level, std::string_view message);
 };

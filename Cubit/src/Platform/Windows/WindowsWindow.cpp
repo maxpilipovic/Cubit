@@ -11,6 +11,7 @@ namespace
 {
     std::uint32_t s_WindowCount = 0;
 
+    //Sends GLFW failures through the engine logging channel.
     void GLFWErrorCallback(int error, const char* description)
     {
         CB_CORE_ERROR(std::string("GLFW error ") + std::to_string(error) + ": " + description);
