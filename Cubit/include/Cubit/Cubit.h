@@ -3,6 +3,7 @@
 #include "Cubit/Application.h"
 #include "Cubit/Events/ApplicationEvent.h"
 #include "Cubit/Events/Event.h"
+#include "Cubit/Events/EventBus.h"
 #include "Cubit/Events/KeyEvent.h"
 #include "Cubit/Events/MouseEvent.h"
 #include "Cubit/Input.h"

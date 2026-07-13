@@ -2,6 +2,7 @@
 
 #include "Cubit/Core.h"
 #include "Cubit/Events/ApplicationEvent.h"
+#include "Cubit/Events/EventBus.h"
 #include "Cubit/Layer/Layer.h"
 #include "Cubit/Timestep.h"
 
@@ -29,6 +30,9 @@ public:
 
     //Transfers ownership of an overlay to the application.
     void PushOverlay(std::unique_ptr<Layer> overlay);
+
+    //Returns the gameplay notification bus owned by this application.
+    EventBus& GetEventBus();
 
 protected:
     //Updates client behavior for one frame.

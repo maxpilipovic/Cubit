@@ -12,6 +12,7 @@
 struct ApplicationData
 {
     std::unique_ptr<Window> WindowInstance;
+    EventBus GameplayEvents;
     LayerStack Layers;
     bool Running = true;
 };
@@ -65,6 +66,9 @@ void Application::Run()
         if (!m_Data->Running || m_Data->WindowInstance->ShouldClose())
             break;
 
+        //Deferred gameplay notifications are delivered once after platform polling.
+        m_Data->GameplayEvents.DispatchQueued();
+
         const auto currentFrameTime = Clock::now();
         const std::chrono::duration<double> frameDuration = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
@@ -102,6 +106,11 @@ void Application::PushLayer(std::unique_ptr<Layer> layer)
 void Application::PushOverlay(std::unique_ptr<Layer> overlay)
 {
     m_Data->Layers.PushOverlay(std::move(overlay));
+}
+
+EventBus& Application::GetEventBus()
+{
+    return m_Data->GameplayEvents;
 }
 
 void Application::OnUpdate(Timestep timestep)
