@@ -67,3 +67,8 @@ bool WindowsWindow::ShouldClose() const
 {
     return glfwWindowShouldClose(m_Window) == GLFW_TRUE;
 }
+
+void WindowsWindow::SetEventCallback(EventCallback callback)
+{
+    m_EventCallback = std::move(callback);
+}

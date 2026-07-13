@@ -25,6 +25,9 @@ public:
     //Reports whether GLFW has received a close request.
     bool ShouldClose() const override;
 
+    //Stores the callback that receives translated GLFW events.
+    void SetEventCallback(EventCallback callback) override;
+
     //Returns the cached window width.
     std::uint32_t GetWidth() const override { return m_Properties.Width; }
 
@@ -36,5 +39,6 @@ public:
 
 private:
     WindowProperties m_Properties;
+    EventCallback m_EventCallback;
     GLFWwindow* m_Window = nullptr;
 };

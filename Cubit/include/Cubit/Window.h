@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/Events/Event.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -16,6 +18,8 @@ struct WindowProperties
 class CB_API Window
 {
 public:
+    using EventCallback = std::function<void(Event&)>;
+
     //Releases resources owned by a platform window.
     virtual ~Window() = default;
 
@@ -24,6 +28,9 @@ public:
 
     //Reports whether the user has requested that the window close.
     virtual bool ShouldClose() const = 0;
+
+    //Registers the immediate callback used to route platform events.
+    virtual void SetEventCallback(EventCallback callback) = 0;
 
     //Returns the current window width in screen coordinates.
     virtual std::uint32_t GetWidth() const = 0;

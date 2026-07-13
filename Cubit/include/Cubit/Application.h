@@ -1,7 +1,11 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/Events/ApplicationEvent.h"
+#include "Cubit/Layer/Layer.h"
 #include "Cubit/Timestep.h"
+
+#include <memory>
 
 struct ApplicationData;
 
@@ -17,10 +21,25 @@ public:
     //Runs frame updates until the application window closes.
     void Run();
 
+    //Handles application events before routing unhandled events through layers.
+    void OnEvent(Event& event);
+
+    //Transfers ownership of a regular layer to the application.
+    void PushLayer(std::unique_ptr<Layer> layer);
+
+    //Transfers ownership of an overlay to the application.
+    void PushOverlay(std::unique_ptr<Layer> overlay);
+
 protected:
     //Updates client behavior for one frame.
     virtual void OnUpdate(Timestep timestep);
 
 private:
+    //Stops the application after a routed window-close request.
+    bool OnWindowClose(WindowCloseEvent& event);
+
+    //Allows application resize bookkeeping before layers receive the event.
+    bool OnWindowResize(WindowResizeEvent& event);
+
     ApplicationData* m_Data;
 };
