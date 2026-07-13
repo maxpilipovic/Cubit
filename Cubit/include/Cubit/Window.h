@@ -23,8 +23,8 @@ public:
     //Releases resources owned by a platform window.
     virtual ~Window() = default;
 
-    //Processes pending native window messages for the frame.
-    virtual void OnUpdate() = 0;
+    //Processes pending native window messages immediately.
+    virtual void PollEvents() = 0;
 
     //Reports whether the user has requested that the window close.
     virtual bool ShouldClose() const = 0;
@@ -37,6 +37,12 @@ public:
 
     //Returns the current window height in screen coordinates.
     virtual std::uint32_t GetHeight() const = 0;
+
+    //Returns the current framebuffer width in pixels.
+    virtual std::uint32_t GetFramebufferWidth() const = 0;
+
+    //Returns the current framebuffer height in pixels.
+    virtual std::uint32_t GetFramebufferHeight() const = 0;
 
     //Returns the platform-specific native window handle.
     virtual void* GetNativeWindow() const = 0;

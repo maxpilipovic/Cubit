@@ -1,6 +1,7 @@
 #include "cub.h"
 
 #include "Cubit/Application.h"
+#include "Cubit/Input.h"
 #include "Cubit/Layer/LayerStack.h"
 #include "Cubit/Logger.h"
 #include "Cubit/Window.h"
@@ -24,6 +25,7 @@ Application::Application()
     try
     {
         m_Data = new ApplicationData{ Window::Create() };
+        Input::SetWindow(m_Data->WindowInstance.get());
         m_Data->WindowInstance->SetEventCallback(
             [this](Event& event)
             {
@@ -41,6 +43,7 @@ Application::Application()
 
 Application::~Application()
 {
+    Input::SetWindow(nullptr);
     delete m_Data;
     CB_CORE_INFO("Application destroyed");
 
@@ -55,8 +58,13 @@ void Application::Run()
     using Clock = std::chrono::steady_clock;
     auto lastFrameTime = Clock::now();
 
-    while (m_Data->Running && !m_Data->WindowInstance->ShouldClose())
+    while (m_Data->Running)
     {
+        m_Data->WindowInstance->PollEvents();
+
+        if (!m_Data->Running || m_Data->WindowInstance->ShouldClose())
+            break;
+
         const auto currentFrameTime = Clock::now();
         const std::chrono::duration<double> frameDuration = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
@@ -65,7 +73,6 @@ void Application::Run()
 
         m_Data->Layers.OnUpdate(timestep);
         OnUpdate(timestep);
-        m_Data->WindowInstance->OnUpdate();
     }
 }
 

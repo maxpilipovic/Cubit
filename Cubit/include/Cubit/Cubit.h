@@ -5,6 +5,7 @@
 #include "Cubit/Events/Event.h"
 #include "Cubit/Events/KeyEvent.h"
 #include "Cubit/Events/MouseEvent.h"
+#include "Cubit/Input.h"
 #include "Cubit/KeyCodes.h"
 #include "Cubit/Layer/Layer.h"
 #include "Cubit/Layer/LayerStack.h"
