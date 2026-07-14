@@ -38,12 +38,18 @@ protected:
     //Updates client behavior for one frame.
     virtual void OnUpdate(Timestep timestep);
 
+    //Renders client behavior for one frame.
+    virtual void OnRender();
+
 private:
     //Stops the application after a routed window-close request.
     bool OnWindowClose(WindowCloseEvent& event);
 
     //Allows application resize bookkeeping before layers receive the event.
     bool OnWindowResize(WindowResizeEvent& event);
+
+    //Updates the renderer viewport when framebuffer pixels change.
+    bool OnFramebufferResize(FramebufferResizeEvent& event);
 
     ApplicationData* m_Data;
 };

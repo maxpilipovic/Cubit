@@ -46,6 +46,12 @@ void LayerStack::OnUpdate(Timestep timestep)
         layer->OnUpdate(timestep);
 }
 
+void LayerStack::OnRender()
+{
+    for (const auto& layer : m_Data->Layers)
+        layer->OnRender();
+}
+
 void LayerStack::OnEvent(Event& event)
 {
     for (auto iterator = m_Data->Layers.rbegin(); iterator != m_Data->Layers.rend(); ++iterator)

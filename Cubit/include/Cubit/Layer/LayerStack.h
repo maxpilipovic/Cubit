@@ -31,6 +31,9 @@ public:
     //Updates regular layers and overlays in forward order.
     void OnUpdate(Timestep timestep);
 
+    //Renders regular layers and overlays in forward order.
+    void OnRender();
+
     //Routes an event from the newest overlay toward the base layers.
     void OnEvent(Event& event);
 

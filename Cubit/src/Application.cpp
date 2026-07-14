@@ -4,6 +4,7 @@
 #include "Cubit/Input.h"
 #include "Cubit/Layer/LayerStack.h"
 #include "Cubit/Logger.h"
+#include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Window.h"
 #include "Core/CoreLogger.h"
 
@@ -32,6 +33,12 @@ Application::Application()
             {
                 OnEvent(event);
             });
+        Renderer::Init();
+        Renderer::SetViewport(
+            0,
+            0,
+            m_Data->WindowInstance->GetFramebufferWidth(),
+            m_Data->WindowInstance->GetFramebufferHeight());
         CB_CORE_INFO("Application created");
     }
     catch (...)
@@ -74,6 +81,12 @@ void Application::Run()
 
         m_Data->Layers.OnUpdate(timestep);
         OnUpdate(timestep);
+
+        Renderer::SetClearColor(0.08f, 0.10f, 0.15f, 1.0f);
+        Renderer::Clear();
+        m_Data->Layers.OnRender();
+        OnRender();
+        m_Data->WindowInstance->SwapBuffers();
     }
 }
 
@@ -89,6 +102,11 @@ void Application::OnEvent(Event& event)
         [this](WindowResizeEvent& resizeEvent)
         {
             return OnWindowResize(resizeEvent);
+        });
+    dispatcher.Dispatch<FramebufferResizeEvent>(
+        [this](FramebufferResizeEvent& resizeEvent)
+        {
+            return OnFramebufferResize(resizeEvent);
         });
 
     if (!event.Handled)
@@ -115,6 +133,10 @@ void Application::OnUpdate(Timestep timestep)
     (void)timestep;
 }
 
+void Application::OnRender()
+{
+}
+
 bool Application::OnWindowClose(WindowCloseEvent& event)
 {
     (void)event;
@@ -125,5 +147,11 @@ bool Application::OnWindowClose(WindowCloseEvent& event)
 bool Application::OnWindowResize(WindowResizeEvent& event)
 {
     (void)event;
+    return false;
+}
+
+bool Application::OnFramebufferResize(FramebufferResizeEvent& event)
+{
+    Renderer::SetViewport(0, 0, event.GetWidth(), event.GetHeight());
     return false;
 }

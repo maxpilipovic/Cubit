@@ -13,5 +13,6 @@
 #include "Cubit/Logger.h"
 #include "Cubit/MouseCodes.h"
 #include "Cubit/Renderer/GraphicsContext.h"
+#include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Timestep.h"
 #include "Cubit/Window.h"
