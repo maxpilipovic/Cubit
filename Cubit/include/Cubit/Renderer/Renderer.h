@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+class IndexBuffer;
+class Shader;
+class VertexArray;
+
 class CB_API Renderer
 {
 public:
@@ -25,4 +29,10 @@ public:
 
     //Clears the color and depth buffers for a new frame.
     static void Clear();
+
+    //Draws indexed triangles using the supplied GPU resources.
+    static void Draw(
+        const VertexArray& vertexArray,
+        const IndexBuffer& indexBuffer,
+        const Shader& shader);
 };

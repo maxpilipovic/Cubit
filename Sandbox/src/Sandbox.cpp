@@ -1,6 +1,9 @@
 #include "Cubit/Cubit.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <string_view>
 
 struct PlayerDiedEvent
 {
@@ -22,6 +25,41 @@ public:
                     std::string("Player ") + std::to_string(event.Player) +
                     " was defeated by player " + std::to_string(event.Killer));
             });
+
+        const float vertices[] =
+        {
+            -0.5f, -0.5f, 0.0f,
+             0.5f, -0.5f, 0.0f,
+             0.0f,  0.5f, 0.0f
+        };
+        const std::uint32_t indices[] = { 0, 1, 2 };
+
+        m_VertexArray = std::make_unique<VertexArray>();
+        m_VertexBuffer = std::make_unique<VertexBuffer>(
+            vertices,
+            static_cast<std::uint32_t>(sizeof(vertices)));
+        m_VertexArray->AddBuffer(*m_VertexBuffer, BufferLayout{ ShaderDataType::Float3 });
+        m_IndexBuffer = std::make_unique<IndexBuffer>(indices, 3);
+
+        constexpr std::string_view vertexSource = R"(
+            #version 330 core
+            layout(location = 0) in vec3 a_Position;
+
+            void main()
+            {
+                gl_Position = vec4(a_Position, 1.0);
+            }
+        )";
+        constexpr std::string_view fragmentSource = R"(
+            #version 330 core
+            layout(location = 0) out vec4 color;
+
+            void main()
+            {
+                color = vec4(0.15, 0.65, 0.95, 1.0);
+            }
+        )";
+        m_Shader = std::make_unique<Shader>(vertexSource, fragmentSource);
     }
 
     //Polls held movement input independently from routed key events.
@@ -30,6 +68,12 @@ public:
         (void)timestep;
         const bool movingForward = Input::IsKeyPressed(KeyCode::W);
         (void)movingForward;
+    }
+
+    //Draws the Sandbox triangle through Cubit's renderer.
+    void OnRender() override
+    {
+        Renderer::Draw(*m_VertexArray, *m_IndexBuffer, *m_Shader);
     }
 
     //Routes one-time key presses through the typed platform dispatcher.
@@ -52,6 +96,11 @@ private:
 
         return false;
     }
+
+    std::unique_ptr<VertexArray> m_VertexArray;
+    std::unique_ptr<VertexBuffer> m_VertexBuffer;
+    std::unique_ptr<IndexBuffer> m_IndexBuffer;
+    std::unique_ptr<Shader> m_Shader;
 };
 
 class SandboxApplication final : public Application
