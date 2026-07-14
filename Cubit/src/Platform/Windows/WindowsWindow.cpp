@@ -5,6 +5,7 @@
 #include "Cubit/Events/ApplicationEvent.h"
 #include "Cubit/Events/KeyEvent.h"
 #include "Cubit/Events/MouseEvent.h"
+#include "Cubit/Renderer/GraphicsContext.h"
 #include "Core/CoreLogger.h"
 
 #include <GLFW/glfw3.h>
@@ -28,6 +29,7 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
         properties.Height,
         properties.Width,
         properties.Height,
+        true,
         {} }
 {
     if (s_WindowCount == 0)
@@ -38,7 +40,9 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
             throw std::runtime_error("Failed to initialize GLFW");
     }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     m_Window = glfwCreateWindow(
         static_cast<int>(m_Data.Width),
         static_cast<int>(m_Data.Height),
@@ -53,6 +57,10 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
 
         throw std::runtime_error("Failed to create GLFW window");
     }
+
+    m_Context = GraphicsContext::Create(m_Window);
+    m_Context->Init();
+    SetVSync(true);
 
     int framebufferWidth = 0;
     int framebufferHeight = 0;
@@ -217,6 +225,7 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
 
 WindowsWindow::~WindowsWindow()
 {
+    m_Context.reset();
     glfwDestroyWindow(m_Window);
     --s_WindowCount;
 
@@ -229,6 +238,11 @@ void WindowsWindow::PollEvents()
     glfwPollEvents();
 }
 
+void WindowsWindow::SwapBuffers()
+{
+    m_Context->SwapBuffers();
+}
+
 bool WindowsWindow::ShouldClose() const
 {
     return glfwWindowShouldClose(m_Window) == GLFW_TRUE;
@@ -237,4 +251,11 @@ bool WindowsWindow::ShouldClose() const
 void WindowsWindow::SetEventCallback(EventCallback callback)
 {
     m_Data.EventCallback = std::move(callback);
+}
+
+void WindowsWindow::SetVSync(bool enabled)
+{
+    glfwMakeContextCurrent(m_Window);
+    glfwSwapInterval(enabled ? 1 : 0);
+    m_Data.VSync = enabled;
 }

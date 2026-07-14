@@ -26,11 +26,20 @@ public:
     //Processes pending native window messages immediately.
     virtual void PollEvents() = 0;
 
+    //Presents the completed graphics back buffer.
+    virtual void SwapBuffers() = 0;
+
     //Reports whether the user has requested that the window close.
     virtual bool ShouldClose() const = 0;
 
     //Registers the immediate callback used to route platform events.
     virtual void SetEventCallback(EventCallback callback) = 0;
+
+    //Enables or disables synchronization with the display refresh rate.
+    virtual void SetVSync(bool enabled) = 0;
+
+    //Reports whether display synchronization is enabled.
+    virtual bool IsVSync() const = 0;
 
     //Returns the current window width in screen coordinates.
     virtual std::uint32_t GetWidth() const = 0;
