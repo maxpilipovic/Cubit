@@ -2,6 +2,7 @@
 
 #include "Cubit/Core.h"
 
+#include <glm/glm.hpp>
 #include <cstdint>
 #include <string_view>
 
@@ -32,9 +33,30 @@ public:
     //Removes the current OpenGL shader-program binding.
     void Unbind() const;
 
+    //Uploads one integer uniform to this shader program.
+    void SetInt(std::string_view name, int value) const;
+
+    //Uploads one floating-point uniform to this shader program.
+    void SetFloat(std::string_view name, float value) const;
+
+    //Uploads one two-component vector uniform to this shader program.
+    void SetFloat2(std::string_view name, const glm::vec2& value) const;
+
+    //Uploads one three-component vector uniform to this shader program.
+    void SetFloat3(std::string_view name, const glm::vec3& value) const;
+
+    //Uploads one four-component vector uniform to this shader program.
+    void SetFloat4(std::string_view name, const glm::vec4& value) const;
+
+    //Uploads one four-by-four matrix uniform to this shader program.
+    void SetMat4(std::string_view name, const glm::mat4& value) const;
+
 private:
     //Compiles one OpenGL shader stage and reports failures.
     static std::uint32_t Compile(std::uint32_t type, std::string_view source);
+
+    //Finds a named uniform in this shader program.
+    int GetUniformLocation(std::string_view name) const;
 
     std::uint32_t m_RendererId = 0;
 };

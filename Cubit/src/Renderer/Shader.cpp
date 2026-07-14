@@ -3,7 +3,9 @@
 #include "Cubit/Renderer/Shader.h"
 
 #include <glad/glad.h>
+#include <glm/gtc/type_ptr.hpp>
 #include <stdexcept>
+#include <string>
 
 Shader::Shader(std::string_view vertexSource, std::string_view fragmentSource)
 {
@@ -79,6 +81,48 @@ void Shader::Bind() const
 void Shader::Unbind() const
 {
     glUseProgram(0);
+}
+
+void Shader::SetInt(std::string_view name, int value) const
+{
+    Bind();
+    glUniform1i(GetUniformLocation(name), value);
+}
+
+void Shader::SetFloat(std::string_view name, float value) const
+{
+    Bind();
+    glUniform1f(GetUniformLocation(name), value);
+}
+
+void Shader::SetFloat2(std::string_view name, const glm::vec2& value) const
+{
+    Bind();
+    glUniform2f(GetUniformLocation(name), value.x, value.y);
+}
+
+void Shader::SetFloat3(std::string_view name, const glm::vec3& value) const
+{
+    Bind();
+    glUniform3f(GetUniformLocation(name), value.x, value.y, value.z);
+}
+
+void Shader::SetFloat4(std::string_view name, const glm::vec4& value) const
+{
+    Bind();
+    glUniform4f(GetUniformLocation(name), value.x, value.y, value.z, value.w);
+}
+
+void Shader::SetMat4(std::string_view name, const glm::mat4& value) const
+{
+    Bind();
+    glUniformMatrix4fv(GetUniformLocation(name), 1, GL_FALSE, glm::value_ptr(value));
+}
+
+int Shader::GetUniformLocation(std::string_view name) const
+{
+    const std::string uniformName(name);
+    return glGetUniformLocation(m_RendererId, uniformName.c_str());
 }
 
 std::uint32_t Shader::Compile(std::uint32_t type, std::string_view source)
