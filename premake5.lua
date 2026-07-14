@@ -13,6 +13,41 @@ outputdir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 group "Dependencies"
 
+project "GLAD"
+    location "vendor/GLAD"
+    kind "StaticLib"
+    language "C"
+
+    targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+    objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
+
+    files
+    {
+        "vendor/GLAD/include/glad/glad.h",
+        "vendor/GLAD/include/KHR/khrplatform.h",
+        "vendor/GLAD/src/glad.c"
+    }
+
+    includedirs
+    {
+        "vendor/GLAD/include"
+    }
+
+    filter "system:windows"
+        systemversion "latest"
+
+    filter "configurations:Debug"
+        runtime "Debug"
+        symbols "On"
+
+    filter "configurations:Release"
+        runtime "Release"
+        optimize "On"
+
+    filter "configurations:Dist"
+        runtime "Release"
+        optimize "On"
+
 project "GLFW"
     location "vendor/GLFW"
     kind "StaticLib"
@@ -100,18 +135,22 @@ project "Cubit"
     {
         "Cubit/include",
         "Cubit/src",
-        "vendor/GLFW/include"
+        "vendor/GLFW/include",
+        "vendor/GLAD/include"
     }
 
     links
     {
-        "GLFW"
+        "GLFW",
+        "GLAD",
+        "opengl32"
     }
 
     defines
     {
         "CB_PLATFORM_WINDOWS",
-        "CB_BUILD_DLL"
+        "CB_BUILD_DLL",
+        "GLFW_INCLUDE_NONE"
     }
 
     filter "system:windows"
