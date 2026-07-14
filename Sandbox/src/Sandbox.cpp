@@ -13,16 +13,15 @@ class SandboxLayer final : public Layer
 public:
     //Subscribes the Sandbox layer to typed gameplay notifications.
     explicit SandboxLayer(EventBus& eventBus)
-        : m_PlayerDiedSubscription(
-            eventBus.Subscribe<PlayerDiedEvent>(
-                //Logs each immediate or deferred player-death notification.
-                [](const PlayerDiedEvent& event)
-                {
-                    CB_INFO(
-                        std::string("Player ") + std::to_string(event.Player) +
-                        " was defeated by player " + std::to_string(event.Killer));
-                }))
     {
+        eventBus.Subscribe<PlayerDiedEvent>(
+            //Logs each player-death notification when it is published.
+            [](const PlayerDiedEvent& event)
+            {
+                CB_INFO(
+                    std::string("Player ") + std::to_string(event.Player) +
+                    " was defeated by player " + std::to_string(event.Killer));
+            });
     }
 
     //Polls held movement input independently from routed key events.
@@ -53,19 +52,16 @@ private:
 
         return false;
     }
-
-    EventSubscription m_PlayerDiedSubscription;
 };
 
 class SandboxApplication final : public Application
 {
 public:
-    //Creates the Sandbox layer and demonstrates immediate and deferred gameplay events.
+    //Creates the Sandbox layer and publishes a gameplay event.
     SandboxApplication()
     {
         PushLayer(std::make_unique<SandboxLayer>(GetEventBus()));
         GetEventBus().Publish(PlayerDiedEvent{ 1, 2 });
-        GetEventBus().Enqueue(PlayerDiedEvent{ 3, 4 });
     }
 };
 

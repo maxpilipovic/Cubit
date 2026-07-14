@@ -66,9 +66,6 @@ void Application::Run()
         if (!m_Data->Running || m_Data->WindowInstance->ShouldClose())
             break;
 
-        //Deferred gameplay notifications are delivered once after platform polling.
-        m_Data->GameplayEvents.DispatchQueued();
-
         const auto currentFrameTime = Clock::now();
         const std::chrono::duration<double> frameDuration = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
