@@ -14,6 +14,8 @@
 #include "Cubit/MouseCodes.h"
 #include "Cubit/Renderer/GraphicsContext.h"
 #include "Cubit/Renderer/IndexBuffer.h"
+#include "Cubit/Renderer/OrthographicCamera.h"
+#include "Cubit/Renderer/OrthographicCameraController.h"
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Renderer/Shader.h"
 #include "Cubit/Renderer/VertexArray.h"

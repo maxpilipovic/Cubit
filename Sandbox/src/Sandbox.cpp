@@ -16,6 +16,7 @@ class SandboxLayer final : public Layer
 public:
     //Subscribes the Sandbox layer to typed gameplay notifications.
     explicit SandboxLayer(EventBus& eventBus)
+        : m_CameraController(16.0f / 9.0f, true)
     {
         eventBus.Subscribe<PlayerDiedEvent>(
             //Logs each player-death notification when it is published.
@@ -44,10 +45,11 @@ public:
         constexpr std::string_view vertexSource = R"(
             #version 330 core
             layout(location = 0) in vec3 a_Position;
+            uniform mat4 u_ViewProjection;
 
             void main()
             {
-                gl_Position = vec4(a_Position, 1.0);
+                gl_Position = u_ViewProjection * vec4(a_Position, 1.0);
             }
         )";
         constexpr std::string_view fragmentSource = R"(
@@ -65,20 +67,23 @@ public:
     //Polls held movement input independently from routed key events.
     void OnUpdate(Timestep timestep) override
     {
-        (void)timestep;
-        const bool movingForward = Input::IsKeyPressed(KeyCode::W);
-        (void)movingForward;
+        m_CameraController.OnUpdate(timestep);
     }
 
     //Draws the Sandbox triangle through Cubit's renderer.
     void OnRender() override
     {
+        m_Shader->SetMat4(
+            "u_ViewProjection",
+            m_CameraController.GetCamera().GetViewProjectionMatrix());
         Renderer::Draw(*m_VertexArray, *m_IndexBuffer, *m_Shader);
     }
 
     //Routes one-time key presses through the typed platform dispatcher.
     void OnEvent(Event& event) override
     {
+        m_CameraController.OnEvent(event);
+
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<KeyPressedEvent>(
             [this](KeyPressedEvent& keyEvent)
@@ -101,6 +106,7 @@ private:
     std::unique_ptr<VertexBuffer> m_VertexBuffer;
     std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
+    OrthographicCameraController m_CameraController;
 };
 
 class SandboxApplication final : public Application
