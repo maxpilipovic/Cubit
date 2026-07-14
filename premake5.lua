@@ -136,7 +136,8 @@ project "Cubit"
         "Cubit/include",
         "Cubit/src",
         "vendor/GLFW/include",
-        "vendor/GLAD/include"
+        "vendor/GLAD/include",
+        "vendor/GLM"
     }
 
     links
@@ -186,7 +187,8 @@ project "Sandbox"
 
     includedirs
     {
-        "Cubit/include"
+        "Cubit/include",
+        "vendor/GLM"
     }
 
     links
