@@ -17,6 +17,8 @@
 #include "Cubit/Renderer/IndexBuffer.h"
 #include "Cubit/Renderer/OrthographicCamera.h"
 #include "Cubit/Renderer/OrthographicCameraController.h"
+#include "Cubit/Renderer/PerspectiveCamera.h"
+#include "Cubit/Renderer/PerspectiveCameraController.h"
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Renderer/Shader.h"
 #include "Cubit/Renderer/VertexArray.h"
