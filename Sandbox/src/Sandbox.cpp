@@ -18,6 +18,8 @@ public:
     explicit SandboxLayer(EventBus& eventBus)
         : m_CameraController(16.0f / 9.0f)
     {
+        Input::SetCursorCaptured(true);
+
         eventBus.Subscribe<PlayerDiedEvent>(
             //Logs each player-death notification when it is published.
             [](const PlayerDiedEvent& event)

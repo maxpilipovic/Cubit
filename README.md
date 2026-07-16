@@ -22,8 +22,8 @@ Cubit is in the foundation stage. The current implementation includes:
 - Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
 In the sandbox, use `W`, `A`, `S`, and `D` to move, `Space` and left `Shift` to
-move vertically, and move the mouse to look around. The cube demonstrates indexed
-3D geometry, interleaved position and color
+move vertically, and move the captured mouse to look around. The cube demonstrates
+indexed 3D geometry, interleaved position and color
 attributes, model transforms, perspective projection, and depth testing.
 
 Most systems described in the design document are planned scope, not implemented scope yet.

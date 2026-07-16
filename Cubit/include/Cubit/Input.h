@@ -30,6 +30,9 @@ public:
     //Returns the current vertical logical mouse coordinate.
     static float GetMouseY();
 
+    //Hides and locks the cursor to the application window for game input.
+    static void SetCursorCaptured(bool captured);
+
 private:
     friend class Application;
 

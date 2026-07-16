@@ -60,6 +60,21 @@ float Input::GetMouseY()
     return GetMousePosition().Y;
 }
 
+void Input::SetCursorCaptured(bool captured)
+{
+    GLFWwindow* window = GetGLFWWindow();
+    if (window == nullptr)
+        return;
+
+    glfwSetInputMode(
+        window,
+        GLFW_CURSOR,
+        captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+
+    if (glfwRawMouseMotionSupported() == GLFW_TRUE)
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+}
+
 void Input::SetWindow(Window* window)
 {
     s_InputWindow = window;
