@@ -1,8 +1,8 @@
 #include "cub.h"
 
 #include "Cubit/Renderer/Renderer.h"
+#include "Cubit/Renderer/Camera.h"
 #include "Cubit/Renderer/IndexBuffer.h"
-#include "Cubit/Renderer/OrthographicCamera.h"
 #include "Cubit/Renderer/Shader.h"
 #include "Cubit/Renderer/VertexArray.h"
 
@@ -41,7 +41,7 @@ void Renderer::Clear()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-void Renderer::BeginScene(const OrthographicCamera& camera)
+void Renderer::BeginScene(const Camera& camera)
 {
     s_ViewProjection = camera.GetViewProjectionMatrix();
 }

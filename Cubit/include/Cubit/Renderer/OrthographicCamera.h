@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Cubit/Renderer/Camera.h"
 #include "Cubit/Core.h"
 
 #include <glm/glm.hpp>
@@ -9,7 +10,7 @@
 #pragma warning(disable: 4251)
 #endif
 
-class CB_API OrthographicCamera
+class CB_API OrthographicCamera final : public Camera
 {
 public:
     //Creates an orthographic camera with the supplied visible bounds.
@@ -37,7 +38,7 @@ public:
     const glm::mat4& GetViewMatrix() const { return m_ViewMatrix; }
 
     //Returns the combined world-to-clip-space matrix.
-    const glm::mat4& GetViewProjectionMatrix() const { return m_ViewProjectionMatrix; }
+    const glm::mat4& GetViewProjectionMatrix() const override { return m_ViewProjectionMatrix; }
 
 private:
     //Rebuilds the view and combined matrices after the camera moves.

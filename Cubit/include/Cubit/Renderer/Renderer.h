@@ -6,7 +6,7 @@
 #include <cstdint>
 
 class IndexBuffer;
-class OrthographicCamera;
+class Camera;
 class Shader;
 class VertexArray;
 
@@ -33,7 +33,7 @@ public:
     static void Clear();
 
     //Begins a scene using the supplied camera for subsequent submissions.
-    static void BeginScene(const OrthographicCamera& camera);
+    static void BeginScene(const Camera& camera);
 
     //Finishes the current scene.
     static void EndScene();
