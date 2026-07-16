@@ -17,13 +17,14 @@ Cubit is in the foundation stage. The current implementation includes:
 - Layer and overlay routing alongside a typed gameplay event bus.
 - OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
 - Scene submission with per-object transforms.
-- An orthographic camera controller with movement, rotation, zoom, and resize handling.
-- A sandbox scene that renders multiple independently transformed objects.
+- Orthographic and perspective cameras with resize-aware controllers.
+- A sandbox scene that renders a rotating, colored indexed cube with depth testing.
 - Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
-In the sandbox, use `W`, `A`, `S`, and `D` to move the camera, `Q` and `E` to
-rotate it, and the mouse wheel to zoom. The rendered objects demonstrate model
-transforms submitted through a shared scene camera.
+In the sandbox, use `W`, `A`, `S`, and `D` to move, `Space` and left `Shift` to
+move vertically, and hold the right mouse button while moving the mouse to look
+around. The cube demonstrates indexed 3D geometry, interleaved position and color
+attributes, model transforms, perspective projection, and depth testing.
 
 Most systems described in the design document are planned scope, not implemented scope yet.
 
