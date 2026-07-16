@@ -2,10 +2,16 @@
 
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Renderer/IndexBuffer.h"
+#include "Cubit/Renderer/OrthographicCamera.h"
 #include "Cubit/Renderer/Shader.h"
 #include "Cubit/Renderer/VertexArray.h"
 
 #include <glad/glad.h>
+
+namespace
+{
+    glm::mat4 s_ViewProjection{ 1.0f };
+}
 
 void Renderer::Init()
 {
@@ -33,6 +39,26 @@ void Renderer::SetClearColor(float red, float green, float blue, float alpha)
 void Renderer::Clear()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+void Renderer::BeginScene(const OrthographicCamera& camera)
+{
+    s_ViewProjection = camera.GetViewProjectionMatrix();
+}
+
+void Renderer::EndScene()
+{
+}
+
+void Renderer::Submit(
+    const VertexArray& vertexArray,
+    const IndexBuffer& indexBuffer,
+    const Shader& shader,
+    const glm::mat4& transform)
+{
+    shader.SetMat4("u_ViewProjection", s_ViewProjection);
+    shader.SetMat4("u_Transform", transform);
+    Draw(vertexArray, indexBuffer, shader);
 }
 
 void Renderer::Draw(

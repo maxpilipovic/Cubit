@@ -2,9 +2,11 @@
 
 #include "Cubit/Core.h"
 
+#include <glm/glm.hpp>
 #include <cstdint>
 
 class IndexBuffer;
+class OrthographicCamera;
 class Shader;
 class VertexArray;
 
@@ -29,6 +31,19 @@ public:
 
     //Clears the color and depth buffers for a new frame.
     static void Clear();
+
+    //Begins a scene using the supplied camera for subsequent submissions.
+    static void BeginScene(const OrthographicCamera& camera);
+
+    //Finishes the current scene.
+    static void EndScene();
+
+    //Draws one transformed object using the current scene camera.
+    static void Submit(
+        const VertexArray& vertexArray,
+        const IndexBuffer& indexBuffer,
+        const Shader& shader,
+        const glm::mat4& transform = glm::mat4(1.0f));
 
     //Draws indexed triangles using the supplied GPU resources.
     static void Draw(
