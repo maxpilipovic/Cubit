@@ -1,6 +1,5 @@
 #include "Cubit/Cubit.h"
 
-#include <glm/gtc/matrix_transform.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -90,24 +89,13 @@ public:
     void OnUpdate(Timestep timestep) override
     {
         m_CameraController.OnUpdate(timestep);
-        m_ObjectRotation += 45.0f * static_cast<float>(timestep.GetSeconds());
     }
 
-    //Draws a rotating indexed cube through Cubit's scene renderer.
+    //Draws an indexed cube through Cubit's scene renderer.
     void OnRender() override
     {
         Renderer::BeginScene(m_CameraController.GetCamera());
-
-        const glm::mat4 transform =
-            glm::rotate(
-                glm::mat4(1.0f),
-                glm::radians(m_ObjectRotation),
-                glm::vec3(0.0f, 1.0f, 0.0f)) *
-            glm::rotate(
-                glm::mat4(1.0f),
-                glm::radians(m_ObjectRotation * 0.5f),
-                glm::vec3(1.0f, 0.0f, 0.0f));
-        Renderer::Submit(*m_VertexArray, *m_IndexBuffer, *m_Shader, transform);
+        Renderer::Submit(*m_VertexArray, *m_IndexBuffer, *m_Shader);
 
         Renderer::EndScene();
     }
@@ -140,7 +128,6 @@ private:
     std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
     PerspectiveCameraController m_CameraController;
-    float m_ObjectRotation = 0.0f;
 };
 
 class SandboxApplication final : public Application

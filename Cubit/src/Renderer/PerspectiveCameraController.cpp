@@ -4,7 +4,6 @@
 
 #include "Cubit/Input.h"
 #include "Cubit/KeyCodes.h"
-#include "Cubit/MouseCodes.h"
 
 #include <algorithm>
 
@@ -62,9 +61,6 @@ bool PerspectiveCameraController::OnMouseMoved(MouseMovedEvent& event)
     const float yOffset = m_LastMouseY - y;
     m_LastMouseX = x;
     m_LastMouseY = y;
-
-    if (!Input::IsMouseButtonPressed(MouseCode::Right))
-        return false;
 
     m_Yaw += xOffset * m_MouseSensitivity;
     m_Pitch = std::clamp(m_Pitch + yOffset * m_MouseSensitivity, -89.0f, 89.0f);
