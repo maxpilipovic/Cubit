@@ -10,22 +10,20 @@ The repository is intentionally split into an engine DLL and a small sandbox exe
 
 ## Current Status
 
-Cubit is in the foundation stage. The current implementation is minimal:
+Cubit is in the foundation stage. The current implementation includes:
 
-- `Cubit` builds as a shared library.
-- `Sandbox` builds as a console application.
-- `Sandbox` links against `Cubit`.
-- The engine exposes a basic `Application` class and client logger.
-- The sandbox creates an `Application` instance and runs it.
-- Premake generates the Visual Studio solution and project files.
+- A GLFW-backed window, OpenGL context, application loop, and frame timestep.
+- Routed window, keyboard, and mouse events plus polled input.
+- Layer and overlay routing alongside a typed gameplay event bus.
+- OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
+- Scene submission with per-object transforms.
+- An orthographic camera controller with movement, rotation, zoom, and resize handling.
+- A sandbox scene that renders multiple independently transformed objects.
+- Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
-The current runtime behavior is simple logger output:
-
-```text
-[CORE] [Info] Application created
-[CORE] [Info] Engine running
-[CLIENT] [Info] Sandbox
-```
+In the sandbox, use `W`, `A`, `S`, and `D` to move the camera, `Q` and `E` to
+rotate it, and the mouse wheel to zoom. The rendered objects demonstrate model
+transforms submitted through a shared scene camera.
 
 Most systems described in the design document are planned scope, not implemented scope yet.
 
