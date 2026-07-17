@@ -21,12 +21,9 @@ public:
         Input::SetCursorCaptured(true);
 
         eventBus.Subscribe<PlayerDiedEvent>(
-            //Logs each player-death notification when it is published.
-            [](const PlayerDiedEvent& event)
+            [this](const PlayerDiedEvent& event)
             {
-                CB_INFO(
-                    std::string("Player ") + std::to_string(event.Player) +
-                    " was defeated by player " + std::to_string(event.Killer));
+                OnPlayerDied(event);
             });
 
         const float vertices[] =
@@ -116,6 +113,14 @@ public:
     }
 
 private:
+    //Logs a player-death notification received from the gameplay event bus.
+    void OnPlayerDied(const PlayerDiedEvent& event)
+    {
+        CB_INFO(
+            std::string("Player ") + std::to_string(event.Player) +
+            " was defeated by player " + std::to_string(event.Killer));
+    }
+
     //Logs a non-repeated key press without consuming it from lower layers.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
