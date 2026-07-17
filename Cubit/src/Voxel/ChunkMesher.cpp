@@ -23,19 +23,19 @@ namespace
     void AddFrontFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.70f, 0.80f, 1.00f };
-        mesh.Vertices.push_back({ { x,        y,        z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y,        z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x,        y + 1.0f, z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
         AddFaceIndices(mesh);
     }
 
     void AddBackFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.55f, 0.65f, 0.85f };
-        mesh.Vertices.push_back({ { x + 1.0f, y,        z }, color });
-        mesh.Vertices.push_back({ { x,        y,        z }, color });
-        mesh.Vertices.push_back({ { x,        y + 1.0f, z }, color });
+        mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
+        mesh.Vertices.push_back({ { x, y, z }, color });
+        mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
         AddFaceIndices(mesh);
     }
@@ -43,8 +43,8 @@ namespace
     void AddRightFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.75f, 0.85f, 1.00f };
-        mesh.Vertices.push_back({ { x + 1.0f, y,        z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y,        z }, color });
+        mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
         AddFaceIndices(mesh);
@@ -53,8 +53,8 @@ namespace
     void AddLeftFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.65f, 0.75f, 0.95f };
-        mesh.Vertices.push_back({ { x, y,        z }, color });
-        mesh.Vertices.push_back({ { x, y,        z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x, y, z }, color });
+        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
         AddFaceIndices(mesh);
@@ -63,20 +63,20 @@ namespace
     void AddTopFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.85f, 0.95f, 1.00f };
-        mesh.Vertices.push_back({ { x,        y + 1.0f, z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
-        mesh.Vertices.push_back({ { x,        y + 1.0f, z }, color });
+        mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
         AddFaceIndices(mesh);
     }
 
     void AddBottomFace(ChunkMeshData& mesh, float x, float y, float z)
     {
         const glm::vec3 color{ 0.45f, 0.55f, 0.75f };
-        mesh.Vertices.push_back({ { x,        y, z }, color });
+        mesh.Vertices.push_back({ { x, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x,        y, z + 1.0f }, color });
+        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
         AddFaceIndices(mesh);
     }
 
