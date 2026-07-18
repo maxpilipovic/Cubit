@@ -68,6 +68,11 @@ Cubit/
 +-- Sandbox/                Test executable / startup project
 |   +-- src/
 |       +-- Sandbox.cpp
++-- Tests/                  doctest suite for engine logic
+|   +-- src/
+|       +-- TestMain.cpp
+|       +-- ChunkTests.cpp
+|       +-- ChunkMesherTests.cpp
 +-- Documentation/
 |   +-- Cubit.pdf           Project scope and feature specification
 +-- images/
@@ -85,6 +90,12 @@ Generated folders such as `bin/`, `bin-int/`, and Visual Studio project files ar
 - Visual Studio 2026 or a compatible Visual Studio C++ toolchain
 - Premake 5 available on `PATH`
 - C++20 compiler support
+
+Dependencies in `vendor/` include Git submodules, so clone with `--recursive` or run:
+
+```bat
+git submodule update --init --recursive
+```
 
 ## Generating Projects
 
@@ -166,7 +177,32 @@ The first exported engine type is `Application`, which is responsible for startu
 - Configurations: `Debug`, `Release`, `Dist`
 - Engine project: `Cubit`, built as `SharedLib`
 - Sandbox project: `Sandbox`, built as `ConsoleApp`
+- Test project: `Tests`, built as `ConsoleApp`
 - Startup project: `Sandbox`
+
+## Tests
+
+`Tests` is a doctest-based executable covering the engine's pure logic. Build the
+solution and run:
+
+```text
+bin/Debug-windows-x86_64/Tests/Tests.exe
+```
+
+It exits non-zero when any test fails, so it can be wired into a build step or CI.
+
+The suite deliberately covers only code that can be checked without a GPU or a window:
+voxel chunk storage and chunk meshing. Rendering, windowing, and input are verified by
+running `Sandbox` and inspecting the result, not by unit tests.
+
+`ChunkMesher` is tested against an independent face-counting oracle that walks the chunk
+directly instead of reusing mesher code, so the two implementations must agree. Small
+cases are also pinned to exact counts: a lone block meshes to 6 faces, two touching
+blocks to 10, and a fully solid chunk to 1536.
+
+That last number encodes the current rule that positions outside a chunk read as air, so
+every chunk border is meshed. Neighbour-aware meshing will change it, and the test is
+meant to fail then so the change is made deliberately.
 
 ## Planned Systems
 
