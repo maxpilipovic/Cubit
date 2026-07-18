@@ -1,5 +1,7 @@
 #include "Cubit/Cubit.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -10,6 +12,35 @@ struct PlayerDiedEvent
     int Player;
     int Killer;
 };
+
+namespace
+{
+    //Returns how many solid blocks are stacked in one chunk column.
+    int GetTerrainHeight(int x, int z)
+    {
+        const float wave =
+            std::sin(static_cast<float>(x) * 0.35f) +
+            std::cos(static_cast<float>(z) * 0.35f);
+
+        return 6 + static_cast<int>(std::lround(wave * 2.0f));
+    }
+
+    //Fills a chunk with test data whose buried blocks exercise face culling.
+    //This is sandbox fixture data, not a world generator.
+    void BuildTestTerrain(Chunk& chunk)
+    {
+        for (int z = 0; z < Chunk::Depth; ++z)
+        {
+            for (int x = 0; x < Chunk::Width; ++x)
+            {
+                const int height = GetTerrainHeight(x, z);
+
+                for (int y = 0; y < height; ++y)
+                    chunk.SetBlock(x, y, z, BlockType::Solid);
+            }
+        }
+    }
+}
 
 class SandboxLayer final : public Layer
 {
@@ -26,36 +57,30 @@ public:
                 OnPlayerDied(event);
             });
 
-        const float vertices[] =
-        {
-            // Position               Color
-            -0.5f, -0.5f, -0.5f,      0.15f, 0.45f, 0.95f,
-             0.5f, -0.5f, -0.5f,      0.20f, 0.80f, 0.45f,
-             0.5f,  0.5f, -0.5f,      0.95f, 0.75f, 0.20f,
-            -0.5f,  0.5f, -0.5f,      0.85f, 0.25f, 0.35f,
-            -0.5f, -0.5f,  0.5f,      0.45f, 0.25f, 0.90f,
-             0.5f, -0.5f,  0.5f,      0.10f, 0.75f, 0.80f,
-             0.5f,  0.5f,  0.5f,      0.95f, 0.40f, 0.15f,
-            -0.5f,  0.5f,  0.5f,      0.55f, 0.85f, 0.25f
-        };
-        const std::uint32_t indices[] =
-        {
-            0, 1, 2, 2, 3, 0,
-            4, 6, 5, 6, 4, 7,
-            0, 4, 5, 5, 1, 0,
-            3, 2, 6, 6, 7, 3,
-            1, 5, 6, 6, 2, 1,
-            0, 3, 7, 7, 4, 0
-        };
+        Chunk chunk;
+        BuildTestTerrain(chunk);
+
+        const ChunkMeshData mesh = ChunkMesher::Build(chunk);
+        CB_INFO(
+            std::string("Chunk meshed into ") +
+            std::to_string(mesh.Vertices.size()) + " vertices and " +
+            std::to_string(mesh.Indices.size() / 3) + " triangles");
 
         m_VertexArray = std::make_unique<VertexArray>();
         m_VertexBuffer = std::make_unique<VertexBuffer>(
-            vertices,
-            static_cast<std::uint32_t>(sizeof(vertices)));
+            mesh.Vertices.data(),
+            static_cast<std::uint32_t>(mesh.Vertices.size() * sizeof(VoxelVertex)));
         m_VertexArray->AddBuffer(
             *m_VertexBuffer,
             BufferLayout{ ShaderDataType::Float3, ShaderDataType::Float3 });
-        m_IndexBuffer = std::make_unique<IndexBuffer>(indices, 36);
+        m_IndexBuffer = std::make_unique<IndexBuffer>(
+            mesh.Indices.data(),
+            static_cast<std::uint32_t>(mesh.Indices.size()));
+
+        // Places the chunk ahead of and below the camera's starting position.
+        m_ChunkTransform = glm::translate(
+            glm::mat4(1.0f),
+            glm::vec3(-8.0f, -12.0f, -28.0f));
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -90,11 +115,11 @@ public:
         m_CameraController.OnUpdate(timestep);
     }
 
-    //Draws an indexed cube through Cubit's scene renderer.
+    //Draws the meshed voxel chunk through Cubit's scene renderer.
     void OnRender() override
     {
         Renderer::BeginScene(m_CameraController.GetCamera());
-        Renderer::Submit(*m_VertexArray, *m_IndexBuffer, *m_Shader);
+        Renderer::Submit(*m_VertexArray, *m_IndexBuffer, *m_Shader, m_ChunkTransform);
 
         Renderer::EndScene();
     }
@@ -134,6 +159,7 @@ private:
     std::unique_ptr<VertexBuffer> m_VertexBuffer;
     std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
+    glm::mat4 m_ChunkTransform{ 1.0f };
     PerspectiveCameraController m_CameraController;
 };
 

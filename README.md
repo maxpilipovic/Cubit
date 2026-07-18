@@ -18,13 +18,20 @@ Cubit is in the foundation stage. The current implementation includes:
 - OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
 - Scene submission with per-object transforms.
 - Orthographic and perspective cameras with resize-aware controllers.
-- A sandbox scene that renders a colored indexed cube with depth testing.
+- Voxel chunk storage and a face-culling chunk mesher.
+- A sandbox scene that renders a meshed voxel chunk with depth testing and backface culling.
 - Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
 In the sandbox, use `W`, `A`, `S`, and `D` to move, `Space` and left `Shift` to
-move vertically, and move the captured mouse to look around. The cube demonstrates
-indexed 3D geometry, interleaved position and color
-attributes, model transforms, perspective projection, and depth testing.
+move vertically, and move the captured mouse to look around. The sandbox builds a
+16x16x16 chunk of test terrain and renders the mesh produced by `ChunkMesher`,
+demonstrating interleaved position and color attributes, model transforms,
+perspective projection, depth testing, and face culling. Only faces exposed to air
+are emitted: the test chunk meshes 1510 solid blocks into 1122 faces rather than
+the 9060 an unculled mesher would produce.
+
+The terrain shape in the sandbox is fixture data used to exercise the mesher, not a
+world generator. Map loading and world generation are not yet designed.
 
 Most systems described in the design document are planned scope, not implemented scope yet.
 

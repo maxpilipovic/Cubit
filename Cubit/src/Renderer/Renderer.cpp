@@ -16,6 +16,11 @@ namespace
 void Renderer::Init()
 {
     glEnable(GL_DEPTH_TEST);
+
+    //Discards inward-facing triangles; meshes must wind faces counter-clockwise.
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
 }
 
 void Renderer::SetViewport(
