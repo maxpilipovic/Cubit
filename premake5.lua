@@ -260,7 +260,12 @@ project "Tests"
 
         postbuildcommands
         {
-            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Tests")
+            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Tests"),
+
+            -- Run the suite as part of the build. Tests.exe returns non-zero on
+            -- failure, so a broken test breaks the build instead of waiting to
+            -- be noticed.
+            "\"$(TargetDir)Tests.exe\""
         }
 
     filter "configurations:Debug"

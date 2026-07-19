@@ -2,6 +2,8 @@
 
 #include "Cubit/Voxel/Chunk.h"
 
+#include "Core/CoreLogger.h"
+
 #include <stdexcept>
 
 Chunk::Chunk()
@@ -39,5 +41,9 @@ bool Chunk::IsInBounds(int x, int y, int z)
 
 std::size_t Chunk::GetIndex(int x, int y, int z)
 {
+    //Callers are expected to have rejected or clamped out-of-range positions
+    //already, so reaching here with one is a bug rather than bad input.
+    CB_CORE_ASSERT(IsInBounds(x, y, z), "Chunk index is out of bounds");
+
     return static_cast<std::size_t>(x + Width * (y + Height * z));
 }

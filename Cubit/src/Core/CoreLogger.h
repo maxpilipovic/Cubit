@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Cubit/Assert.h"
+
+#include <string>
 #include <string_view>
 
 //Engine-only logging macros.
@@ -8,6 +11,25 @@
 #define CB_CORE_WARN(message) CoreLogger::Warn(message)
 #define CB_CORE_ERROR(message) CoreLogger::Error(message)
 #define CB_CORE_CRITICAL(message) CoreLogger::Critical(message)
+
+//Engine-only assertion. Reports on the core channel; see CB_ASSERT for when
+//assertions are the right tool.
+#ifdef CB_ENABLE_ASSERTS
+	#define CB_CORE_ASSERT(condition, message)                                \
+		do                                                                    \
+		{                                                                     \
+			if (!(condition))                                                 \
+			{                                                                 \
+				CoreLogger::Critical(                                         \
+					std::string("Assertion failed: ") + (message) +           \
+					" [" #condition "] at " __FILE__ ":" +                    \
+					std::to_string(__LINE__));                                \
+				CB_DEBUGBREAK();                                              \
+			}                                                                 \
+		} while (false)
+#else
+	#define CB_CORE_ASSERT(condition, message) do { } while (false)
+#endif
 
 class CoreLogger
 {

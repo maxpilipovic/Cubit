@@ -4,12 +4,12 @@
 
 void Logger::Init()
 {
-	std::cout << "[CLIENT] Logger initialized\n";
+	std::cout << "[CLIENT] Logger initialized" << std::endl;
 }
 
 void Logger::Shutdown()
 {
-	std::cout << "[CLIENT] Logger shutdown\n";
+	std::cout << "[CLIENT] Logger shutdown" << std::endl;
 }
 
 void Logger::Log(std::string_view channel, LogLevel level, std::string_view message)
@@ -35,7 +35,9 @@ void Logger::Log(std::string_view channel, LogLevel level, std::string_view mess
 			break;
 	}
 
-	std::cout << message << '\n';
+	//Flush every message. std::cout is fully buffered when redirected to a file
+	//or pipe, so an unflushed crash loses exactly the output needed to diagnose it.
+	std::cout << message << std::endl;
 }
 
 void Logger::Trace(std::string_view message)

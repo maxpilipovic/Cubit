@@ -13,6 +13,7 @@ The repository is intentionally split into an engine DLL and a small sandbox exe
 Cubit is in the foundation stage. The current implementation includes:
 
 - A GLFW-backed window, OpenGL context, application loop, and frame timestep.
+- Flushed logging and debug-only assertions (`CB_ASSERT`, `CB_CORE_ASSERT`).
 - Routed window, keyboard, and mouse events plus polled input.
 - Layer and overlay routing alongside a typed gameplay event bus.
 - OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
@@ -203,7 +204,10 @@ solution and run:
 bin/Debug-windows-x86_64/Tests/Tests.exe
 ```
 
-It exits non-zero when any test fails, so it can be wired into a build step or CI.
+It exits non-zero when any test fails, and it runs automatically as a post-build step
+on the `Tests` project, so a broken test fails the build rather than waiting to be
+noticed. Remove the `postbuildcommands` entry in `premake5.lua` if you would rather run
+it by hand.
 
 The suite deliberately covers only code that can be checked without a GPU or a window:
 voxel chunk storage and chunk meshing. Rendering, windowing, and input are verified by

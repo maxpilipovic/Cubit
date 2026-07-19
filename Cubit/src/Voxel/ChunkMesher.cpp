@@ -4,11 +4,17 @@
 
 #include "Cubit/Voxel/Chunk.h"
 
+#include "Core/CoreLogger.h"
+
 namespace
 {
     //Adds two triangles referencing the four vertices most recently appended.
     void AddFaceIndices(ChunkMeshData& mesh)
     {
+        CB_CORE_ASSERT(
+            mesh.Vertices.size() >= 4,
+            "A face must append its four vertices before its indices");
+
         const std::uint32_t firstVertex =
             static_cast<std::uint32_t>(mesh.Vertices.size()) - 4;
 

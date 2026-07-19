@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cubit/Application.h"
+#include "Cubit/Assert.h"
 #include "Cubit/Events/ApplicationEvent.h"
 #include "Cubit/Events/Event.h"
 #include "Cubit/Events/EventBus.h"

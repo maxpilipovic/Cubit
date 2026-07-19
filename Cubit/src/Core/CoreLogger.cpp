@@ -4,12 +4,12 @@
 
 void CoreLogger::Init()
 {
-	std::cout << "[CORE] Logger initialized\n";
+	std::cout << "[CORE] Logger initialized" << std::endl;
 }
 
 void CoreLogger::Shutdown()
 {
-	std::cout << "[CORE] Logger shutdown\n";
+	std::cout << "[CORE] Logger shutdown" << std::endl;
 }
 
 void CoreLogger::Log(std::string_view channel, LogLevel level, std::string_view message)
@@ -35,7 +35,9 @@ void CoreLogger::Log(std::string_view channel, LogLevel level, std::string_view 
 		break;
 	}
 
-	std::cout << message << '\n';
+	//Flush every message. std::cout is fully buffered when redirected to a file
+	//or pipe, so an unflushed crash loses exactly the output needed to diagnose it.
+	std::cout << message << std::endl;
 }
 
 void CoreLogger::Trace(std::string_view message)
