@@ -28,4 +28,5 @@
 #include "Cubit/Voxel/Block.h"
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
+#include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/VoxelRaycast.h"
