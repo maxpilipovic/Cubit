@@ -22,6 +22,12 @@ public:
     //Handles mouse-look and projection resize events.
     void OnEvent(Event& event);
 
+    //Moves the camera to a world-space position. Lets a caller that owns player
+    //movement, such as a character controller, drive the view directly.
+    void SetPosition(const glm::vec3& position);
+
+    const glm::vec3& GetPosition() const { return m_Position; }
+
     PerspectiveCamera& GetCamera() { return m_Camera; }
     const PerspectiveCamera& GetCamera() const { return m_Camera; }
 

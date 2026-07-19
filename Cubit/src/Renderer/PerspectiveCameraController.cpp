@@ -36,6 +36,12 @@ void PerspectiveCameraController::OnUpdate(Timestep timestep)
     m_Camera.SetPosition(m_Position);
 }
 
+void PerspectiveCameraController::SetPosition(const glm::vec3& position)
+{
+    m_Position = position;
+    m_Camera.SetPosition(m_Position);
+}
+
 void PerspectiveCameraController::OnEvent(Event& event)
 {
     EventDispatcher dispatcher(event);

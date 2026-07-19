@@ -20,11 +20,15 @@ Cubit is in the foundation stage. The current implementation includes:
 - Orthographic and perspective cameras with resize-aware controllers.
 - Voxel chunk storage, a face-culling chunk mesher, and voxel raycasting.
 - Terrain editing: breaking and placing blocks along the view ray, with remeshing.
+- Box collision against voxel terrain, and a walking player with gravity and jumping.
 - A sandbox scene that renders a meshed voxel chunk with depth testing and backface culling.
 - Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
-In the sandbox, use `W`, `A`, `S`, and `D` to move, `Space` and left `Shift` to
-move vertically, and move the captured mouse to look around. Left click breaks the
+In the sandbox you walk on the terrain rather than fly through it. Use `W`, `A`, `S`,
+and `D` to move, `Space` to jump, and move the captured mouse to look around. The
+player is a 0.6 x 1.8 x 0.6 box that falls under gravity, stands on solid blocks, and
+slides along walls instead of sticking to them. Walking off the edge of the chunk
+returns you to the spawn point. Left click breaks the
 block under the crosshair and right click places one against the face you are looking
 at, up to 12 blocks away. Each edit remeshes the chunk and re-uploads it.
 

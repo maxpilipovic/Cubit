@@ -22,6 +22,22 @@ namespace
     //How far the player can reach to edit terrain, in blocks.
     constexpr float ReachDistance = 12.0f;
 
+    //Half extents of the player's 0.6 x 1.8 x 0.6 collision box.
+    const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
+
+    //Where the player starts, in chunk space, above the terrain surface.
+    const glm::vec3 SpawnPosition{ 8.5f, 12.0f, 8.5f };
+
+    //Eye height above the centre of the player box.
+    constexpr float EyeOffset = 0.7f;
+
+    constexpr float WalkSpeed = 5.0f;
+    constexpr float JumpSpeed = 9.0f;
+    constexpr float Gravity = 24.0f;
+
+    //Height below the chunk at which a fallen player is returned to spawn.
+    constexpr float FallResetHeight = -20.0f;
+
     //Returns how many solid blocks are stacked in one chunk column.
     int GetTerrainHeight(int x, int z)
     {
@@ -67,8 +83,8 @@ public:
         BuildTestTerrain(m_Chunk);
         RebuildMesh();
 
-        // Places the chunk ahead of and below the camera's starting position.
         m_ChunkTransform = glm::translate(glm::mat4(1.0f), ChunkOrigin);
+        UpdateCameraPosition();
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -97,10 +113,39 @@ public:
         m_Shader = std::make_unique<Shader>(vertexSource, fragmentSource);
     }
 
-    //Polls held movement input independently from routed key events.
+    //Walks the player through the chunk under gravity and moves the camera to
+    //the resulting eye position.
     void OnUpdate(Timestep timestep) override
     {
-        m_CameraController.OnUpdate(timestep);
+        const float seconds = static_cast<float>(timestep.GetSeconds());
+        const glm::vec3 walk = ReadWalkInput() * WalkSpeed;
+
+        if (m_Grounded && Input::IsKeyPressed(KeyCode::Space))
+            m_VerticalVelocity = JumpSpeed;
+
+        m_VerticalVelocity -= Gravity * seconds;
+
+        const VoxelMoveResult move = VoxelCollision::MoveBox(
+            m_Chunk,
+            m_PlayerPosition,
+            PlayerHalfExtents,
+            glm::vec3(walk.x, m_VerticalVelocity, walk.z) * seconds);
+
+        m_PlayerPosition = move.Position;
+        m_Grounded = move.Grounded;
+
+        // Landing or hitting a ceiling ends vertical motion.
+        if (move.BlockedY)
+            m_VerticalVelocity = 0.0f;
+
+        // The chunk is not a closed world, so a player can walk off its edge.
+        if (m_PlayerPosition.y < FallResetHeight)
+        {
+            m_PlayerPosition = SpawnPosition;
+            m_VerticalVelocity = 0.0f;
+        }
+
+        UpdateCameraPosition();
     }
 
     //Draws the meshed voxel chunk through Cubit's scene renderer.
@@ -134,6 +179,45 @@ public:
     }
 
 private:
+    //Returns a unit direction for held movement keys, flattened so that looking
+    //up or down does not change walking speed.
+    glm::vec3 ReadWalkInput() const
+    {
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+
+        glm::vec3 forward = camera.GetForwardDirection();
+        glm::vec3 right = camera.GetRightDirection();
+        forward.y = 0.0f;
+        right.y = 0.0f;
+
+        if (glm::length(forward) > 0.0f)
+            forward = glm::normalize(forward);
+        if (glm::length(right) > 0.0f)
+            right = glm::normalize(right);
+
+        glm::vec3 direction{ 0.0f };
+        if (Input::IsKeyPressed(KeyCode::W))
+            direction += forward;
+        if (Input::IsKeyPressed(KeyCode::S))
+            direction -= forward;
+        if (Input::IsKeyPressed(KeyCode::D))
+            direction += right;
+        if (Input::IsKeyPressed(KeyCode::A))
+            direction -= right;
+
+        if (glm::length(direction) > 0.0f)
+            direction = glm::normalize(direction);
+
+        return direction;
+    }
+
+    //Places the camera at eye height above the player, in world space.
+    void UpdateCameraPosition()
+    {
+        m_CameraController.SetPosition(
+            m_PlayerPosition + ChunkOrigin + glm::vec3(0.0f, EyeOffset, 0.0f));
+    }
+
     //Rebuilds the chunk mesh and replaces the GPU buffers holding it.
     //Recreating the buffers is cheap at one chunk and avoids sizing them up front.
     void RebuildMesh()
@@ -221,6 +305,9 @@ private:
     std::unique_ptr<Shader> m_Shader;
     Chunk m_Chunk;
     glm::mat4 m_ChunkTransform{ 1.0f };
+    glm::vec3 m_PlayerPosition{ SpawnPosition };
+    float m_VerticalVelocity = 0.0f;
+    bool m_Grounded = false;
     PerspectiveCameraController m_CameraController;
 };
 
