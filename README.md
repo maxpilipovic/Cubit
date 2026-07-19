@@ -18,12 +18,22 @@ Cubit is in the foundation stage. The current implementation includes:
 - OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
 - Scene submission with per-object transforms.
 - Orthographic and perspective cameras with resize-aware controllers.
-- Voxel chunk storage and a face-culling chunk mesher.
+- Voxel chunk storage, a face-culling chunk mesher, and voxel raycasting.
+- Terrain editing: breaking and placing blocks along the view ray, with remeshing.
 - A sandbox scene that renders a meshed voxel chunk with depth testing and backface culling.
 - Premake-generated Visual Studio projects for the engine DLL and sandbox executable.
 
 In the sandbox, use `W`, `A`, `S`, and `D` to move, `Space` and left `Shift` to
-move vertically, and move the captured mouse to look around. The sandbox builds a
+move vertically, and move the captured mouse to look around. Left click breaks the
+block under the crosshair and right click places one against the face you are looking
+at, up to 12 blocks away. Each edit remeshes the chunk and re-uploads it.
+
+Because the world is a single chunk, blocks cannot be placed against its outer
+border: the target position would lie outside the chunk and is rejected. Building
+works against any surface with air on the near side, such as the wall of a tunnel
+you have dug.
+
+The sandbox builds a
 16x16x16 chunk of test terrain and renders the mesh produced by `ChunkMesher`,
 demonstrating interleaved position and color attributes, model transforms,
 perspective projection, depth testing, and face culling. Only faces exposed to air
