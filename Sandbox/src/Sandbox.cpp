@@ -1,5 +1,7 @@
 #include "Cubit/Cubit.h"
 
+#include "HudLayer.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <cstdint>
@@ -318,6 +320,9 @@ public:
     SandboxApplication()
     {
         PushLayer(std::make_unique<SandboxLayer>(GetEventBus()));
+        PushOverlay(std::make_unique<HudLayer>(
+            GetWindow().GetFramebufferWidth(),
+            GetWindow().GetFramebufferHeight()));
         GetEventBus().Publish(PlayerDiedEvent{ 1, 2 });
     }
 };

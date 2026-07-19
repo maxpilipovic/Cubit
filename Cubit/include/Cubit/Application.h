@@ -9,6 +9,7 @@
 #include <memory>
 
 struct ApplicationData;
+class Window;
 
 class CB_API Application
 {
@@ -33,6 +34,10 @@ public:
 
     //Returns the gameplay notification bus owned by this application.
     EventBus& GetEventBus();
+
+    //Returns the window owned by this application, for callers that need its
+    //size or native handle.
+    Window& GetWindow();
 
 protected:
     //Updates client behavior for one frame.

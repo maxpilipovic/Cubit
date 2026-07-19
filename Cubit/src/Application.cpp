@@ -128,6 +128,11 @@ EventBus& Application::GetEventBus()
     return m_Data->GameplayEvents;
 }
 
+Window& Application::GetWindow()
+{
+    return *m_Data->WindowInstance;
+}
+
 void Application::OnUpdate(Timestep timestep)
 {
     (void)timestep;

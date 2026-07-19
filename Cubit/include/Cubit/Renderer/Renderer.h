@@ -19,6 +19,10 @@ public:
     //Initializes the fixed OpenGL state used by the renderer.
     static void Init();
 
+    //Enables or disables depth testing. Screen-space overlays draw with it off
+    //so they are not hidden by scene geometry.
+    static void SetDepthTest(bool enabled);
+
     //Sets the pixel region that receives rendered output.
     static void SetViewport(
         std::int32_t x,

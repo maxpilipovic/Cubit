@@ -22,6 +22,7 @@
 #include "Cubit/Renderer/PerspectiveCameraController.h"
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Renderer/Shader.h"
+#include "Cubit/Renderer/Texture2D.h"
 #include "Cubit/Renderer/VertexArray.h"
 #include "Cubit/Renderer/VertexBuffer.h"
 #include "Cubit/Timestep.h"
