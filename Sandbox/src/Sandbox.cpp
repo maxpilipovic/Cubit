@@ -50,6 +50,35 @@ namespace
         return 6 + static_cast<int>(std::lround(wave * 2.0f));
     }
 
+    //Block colours selectable with the number keys, in order.
+    constexpr BlockType PlaceableBlocks[] =
+    {
+        BlockType::Red,
+        BlockType::Orange,
+        BlockType::Yellow,
+        BlockType::Green,
+        BlockType::Blue,
+        BlockType::Purple,
+        BlockType::White,
+        BlockType::Grey
+    };
+
+    constexpr int PlaceableBlockCount =
+        static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
+
+    //Colours the test terrain in bands so the block palette is visible.
+    BlockType GetTerrainBlock(int y, int surfaceHeight)
+    {
+        if (y == surfaceHeight - 1)
+            return BlockType::Green;
+        if (y >= surfaceHeight - 3)
+            return BlockType::Orange;
+        if (y >= surfaceHeight - 5)
+            return BlockType::Grey;
+
+        return BlockType::Blue;
+    }
+
     //Fills a chunk with test data whose buried blocks exercise face culling.
     //This is sandbox fixture data, not a world generator.
     void BuildTestTerrain(Chunk& chunk)
@@ -61,7 +90,7 @@ namespace
                 const int height = GetTerrainHeight(x, z);
 
                 for (int y = 0; y < height; ++y)
-                    chunk.SetBlock(x, y, z, BlockType::Solid);
+                    chunk.SetBlock(x, y, z, GetTerrainBlock(y, height));
             }
         }
     }
@@ -276,7 +305,7 @@ private:
             target.x,
             target.y,
             target.z,
-            button == MouseCode::Left ? BlockType::Air : BlockType::Solid);
+            button == MouseCode::Left ? BlockType::Air : m_PlaceBlock);
         RebuildMesh();
 
         CB_INFO(
@@ -297,11 +326,19 @@ private:
             " was defeated by player " + std::to_string(event.Killer));
     }
 
-    //Logs a non-repeated key press without consuming it from lower layers.
+    //Selects the colour used when placing blocks, or logs an unhandled press.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
-        if (!event.IsRepeat())
-            CB_INFO("Sandbox received a key press");
+        if (event.IsRepeat())
+            return false;
+
+        const int key = static_cast<int>(event.GetKeyCode());
+        const int first = static_cast<int>(KeyCode::D1);
+        if (key >= first && key < first + PlaceableBlockCount)
+        {
+            m_PlaceBlock = PlaceableBlocks[key - first];
+            return true;
+        }
 
         return false;
     }
@@ -312,6 +349,7 @@ private:
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
     Chunk m_Chunk;
+    BlockType m_PlaceBlock = BlockType::Red;
     glm::mat4 m_ChunkTransform{ 1.0f };
     glm::vec3 m_PlayerPosition{ SpawnPosition };
     float m_VerticalVelocity = 0.0f;

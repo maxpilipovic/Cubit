@@ -23,6 +23,7 @@ Cubit is in the foundation stage. The current implementation includes:
 - A debug HUD with a crosshair and a readout of position, grounded state, mesh face
   count, and frame rate.
 - Voxel chunk storage, a face-culling chunk mesher, and voxel raycasting.
+- Coloured blocks, shaded per face direction so a solid colour still reads as a cube.
 - Terrain editing: breaking and placing blocks along the view ray, with remeshing.
 - Box collision against voxel terrain, and a walking player with gravity and jumping.
 - A sandbox scene that renders a meshed voxel chunk with depth testing and backface culling.
@@ -34,7 +35,8 @@ player is a 0.6 x 1.8 x 0.6 box that falls under gravity, stands on solid blocks
 slides along walls instead of sticking to them. Walking off the edge of the chunk
 returns you to the spawn point. Left click breaks the
 block under the crosshair and right click places one against the face you are looking
-at, up to 12 blocks away. Each edit remeshes the chunk and re-uploads it.
+at, up to 12 blocks away. The number keys `1` to `8` choose which colour is placed.
+Each edit remeshes the chunk and re-uploads it.
 
 Because the world is a single chunk, blocks cannot be placed against its outer
 border: the target position would lie outside the chunk and is rejected. Building

@@ -26,9 +26,18 @@ namespace
         mesh.Indices.push_back(firstVertex + 0);
     }
 
-    void AddFrontFace(ChunkMeshData& mesh, float x, float y, float z)
+    //Per-face brightness, so a solid-coloured block still reads as a cube.
+    //Roughly the shading a single overhead light would give.
+    constexpr float TopShade = 1.00f;
+    constexpr float RightShade = 0.92f;
+    constexpr float FrontShade = 0.86f;
+    constexpr float LeftShade = 0.80f;
+    constexpr float BackShade = 0.72f;
+    constexpr float BottomShade = 0.60f;
+
+    void AddFrontFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.70f, 0.80f, 1.00f };
+        const glm::vec3 color = blockColor * FrontShade;
         mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
@@ -36,9 +45,9 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddBackFace(ChunkMeshData& mesh, float x, float y, float z)
+    void AddBackFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.55f, 0.65f, 0.85f };
+        const glm::vec3 color = blockColor * BackShade;
         mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
         mesh.Vertices.push_back({ { x, y, z }, color });
         mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
@@ -46,9 +55,9 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddRightFace(ChunkMeshData& mesh, float x, float y, float z)
+    void AddRightFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.75f, 0.85f, 1.00f };
+        const glm::vec3 color = blockColor * RightShade;
         mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
@@ -56,9 +65,9 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddLeftFace(ChunkMeshData& mesh, float x, float y, float z)
+    void AddLeftFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.65f, 0.75f, 0.95f };
+        const glm::vec3 color = blockColor * LeftShade;
         mesh.Vertices.push_back({ { x, y, z }, color });
         mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
@@ -66,9 +75,9 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddTopFace(ChunkMeshData& mesh, float x, float y, float z)
+    void AddTopFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.85f, 0.95f, 1.00f };
+        const glm::vec3 color = blockColor * TopShade;
         mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
@@ -76,9 +85,9 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddBottomFace(ChunkMeshData& mesh, float x, float y, float z)
+    void AddBottomFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
     {
-        const glm::vec3 color{ 0.45f, 0.55f, 0.75f };
+        const glm::vec3 color = blockColor * BottomShade;
         mesh.Vertices.push_back({ { x, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
         mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
@@ -91,19 +100,20 @@ namespace
         const float blockX = static_cast<float>(x);
         const float blockY = static_cast<float>(y);
         const float blockZ = static_cast<float>(z);
+        const glm::vec3 color = GetBlockColor(chunk.GetBlock(x, y, z));
 
         if (!chunk.IsBlockSolid(x, y, z + 1))
-            AddFrontFace(mesh, blockX, blockY, blockZ);
+            AddFrontFace(mesh, blockX, blockY, blockZ, color);
         if (!chunk.IsBlockSolid(x, y, z - 1))
-            AddBackFace(mesh, blockX, blockY, blockZ);
+            AddBackFace(mesh, blockX, blockY, blockZ, color);
         if (!chunk.IsBlockSolid(x + 1, y, z))
-            AddRightFace(mesh, blockX, blockY, blockZ);
+            AddRightFace(mesh, blockX, blockY, blockZ, color);
         if (!chunk.IsBlockSolid(x - 1, y, z))
-            AddLeftFace(mesh, blockX, blockY, blockZ);
+            AddLeftFace(mesh, blockX, blockY, blockZ, color);
         if (!chunk.IsBlockSolid(x, y + 1, z))
-            AddTopFace(mesh, blockX, blockY, blockZ);
+            AddTopFace(mesh, blockX, blockY, blockZ, color);
         if (!chunk.IsBlockSolid(x, y - 1, z))
-            AddBottomFace(mesh, blockX, blockY, blockZ);
+            AddBottomFace(mesh, blockX, blockY, blockZ, color);
     }
 }
 
