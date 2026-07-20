@@ -19,7 +19,9 @@ Cubit is in the foundation stage. The current implementation includes:
 - OpenGL vertex arrays, vertex and index buffers, shaders, and indexed drawing.
 - Scene submission with per-object transforms.
 - Orthographic and perspective cameras with resize-aware controllers.
-- Textures with alpha blending, and a screen-space overlay pass drawing a crosshair.
+- Textures with alpha blending, and a screen-space overlay pass.
+- A debug HUD with a crosshair and a readout of position, grounded state, mesh face
+  count, and frame rate.
 - Voxel chunk storage, a face-culling chunk mesher, and voxel raycasting.
 - Terrain editing: breaking and placing blocks along the view ray, with remeshing.
 - Box collision against voxel terrain, and a walking player with gravity and jumping.

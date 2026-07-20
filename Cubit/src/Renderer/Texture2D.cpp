@@ -43,34 +43,6 @@ Texture2D::~Texture2D()
         glDeleteTextures(1, &m_RendererId);
 }
 
-Texture2D::Texture2D(Texture2D&& other) noexcept
-    : m_RendererId(other.m_RendererId),
-      m_Width(other.m_Width),
-      m_Height(other.m_Height)
-{
-    other.m_RendererId = 0;
-    other.m_Width = 0;
-    other.m_Height = 0;
-}
-
-Texture2D& Texture2D::operator=(Texture2D&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    if (m_RendererId != 0)
-        glDeleteTextures(1, &m_RendererId);
-
-    m_RendererId = other.m_RendererId;
-    m_Width = other.m_Width;
-    m_Height = other.m_Height;
-    other.m_RendererId = 0;
-    other.m_Width = 0;
-    other.m_Height = 0;
-
-    return *this;
-}
-
 void Texture2D::Bind(std::uint32_t slot) const
 {
     glActiveTexture(GL_TEXTURE0 + slot);

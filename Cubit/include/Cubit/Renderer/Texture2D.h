@@ -21,11 +21,6 @@ public:
     //Prevents assigning duplicate ownership of an OpenGL texture.
     Texture2D& operator=(const Texture2D&) = delete;
 
-    //Transfers ownership of an OpenGL texture.
-    Texture2D(Texture2D&& other) noexcept;
-
-    //Releases the current texture before taking another texture.
-    Texture2D& operator=(Texture2D&& other) noexcept;
 
     //Binds this texture to a numbered sampler slot.
     void Bind(std::uint32_t slot = 0) const;

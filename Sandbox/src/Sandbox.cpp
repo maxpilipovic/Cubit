@@ -71,8 +71,9 @@ class SandboxLayer final : public Layer
 {
 public:
     //Subscribes the Sandbox layer to typed gameplay notifications.
-    explicit SandboxLayer(EventBus& eventBus)
-        : m_CameraController(16.0f / 9.0f)
+    SandboxLayer(EventBus& eventBus, std::shared_ptr<HudState> hudState)
+        : m_HudState(std::move(hudState)),
+          m_CameraController(16.0f / 9.0f)
     {
         Input::SetCursorCaptured(true);
 
@@ -135,6 +136,8 @@ public:
 
         m_PlayerPosition = move.Position;
         m_Grounded = move.Grounded;
+        m_HudState->PlayerPosition = m_PlayerPosition;
+        m_HudState->Grounded = m_Grounded;
 
         // Landing or hitting a ceiling ends vertical motion.
         if (move.BlockedY)
@@ -236,6 +239,8 @@ private:
         m_IndexBuffer = std::make_unique<IndexBuffer>(
             mesh.Indices.data(),
             static_cast<std::uint32_t>(mesh.Indices.size()));
+
+        m_HudState->MeshFaceCount = m_IndexBuffer->GetCount() / 6;
     }
 
     //Breaks or places a block along the camera's view ray.
@@ -305,6 +310,7 @@ private:
     std::unique_ptr<VertexBuffer> m_VertexBuffer;
     std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
+    std::shared_ptr<HudState> m_HudState;
     Chunk m_Chunk;
     glm::mat4 m_ChunkTransform{ 1.0f };
     glm::vec3 m_PlayerPosition{ SpawnPosition };
@@ -319,8 +325,13 @@ public:
     //Creates the Sandbox layer and publishes a gameplay event.
     SandboxApplication()
     {
-        PushLayer(std::make_unique<SandboxLayer>(GetEventBus()));
+        //Shared so the overlay can read what the gameplay layer writes, without
+        //either layer knowing about the other.
+        auto hudState = std::make_shared<HudState>();
+
+        PushLayer(std::make_unique<SandboxLayer>(GetEventBus(), hudState));
         PushOverlay(std::make_unique<HudLayer>(
+            hudState,
             GetWindow().GetFramebufferWidth(),
             GetWindow().GetFramebufferHeight()));
         GetEventBus().Publish(PlayerDiedEvent{ 1, 2 });
