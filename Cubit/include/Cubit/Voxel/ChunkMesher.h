@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-class Chunk;
+class World;
 
 struct VoxelVertex
 {
@@ -25,6 +25,9 @@ class CB_API ChunkMesher
 public:
     ChunkMesher() = delete;
 
-    //Builds one mesh containing only faces exposed to air.
-    static ChunkMeshData Build(const Chunk& chunk);
+    //Builds one chunk's mesh, containing only faces exposed to air. Blocks in
+    //neighbouring chunks are consulted, so a face shared with a solid block in
+    //the next chunk is not emitted. Vertices are in chunk-local coordinates, so
+    //the caller positions the mesh by the chunk's origin.
+    static ChunkMeshData Build(const World& world, int chunkX, int chunkY, int chunkZ);
 };

@@ -3,6 +3,7 @@
 #include "Cubit/Voxel/ChunkMesher.h"
 
 #include "Cubit/Voxel/Chunk.h"
+#include "Cubit/Voxel/World.h"
 
 #include "Core/CoreLogger.h"
 
@@ -95,31 +96,43 @@ namespace
         AddFaceIndices(mesh);
     }
 
-    void AddExposedFaces(ChunkMeshData& mesh, const Chunk& chunk, int x, int y, int z)
+    //Emits the faces of one block that are exposed to air. Neighbours are looked
+    //up in world coordinates so blocks in the next chunk are visible, while the
+    //vertices use chunk-local coordinates.
+    void AddExposedFaces(
+        ChunkMeshData& mesh,
+        const World& world,
+        const glm::ivec3& worldPosition,
+        const glm::ivec3& localPosition)
     {
-        const float blockX = static_cast<float>(x);
-        const float blockY = static_cast<float>(y);
-        const float blockZ = static_cast<float>(z);
-        const glm::vec3 color = GetBlockColor(chunk.GetBlock(x, y, z));
+        const float blockX = static_cast<float>(localPosition.x);
+        const float blockY = static_cast<float>(localPosition.y);
+        const float blockZ = static_cast<float>(localPosition.z);
 
-        if (!chunk.IsBlockSolid(x, y, z + 1))
+        const int x = worldPosition.x;
+        const int y = worldPosition.y;
+        const int z = worldPosition.z;
+        const glm::vec3 color = GetBlockColor(world.GetBlock(x, y, z));
+
+        if (!world.IsBlockSolid(x, y, z + 1))
             AddFrontFace(mesh, blockX, blockY, blockZ, color);
-        if (!chunk.IsBlockSolid(x, y, z - 1))
+        if (!world.IsBlockSolid(x, y, z - 1))
             AddBackFace(mesh, blockX, blockY, blockZ, color);
-        if (!chunk.IsBlockSolid(x + 1, y, z))
+        if (!world.IsBlockSolid(x + 1, y, z))
             AddRightFace(mesh, blockX, blockY, blockZ, color);
-        if (!chunk.IsBlockSolid(x - 1, y, z))
+        if (!world.IsBlockSolid(x - 1, y, z))
             AddLeftFace(mesh, blockX, blockY, blockZ, color);
-        if (!chunk.IsBlockSolid(x, y + 1, z))
+        if (!world.IsBlockSolid(x, y + 1, z))
             AddTopFace(mesh, blockX, blockY, blockZ, color);
-        if (!chunk.IsBlockSolid(x, y - 1, z))
+        if (!world.IsBlockSolid(x, y - 1, z))
             AddBottomFace(mesh, blockX, blockY, blockZ, color);
     }
 }
 
-ChunkMeshData ChunkMesher::Build(const Chunk& chunk)
+ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int chunkZ)
 {
     ChunkMeshData mesh;
+    const glm::ivec3 origin = World::GetChunkOrigin(chunkX, chunkY, chunkZ);
 
     for (int z = 0; z < Chunk::Depth; ++z)
     {
@@ -127,11 +140,15 @@ ChunkMeshData ChunkMesher::Build(const Chunk& chunk)
         {
             for (int x = 0; x < Chunk::Width; ++x)
             {
-                if (chunk.IsBlockSolid(x, y, z))
-                    AddExposedFaces(mesh, chunk, x, y, z);
+                const glm::ivec3 local(x, y, z);
+                const glm::ivec3 position = origin + local;
+
+                if (world.IsBlockSolid(position.x, position.y, position.z))
+                    AddExposedFaces(mesh, world, position, local);
             }
         }
     }
 
     return mesh;
 }
+

@@ -79,18 +79,18 @@ namespace
         return BlockType::Blue;
     }
 
-    //Fills a chunk with test data whose buried blocks exercise face culling.
+    //Fills a world with test data whose buried blocks exercise face culling.
     //This is sandbox fixture data, not a world generator.
-    void BuildTestTerrain(Chunk& chunk)
+    void BuildTestTerrain(World& world)
     {
-        for (int z = 0; z < Chunk::Depth; ++z)
+        for (int z = 0; z < world.GetDepth(); ++z)
         {
-            for (int x = 0; x < Chunk::Width; ++x)
+            for (int x = 0; x < world.GetWidth(); ++x)
             {
                 const int height = GetTerrainHeight(x, z);
 
                 for (int y = 0; y < height; ++y)
-                    chunk.SetBlock(x, y, z, GetTerrainBlock(y, height));
+                    world.SetBlock(x, y, z, GetTerrainBlock(y, height));
             }
         }
     }
@@ -112,7 +112,7 @@ public:
                 OnPlayerDied(event);
             });
 
-        BuildTestTerrain(m_Chunk);
+        BuildTestTerrain(m_World);
         RebuildMesh();
 
         m_ChunkTransform = glm::translate(glm::mat4(1.0f), ChunkOrigin);
@@ -157,8 +157,10 @@ public:
 
         m_VerticalVelocity -= Gravity * seconds;
 
+        //Collision still works on a single chunk, so it reads the world's only
+        //chunk until it is moved onto world coordinates.
         const VoxelMoveResult move = VoxelCollision::MoveBox(
-            m_Chunk,
+            m_World.GetChunk(0, 0, 0),
             m_PlayerPosition,
             PlayerHalfExtents,
             glm::vec3(walk.x, m_VerticalVelocity, walk.z) * seconds);
@@ -256,7 +258,7 @@ private:
     //Recreating the buffers is cheap at one chunk and avoids sizing them up front.
     void RebuildMesh()
     {
-        const ChunkMeshData mesh = ChunkMesher::Build(m_Chunk);
+        const ChunkMeshData mesh = ChunkMesher::Build(m_World, 0, 0, 0);
 
         m_VertexArray = std::make_unique<VertexArray>();
         m_VertexBuffer = std::make_unique<VertexBuffer>(
@@ -281,7 +283,7 @@ private:
 
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
         const VoxelRayHit hit = VoxelRaycast::Cast(
-            m_Chunk,
+            m_World.GetChunk(0, 0, 0),
             camera.GetPosition() - ChunkOrigin,
             camera.GetForwardDirection(),
             ReachDistance);
@@ -298,10 +300,10 @@ private:
         if (button == MouseCode::Right && hit.Normal == glm::ivec3(0))
             return false;
 
-        if (!Chunk::IsInBounds(target.x, target.y, target.z))
+        if (!m_World.IsInBounds(target.x, target.y, target.z))
             return false;
 
-        m_Chunk.SetBlock(
+        m_World.SetBlock(
             target.x,
             target.y,
             target.z,
@@ -348,7 +350,7 @@ private:
     std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
-    Chunk m_Chunk;
+    World m_World{ 1, 1, 1 };
     BlockType m_PlaceBlock = BlockType::Red;
     glm::mat4 m_ChunkTransform{ 1.0f };
     glm::vec3 m_PlayerPosition{ SpawnPosition };
