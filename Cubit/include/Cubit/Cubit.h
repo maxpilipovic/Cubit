@@ -32,3 +32,4 @@
 #include "Cubit/Voxel/ChunkMesher.h"
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/VoxelRaycast.h"
+#include "Cubit/Voxel/World.h"
