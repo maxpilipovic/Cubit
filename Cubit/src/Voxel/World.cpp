@@ -16,6 +16,12 @@ World::World(int chunksX, int chunksY, int chunksZ)
         static_cast<std::size_t>(chunksX) *
         static_cast<std::size_t>(chunksY) *
         static_cast<std::size_t>(chunksZ));
+
+    //A freshly loaded world has no GPU meshes yet, so every chunk needs building.
+    for (int z = 0; z < chunksZ; ++z)
+        for (int y = 0; y < chunksY; ++y)
+            for (int x = 0; x < chunksX; ++x)
+                m_DirtyChunks.insert(glm::ivec3(x, y, z));
 }
 
 BlockType World::GetBlock(int x, int y, int z) const
@@ -49,6 +55,35 @@ void World::SetBlock(int x, int y, int z, BlockType block)
         y % Chunk::Height,
         z % Chunk::Depth,
         block);
+
+    MarkChunkDirtyForEdit(x, y, z);
+}
+
+void World::MarkChunkDirtyForEdit(int x, int y, int z)
+{
+    const int chunkX = x / Chunk::Width;
+    const int chunkY = y / Chunk::Height;
+    const int chunkZ = z / Chunk::Depth;
+    m_DirtyChunks.insert(glm::ivec3(chunkX, chunkY, chunkZ));
+
+    //A block on a chunk's boundary plane also changes the shared faces of the
+    //neighbour on that side, so that neighbour's mesh is dirty too.
+    const int localX = x % Chunk::Width;
+    const int localY = y % Chunk::Height;
+    const int localZ = z % Chunk::Depth;
+
+    const auto markNeighbour = [this](int cx, int cy, int cz)
+    {
+        if (IsChunkInBounds(cx, cy, cz))
+            m_DirtyChunks.insert(glm::ivec3(cx, cy, cz));
+    };
+
+    if (localX == 0)                 markNeighbour(chunkX - 1, chunkY, chunkZ);
+    if (localX == Chunk::Width - 1)  markNeighbour(chunkX + 1, chunkY, chunkZ);
+    if (localY == 0)                 markNeighbour(chunkX, chunkY - 1, chunkZ);
+    if (localY == Chunk::Height - 1) markNeighbour(chunkX, chunkY + 1, chunkZ);
+    if (localZ == 0)                 markNeighbour(chunkX, chunkY, chunkZ - 1);
+    if (localZ == Chunk::Depth - 1)  markNeighbour(chunkX, chunkY, chunkZ + 1);
 }
 
 bool World::IsBlockSolid(int x, int y, int z) const

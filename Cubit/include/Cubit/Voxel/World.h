@@ -6,12 +6,25 @@
 
 #include <glm/glm.hpp>
 #include <cstddef>
+#include <set>
 #include <vector>
 
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4251)
 #endif
+
+//Orders chunk coordinates so they can be stored in a set or map. Compares x,
+//then y, then z; the values are only ever equal for the same chunk.
+struct IVec3Less
+{
+    bool operator()(const glm::ivec3& a, const glm::ivec3& b) const
+    {
+        if (a.x != b.x) return a.x < b.x;
+        if (a.y != b.y) return a.y < b.y;
+        return a.z < b.z;
+    }
+};
 
 //A fixed grid of chunks addressed in world block coordinates. The size is known
 //when the world is created and never changes, because maps are loaded whole
@@ -40,6 +53,14 @@ public:
     //Reports whether chunk grid coordinates are inside the world.
     bool IsChunkInBounds(int chunkX, int chunkY, int chunkZ) const;
 
+    //Returns the chunks whose meshes are out of date because a block in them,
+    //or in a chunk sharing a face with them, changed.
+    const std::set<glm::ivec3, IVec3Less>& DirtyChunks() const { return m_DirtyChunks; }
+
+    //Forgets every dirty chunk. The renderer calls this once it has remeshed
+    //them.
+    void ClearDirty() { m_DirtyChunks.clear(); }
+
     //Returns the world block coordinates of a chunk's minimum corner.
     static glm::ivec3 GetChunkOrigin(int chunkX, int chunkY, int chunkZ);
 
@@ -55,10 +76,15 @@ private:
     //Returns the chunk holding a world position, which must be in bounds.
     std::size_t GetChunkIndex(int chunkX, int chunkY, int chunkZ) const;
 
+    //Marks the chunk holding a world position dirty, plus any chunk sharing a
+    //face the position lies on, when that neighbour is inside the world.
+    void MarkChunkDirtyForEdit(int x, int y, int z);
+
     int m_ChunksX = 0;
     int m_ChunksY = 0;
     int m_ChunksZ = 0;
     std::vector<Chunk> m_Chunks;
+    std::set<glm::ivec3, IVec3Less> m_DirtyChunks;
 };
 
 #ifdef _MSC_VER
