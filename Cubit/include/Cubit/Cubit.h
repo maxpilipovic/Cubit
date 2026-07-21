@@ -25,6 +25,7 @@
 #include "Cubit/Renderer/Texture2D.h"
 #include "Cubit/Renderer/VertexArray.h"
 #include "Cubit/Renderer/VertexBuffer.h"
+#include "Cubit/Renderer/WorldRenderer.h"
 #include "Cubit/Timestep.h"
 #include "Cubit/Window.h"
 #include "Cubit/Voxel/Block.h"
