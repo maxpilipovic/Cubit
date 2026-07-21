@@ -17,9 +17,11 @@ struct PlayerDiedEvent
 
 namespace
 {
-    //Chunk-space origin of the rendered chunk, in world units. Placed so the
-    //camera starts looking straight at terrain that is within editing reach.
-    const glm::vec3 ChunkOrigin{ -8.0f, -6.0f, -18.0f };
+    //Where the world's chunk (0,0,0) is placed in view, in world units. Chosen
+    //so the camera starts looking at terrain within editing reach. The rest of
+    //the grid extends from here. Player physics still live in chunk (0,0,0)'s
+    //local space until step 4, so this is not yet a centred offset.
+    const glm::vec3 WorldOffset{ -8.0f, -6.0f, -18.0f };
 
     //How far the player can reach to edit terrain, in blocks.
     constexpr float ReachDistance = 12.0f;
@@ -113,9 +115,8 @@ public:
             });
 
         BuildTestTerrain(m_World);
-        RebuildMesh();
+        //The world starts with every chunk dirty, so the first render meshes it.
 
-        m_ChunkTransform = glm::translate(glm::mat4(1.0f), ChunkOrigin);
         UpdateCameraPosition();
 
         constexpr std::string_view vertexSource = R"(
@@ -184,15 +185,14 @@ public:
         UpdateCameraPosition();
     }
 
-    //Draws the meshed voxel chunk through Cubit's scene renderer.
+    //Draws the meshed voxel world through Cubit's scene renderer.
     void OnRender() override
     {
+        m_WorldRenderer.Update(m_World);
+        m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
+
         Renderer::BeginScene(m_CameraController.GetCamera());
-
-        // An emptied chunk meshes to nothing, leaving no geometry to draw.
-        if (m_IndexBuffer->GetCount() > 0)
-            Renderer::Submit(*m_VertexArray, *m_IndexBuffer, *m_Shader, m_ChunkTransform);
-
+        m_WorldRenderer.Render(*m_Shader, WorldOffset);
         Renderer::EndScene();
     }
 
@@ -251,27 +251,7 @@ private:
     void UpdateCameraPosition()
     {
         m_CameraController.SetPosition(
-            m_PlayerPosition + ChunkOrigin + glm::vec3(0.0f, EyeOffset, 0.0f));
-    }
-
-    //Rebuilds the chunk mesh and replaces the GPU buffers holding it.
-    //Recreating the buffers is cheap at one chunk and avoids sizing them up front.
-    void RebuildMesh()
-    {
-        const ChunkMeshData mesh = ChunkMesher::Build(m_World, 0, 0, 0);
-
-        m_VertexArray = std::make_unique<VertexArray>();
-        m_VertexBuffer = std::make_unique<VertexBuffer>(
-            mesh.Vertices.data(),
-            static_cast<std::uint32_t>(mesh.Vertices.size() * sizeof(VoxelVertex)));
-        m_VertexArray->AddBuffer(
-            *m_VertexBuffer,
-            BufferLayout{ ShaderDataType::Float3, ShaderDataType::Float3 });
-        m_IndexBuffer = std::make_unique<IndexBuffer>(
-            mesh.Indices.data(),
-            static_cast<std::uint32_t>(mesh.Indices.size()));
-
-        m_HudState->MeshFaceCount = m_IndexBuffer->GetCount() / 6;
+            m_PlayerPosition + WorldOffset + glm::vec3(0.0f, EyeOffset, 0.0f));
     }
 
     //Breaks or places a block along the camera's view ray.
@@ -284,7 +264,7 @@ private:
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
         const VoxelRayHit hit = VoxelRaycast::Cast(
             m_World.GetChunk(0, 0, 0),
-            camera.GetPosition() - ChunkOrigin,
+            camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
             ReachDistance);
 
@@ -308,14 +288,11 @@ private:
             target.y,
             target.z,
             button == MouseCode::Left ? BlockType::Air : m_PlaceBlock);
-        RebuildMesh();
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
             " block at " + std::to_string(target.x) + "," +
-            std::to_string(target.y) + "," + std::to_string(target.z) +
-            " (mesh now " + std::to_string(m_IndexBuffer->GetCount() / 6) +
-            " faces)");
+            std::to_string(target.y) + "," + std::to_string(target.z));
 
         return true;
     }
@@ -345,14 +322,11 @@ private:
         return false;
     }
 
-    std::unique_ptr<VertexArray> m_VertexArray;
-    std::unique_ptr<VertexBuffer> m_VertexBuffer;
-    std::unique_ptr<IndexBuffer> m_IndexBuffer;
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
-    World m_World{ 1, 1, 1 };
+    World m_World{ 4, 1, 4 };
+    WorldRenderer m_WorldRenderer;
     BlockType m_PlaceBlock = BlockType::Red;
-    glm::mat4 m_ChunkTransform{ 1.0f };
     glm::vec3 m_PlayerPosition{ SpawnPosition };
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
