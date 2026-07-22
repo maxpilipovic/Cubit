@@ -2,7 +2,7 @@
 
 #include "Cubit/Voxel/VoxelRaycast.h"
 
-#include "Cubit/Voxel/Chunk.h"
+#include "Cubit/Voxel/World.h"
 
 #include <cmath>
 #include <limits>
@@ -58,7 +58,7 @@ namespace
 }
 
 VoxelRayHit VoxelRaycast::Cast(
-    const Chunk& chunk,
+    const World& world,
     const glm::vec3& origin,
     const glm::vec3& direction,
     float maxDistance)
@@ -93,7 +93,7 @@ VoxelRayHit VoxelRaycast::Cast(
 
     while (travelled <= maxDistance)
     {
-        if (chunk.IsBlockSolid(voxel.x, voxel.y, voxel.z))
+        if (world.IsBlockSolid(voxel.x, voxel.y, voxel.z))
         {
             result.Hit = true;
             result.Block = voxel;

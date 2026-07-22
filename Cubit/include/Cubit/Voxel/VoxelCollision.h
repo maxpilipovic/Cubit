@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-class Chunk;
+class World;
 
 struct VoxelMoveResult
 {
@@ -26,19 +26,19 @@ class CB_API VoxelCollision
 public:
     VoxelCollision() = delete;
 
-    //Moves an axis-aligned box through the chunk and stops it against solid
+    //Moves an axis-aligned box through the world and stops it against solid
     //blocks. Each axis is resolved separately so a box blocked on one axis still
     //slides along the others. Long moves are split into small steps so a box
     //cannot pass through a block it should have hit.
     static VoxelMoveResult MoveBox(
-        const Chunk& chunk,
+        const World& world,
         const glm::vec3& position,
         const glm::vec3& halfExtents,
         const glm::vec3& motion);
 
     //Reports whether a box at this position overlaps any solid block.
     static bool Overlaps(
-        const Chunk& chunk,
+        const World& world,
         const glm::vec3& position,
         const glm::vec3& halfExtents);
 };

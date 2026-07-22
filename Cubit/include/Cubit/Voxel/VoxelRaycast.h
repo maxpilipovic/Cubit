@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-class Chunk;
+class World;
 
 struct VoxelRayHit
 {
@@ -28,9 +28,9 @@ public:
     VoxelRaycast() = delete;
 
     //Walks the ray voxel by voxel and reports the first solid block it enters.
-    //Positions outside the chunk are treated as air, matching Chunk::GetBlock.
+    //Positions outside the world are treated as air, matching World::GetBlock.
     static VoxelRayHit Cast(
-        const Chunk& chunk,
+        const World& world,
         const glm::vec3& origin,
         const glm::vec3& direction,
         float maxDistance);

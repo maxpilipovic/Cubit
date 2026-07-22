@@ -158,10 +158,10 @@ public:
 
         m_VerticalVelocity -= Gravity * seconds;
 
-        //Collision still works on a single chunk, so it reads the world's only
-        //chunk until it is moved onto world coordinates.
+        //The player position is in world coordinates, so collision runs against
+        //the whole world and the box can cross chunk boundaries.
         const VoxelMoveResult move = VoxelCollision::MoveBox(
-            m_World.GetChunk(0, 0, 0),
+            m_World,
             m_PlayerPosition,
             PlayerHalfExtents,
             glm::vec3(walk.x, m_VerticalVelocity, walk.z) * seconds);
@@ -262,8 +262,10 @@ private:
             return false;
 
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        //Subtracting WorldOffset turns the camera's view-space position back into
+        //world coordinates, the space the world and the ray share.
         const VoxelRayHit hit = VoxelRaycast::Cast(
-            m_World.GetChunk(0, 0, 0),
+            m_World,
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
             ReachDistance);

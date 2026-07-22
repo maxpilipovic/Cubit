@@ -2,7 +2,7 @@
 
 #include "Cubit/Voxel/VoxelCollision.h"
 
-#include "Cubit/Voxel/Chunk.h"
+#include "Cubit/Voxel/World.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,7 +18,7 @@ namespace
     constexpr float MaxStep = 0.25f;
 
     //Reports whether the box spanning these corners covers any solid block.
-    bool OverlapsSolid(const Chunk& chunk, const glm::vec3& min, const glm::vec3& max)
+    bool OverlapsSolid(const World& world, const glm::vec3& min, const glm::vec3& max)
     {
         const int minX = static_cast<int>(std::floor(min.x + Skin));
         const int minY = static_cast<int>(std::floor(min.y + Skin));
@@ -30,7 +30,7 @@ namespace
         for (int z = minZ; z <= maxZ; ++z)
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
-                    if (chunk.IsBlockSolid(x, y, z))
+                    if (world.IsBlockSolid(x, y, z))
                         return true;
 
         return false;
@@ -57,7 +57,7 @@ namespace
 
     //Moves the box along one axis and pushes it back out of anything it entered.
     void MoveAxis(
-        const Chunk& chunk,
+        const World& world,
         VoxelMoveResult& result,
         const glm::vec3& halfExtents,
         int axis,
@@ -70,7 +70,7 @@ namespace
 
         const glm::vec3 min = result.Position - halfExtents;
         const glm::vec3 max = result.Position + halfExtents;
-        if (!OverlapsSolid(chunk, min, max))
+        if (!OverlapsSolid(world, min, max))
             return;
 
         //Snap back to the face of the block row that was entered.
@@ -83,15 +83,15 @@ namespace
 }
 
 bool VoxelCollision::Overlaps(
-    const Chunk& chunk,
+    const World& world,
     const glm::vec3& position,
     const glm::vec3& halfExtents)
 {
-    return OverlapsSolid(chunk, position - halfExtents, position + halfExtents);
+    return OverlapsSolid(world, position - halfExtents, position + halfExtents);
 }
 
 VoxelMoveResult VoxelCollision::MoveBox(
-    const Chunk& chunk,
+    const World& world,
     const glm::vec3& position,
     const glm::vec3& halfExtents,
     const glm::vec3& motion)
@@ -112,9 +112,9 @@ VoxelMoveResult VoxelCollision::MoveBox(
 
     for (int step = 0; step < steps; ++step)
     {
-        MoveAxis(chunk, result, halfExtents, 0, stepMotion.x);
-        MoveAxis(chunk, result, halfExtents, 1, stepMotion.y);
-        MoveAxis(chunk, result, halfExtents, 2, stepMotion.z);
+        MoveAxis(world, result, halfExtents, 0, stepMotion.x);
+        MoveAxis(world, result, halfExtents, 1, stepMotion.y);
+        MoveAxis(world, result, halfExtents, 2, stepMotion.z);
     }
 
     return result;
