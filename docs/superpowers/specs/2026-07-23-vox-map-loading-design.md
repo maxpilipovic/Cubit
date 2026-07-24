@@ -100,7 +100,9 @@ extent within the last chunk of an axis stay air (`0`).
 `i - 1` — the format's well-known 1-based off-by-one. `VoxLoader` resolves this so
 a `BlockId` stored in the world indexes `Palette` directly. RGBA bytes (0-255)
 convert to the `glm::vec3` 0-1 range the mesher expects. A file with no `RGBA`
-chunk falls back to MagicaVoxel's default palette.
+chunk falls back to the engine's default palette; exact parity with MagicaVoxel's
+built-in default palette is deferred, since the maps this slice loads always carry
+their own `RGBA` chunk.
 
 ## Error handling
 
