@@ -113,12 +113,12 @@ the two sides read as opposing teams.
 3. **Column fill** — for each column, fill `y = 0` up to its height: **stone** at
    depth, a **dirt** band beneath the surface, **grass** on top. Above `SnowLine`,
    surface becomes **snow** and exposed rock becomes **stone-dark**.
-4. **River** — a channel centered on the mirror line (`x = 63/64`), meandering in
-   `x` by a low-frequency noise of `z` (amplitude a few blocks), width ~6–10. Within
-   the channel, carve the ground down and fill with **water** up to `WaterLevel`;
-   line the banks with **sand**. Because the channel is generated to include the
-   `x = 63` edge and then mirrored, it forms one continuous river straddling the
-   contested center line.
+4. **River** — a channel whose centerline stays on the mirror plane (`x = 63/64`),
+   with its **half-width varying along `z`** via low-frequency noise (banks wave in
+   and out, ~6–12 blocks wide total) rather than the centerline shifting — this keeps
+   the channel provably mirror-symmetric. Within the channel, carve the ground down
+   and fill with **water** up to `WaterLevel`; line the banks with **sand**. The
+   result is one continuous river straddling the contested center line.
 5. **Forests** — for each eligible surface column (grass, above water level, away
    from the river banks and forts), a per-column hash compared against
    `ForestDensity` places a **tree**: a **wood** trunk 4–7 tall plus a rounded
