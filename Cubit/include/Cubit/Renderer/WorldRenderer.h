@@ -7,9 +7,11 @@
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 
 class Shader;
 
@@ -45,6 +47,12 @@ public:
     //Total exposed faces across all chunk meshes, for the HUD.
     std::uint32_t TotalFaceCount() const;
 
+    //Cached chunk meshes ready to draw.
+    std::size_t TotalChunkCount() const { return m_Meshes.size(); }
+
+    //Chunks still waiting to be (re)meshed.
+    std::size_t PendingCount() const { return m_Pending.size(); }
+
 private:
     //A chunk's GPU buffers plus its face count. Move-only through its unique_ptr
     //members, so it can live in a map without copying GPU resources.
@@ -56,7 +64,12 @@ private:
         std::uint32_t FaceCount = 0;
     };
 
+    //How many chunks to (re)mesh per Update, so a full load spreads over frames
+    //instead of stalling one.
+    static constexpr std::size_t MeshBudgetPerFrame = 16;
+
     std::map<glm::ivec3, ChunkMesh, IVec3Less> m_Meshes;
+    std::set<glm::ivec3, IVec3Less> m_Pending;
 };
 
 #ifdef _MSC_VER
