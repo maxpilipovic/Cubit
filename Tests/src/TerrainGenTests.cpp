@@ -153,3 +153,47 @@ TEST_CASE("Leaves exist above trunks")
             leaves = true;
     CHECK(leaves);
 }
+
+TEST_CASE("Forts are team-coloured: red only on the left half, blue only on the right")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    const int half = m.Size.x / 2;
+
+    int red = 0, blue = 0;
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = 0; y < m.Size.y; ++y)
+            for (int x = 0; x < m.Size.x; ++x)
+            {
+                const std::uint8_t id = m.At(x, y, z);
+                if (id == MapBlocks::RedBase)
+                {
+                    CHECK(x < half);
+                    ++red;
+                }
+                else if (id == MapBlocks::BlueBase)
+                {
+                    CHECK(x >= half);
+                    ++blue;
+                }
+            }
+    CHECK(red > 0);
+    CHECK(blue > 0);
+    CHECK(red == blue); // symmetric forts
+}
+
+TEST_CASE("Colours mirror across x everywhere except the team-coloured forts")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = 0; y < m.Size.y; ++y)
+            for (int x = 0; x < m.Size.x; ++x)
+            {
+                const std::uint8_t a = m.At(x, y, z);
+                const std::uint8_t b = m.At(m.Size.x - 1 - x, y, z);
+                const bool teamA = (a == MapBlocks::RedBase || a == MapBlocks::BlueBase);
+                const bool teamB = (b == MapBlocks::RedBase || b == MapBlocks::BlueBase);
+                if (teamA || teamB)
+                    continue; // forts are intentionally recoloured by side
+                CHECK(a == b);
+            }
+}

@@ -10,6 +10,11 @@ namespace
 {
     using namespace MapBlocks;
 
+    // Fort placement, shared by the fort footprint test and the builder so they
+    // never diverge.
+    constexpr int FortEdgeOffset = 8; // fort centre distance from the x edge
+    constexpr int FortRadius = 5;     // half-footprint
+
     std::size_t Index(const VoxModel& m, int x, int y, int z)
     {
         return static_cast<std::size_t>(x) +
@@ -169,7 +174,11 @@ namespace
                 {
                     if (dx * dx + dy * dy + dz * dz > rad * rad + 1)
                         continue;
-                    const bool light = ((dx + dy + dz) & 1) != 0;
+                    // Colour by absolute (folded) position, not the tree's local
+                    // offset, so overlapping canopies dither identically regardless
+                    // of placement order and the result stays mirror-symmetric.
+                    const bool light =
+                        ((Fold(c, x + dx) + (cy + dy) + (z + dz)) & 1) != 0;
                     // Never overwrite trunk wood: a canopy that clipped a nearby
                     // tree's trunk would split it (a wood block left above a leaf).
                     if (Get(m, x + dx, cy + dy, z + dz) == MapBlocks::Wood)
@@ -179,11 +188,26 @@ namespace
                 }
     }
 
+    //Reports whether a column sits within (or just around) a fort footprint, so
+    //forests leave the forts clear. Symmetric because the two fort centres mirror.
+    bool InFortFootprint(const TerrainConfig& c, int x, int z)
+    {
+        const int cz = c.Size.z / 2;
+        const int margin = FortRadius + 2;
+        if (std::abs(z - cz) > margin)
+            return false;
+        const int left = FortEdgeOffset;
+        const int right = c.Size.x - 1 - FortEdgeOffset;
+        return std::abs(x - left) <= margin || std::abs(x - right) <= margin;
+    }
+
     void PlantForests(VoxModel& m, const TerrainConfig& c)
     {
         for (int z = 2; z < c.Size.z - 2; ++z)
             for (int x = 2; x < c.Size.x - 2; ++x)
             {
+                if (InFortFootprint(c, x, z))
+                    continue;                              // keep the forts clear
                 const int top = SurfaceHeight(c, x, z) - 1; // surface block y
                 const std::uint8_t surface = Get(m, x, top, z);
                 if (surface != MapBlocks::Grass && surface != MapBlocks::GrassDark)
@@ -196,8 +220,42 @@ namespace
             }
     }
 
-    // Filled in by later tasks. No-ops for now.
-    void BuildForts(VoxModel&, const TerrainConfig&) {}
+    void BuildForts(VoxModel& m, const TerrainConfig& c)
+    {
+        const int half = c.Size.x / 2;
+        const int cz = c.Size.z / 2;         // fort centre in z
+        const int radius = FortRadius;       // half-footprint
+        const int wallH = 5;
+
+        // Two mirrored footprints: left (x≈FortEdgeOffset) and right (mirror).
+        const int centres[2] = { FortEdgeOffset, c.Size.x - 1 - FortEdgeOffset };
+        for (int cxi : centres)
+        {
+            for (int z = cz - radius; z <= cz + radius; ++z)
+                for (int x = cxi - radius; x <= cxi + radius; ++x)
+                {
+                    if (x < 0 || x >= c.Size.x || z < 0 || z >= c.Size.z)
+                        continue;
+                    const int ground = SurfaceHeight(c, x, z); // floor sits here
+                    const BlockId team = (x < half) ? MapBlocks::RedBase
+                                                    : MapBlocks::BlueBase;
+
+                    // Floor slab.
+                    Set(m, x, ground, z, team);
+
+                    // Perimeter walls, with an opening on the field-facing side.
+                    const bool edge =
+                        x == cxi - radius || x == cxi + radius ||
+                        z == cz - radius || z == cz + radius;
+                    const bool opening =
+                        (z == cz) && ((x < half) ? (x == cxi + radius)
+                                                  : (x == cxi - radius));
+                    if (edge && !opening)
+                        for (int i = 1; i <= wallH; ++i)
+                            Set(m, x, ground + i, z, team);
+                }
+        }
+    }
 }
 
 Palette TerrainGen::MapPalette()
