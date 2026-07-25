@@ -85,3 +85,33 @@ TEST_CASE("Snow only appears at or above the snow line")
             for (int x = 0; x < m.Size.x; ++x)
                 CHECK(m.At(x, y, z) != MapBlocks::Snow);
 }
+
+TEST_CASE("A river of water sits on the centre line and never above water level")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    const TerrainConfig c = SmallConfig();
+    const int cx = c.Size.x / 2;
+
+    bool waterAtCentre = false;
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = 0; y <= c.WaterLevel; ++y)
+            if (m.At(cx, y, z) == MapBlocks::Water ||
+                m.At(cx - 1, y, z) == MapBlocks::Water)
+                waterAtCentre = true;
+    CHECK(waterAtCentre);
+
+    // No water above the water level anywhere.
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = c.WaterLevel + 1; y < m.Size.y; ++y)
+            for (int x = 0; x < m.Size.x; ++x)
+                CHECK(m.At(x, y, z) != MapBlocks::Water);
+}
+
+TEST_CASE("The river has sand somewhere on its banks")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    bool sand = false;
+    for (std::size_t i = 0; i < m.Voxels.size() && !sand; ++i)
+        if (m.Voxels[i] == MapBlocks::Sand) sand = true;
+    CHECK(sand);
+}

@@ -119,8 +119,42 @@ namespace
                 FillColumn(m, c, x, z);
     }
 
+    void CarveRiver(VoxModel& m, const TerrainConfig& c)
+    {
+        const int bed = c.WaterLevel - 2;               // river bottom
+        for (int z = 0; z < c.Size.z; ++z)
+        {
+            // Half-width waves along z (symmetric: centreline stays on the mirror plane).
+            const float w = SmoothNoise(z * 0.10f, 0.0f, c.Seed + 31u);
+            const int halfWidth = 3 + static_cast<int>(std::lround(w * 3.0f)); // 3..6
+
+            for (int x = 0; x < c.Size.x; ++x)
+            {
+                // Distance from the mirror plane, symmetric in x: 0 at the centre columns.
+                const int dist = (c.Size.x - 1) / 2 - Fold(c, x);
+
+                if (dist <= halfWidth)
+                {
+                    // Inside the channel: clear above the bed, fill water to water level.
+                    for (int y = bed + 1; y < c.Size.y; ++y)
+                        Set(m, x, y, z, 0);
+                    for (int y = bed + 1; y <= c.WaterLevel; ++y)
+                        Set(m, x, y, z, MapBlocks::Water);
+                    if (Get(m, x, bed, z) == 0)
+                        Set(m, x, bed, z, MapBlocks::Stone); // guarantee a floor
+                }
+                else if (dist <= halfWidth + 2)
+                {
+                    // Bank: turn the existing surface block to sand.
+                    const int top = SurfaceHeight(c, x, z) - 1;
+                    if (IsSolid(Get(m, x, top, z)))
+                        Set(m, x, top, z, MapBlocks::Sand);
+                }
+            }
+        }
+    }
+
     // Filled in by later tasks. No-ops for now.
-    void CarveRiver(VoxModel&, const TerrainConfig&) {}
     void PlantForests(VoxModel&, const TerrainConfig&) {}
     void BuildForts(VoxModel&, const TerrainConfig&) {}
 }
