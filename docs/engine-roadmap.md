@@ -67,9 +67,9 @@ Ranked by leverage. Performance items are detailed in
 
 A bounded sequence — genuinely finishable, not endless:
 
-1. **Threaded/amortized meshing + frustum culling** (perf — unblocks scale; natural
-   pair). ← starting here.
-2. **Ambient-occlusion lighting** (the visual leap).
+1. ~~**Amortized meshing + frustum culling**~~ **DONE 2026-07-25** — the map now
+   ships at 256×64×256 and loads without a stall. Threading still deferred.
+2. **Ambient-occlusion lighting** (the visual leap). ← next.
 3. **Transparency** (real water) + **world save** (small, high value).
 4. **Multi-model stitching** (full AoS-scale maps).
 

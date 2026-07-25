@@ -33,7 +33,9 @@ This is the specific thing gating bigger maps.
   upload the finished vertex/index data to GPU on the main thread (GL calls must stay
   on the render thread). Double-buffer so the main thread never blocks on a worker.
 
-**Priority:** highest. **Status:** open (next slice).
+**Priority:** highest. **Status:** DONE 2026-07-25 — `WorldRenderer::Update` now
+absorbs dirty chunks into an internal `m_Pending` set and meshes at most
+`MeshBudgetPerFrame` (16) chunks per frame. Threading remains deferred.
 
 ---
 
@@ -54,7 +56,9 @@ geometry that is off-screen.
 world-space AABB against it before submitting. Requires exposing the frustum (or
 view-projection) from `PerspectiveCamera`. Pairs naturally with P1.
 
-**Priority:** high. **Status:** open (bundled with the next slice).
+**Priority:** high. **Status:** DONE 2026-07-25 — `WorldRenderer::Render` builds a
+`Frustum` from the camera view-projection and skips chunks whose world-space AABB is
+outside it. Verified in-sandbox on the 256 map (`DRAWN 232/602`).
 
 ---
 
@@ -121,8 +125,8 @@ bottleneck after culling. Not needed near-term.
 
 | ID | Issue | Where | Priority | Status |
 |----|-------|-------|----------|--------|
-| P1 | Whole world meshes in one frame | `WorldRenderer::Update` | Highest | Open (next) |
-| P2 | No frustum culling | `WorldRenderer::Render` | High | Open (next) |
+| P1 | Whole world meshes in one frame | `WorldRenderer::Update` | Highest | **Done 2026-07-25** (amortized) |
+| P2 | No frustum culling | `WorldRenderer::Render` | High | **Done 2026-07-25** |
 | P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | Open |
 | P4 | GPU buffers reallocated per remesh | `WorldRenderer::Update` | Low | Open |
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
