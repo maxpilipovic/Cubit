@@ -208,5 +208,5 @@ TEST_CASE("The committed battlefield map loads at the expected size")
         return; // asset not reachable from this working directory; skip
 
     const VoxModel m = VoxLoader::LoadFile(path.string());
-    CHECK(m.Size == glm::ivec3(128, 48, 128));
+    CHECK(m.Size == glm::ivec3(256, 64, 256));
 }

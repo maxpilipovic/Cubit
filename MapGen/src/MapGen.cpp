@@ -12,7 +12,8 @@ int main(int argc, char** argv)
 {
     const std::string out = (argc > 1) ? argv[1] : "battlefield.vox";
 
-    const TerrainConfig config;
+    TerrainConfig config;
+    config.Size = glm::ivec3(256, 64, 256);
     const VoxModel model = TerrainGen::Generate(config);
     const std::vector<std::uint8_t> bytes = VoxWriter::Write(model);
 
