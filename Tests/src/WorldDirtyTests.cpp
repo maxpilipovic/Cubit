@@ -34,7 +34,7 @@ TEST_CASE("An interior edit marks exactly one chunk")
     world.ClearDirty();
 
     // Local (8,8,8) inside chunk (1,1,1): touches no boundary.
-    world.SetBlock(24, 24, 24, BlockType::Solid);
+    world.SetBlock(24, 24, 24, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 1);
     CHECK(world.DirtyChunks().count(glm::ivec3(1, 1, 1)) == 1);
@@ -46,7 +46,7 @@ TEST_CASE("A face edit marks the chunk and one neighbour")
     world.ClearDirty();
 
     // Local (0,8,8) inside chunk (1,1,1): touches the -X boundary.
-    world.SetBlock(16, 24, 24, BlockType::Solid);
+    world.SetBlock(16, 24, 24, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 2);
     CHECK(world.DirtyChunks().count(glm::ivec3(1, 1, 1)) == 1);
@@ -59,7 +59,7 @@ TEST_CASE("An edge edit marks the chunk and two neighbours")
     world.ClearDirty();
 
     // Local (0,0,8) inside chunk (1,1,1): touches -X and -Y boundaries.
-    world.SetBlock(16, 16, 24, BlockType::Solid);
+    world.SetBlock(16, 16, 24, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 3);
 }
@@ -70,7 +70,7 @@ TEST_CASE("A corner edit marks the chunk and three neighbours")
     world.ClearDirty();
 
     // Local (0,0,0) inside chunk (1,1,1): touches -X, -Y and -Z boundaries.
-    world.SetBlock(16, 16, 16, BlockType::Solid);
+    world.SetBlock(16, 16, 16, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 4);
 }
@@ -82,7 +82,7 @@ TEST_CASE("A boundary edit at the world edge marks no out-of-bounds neighbour")
 
     // Local (0,8,8) inside chunk (0,1,1): the -X neighbour would be (-1,1,1),
     // which is outside the world and must not be marked.
-    world.SetBlock(0, 24, 24, BlockType::Solid);
+    world.SetBlock(0, 24, 24, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 1);
     CHECK(world.DirtyChunks().count(glm::ivec3(0, 1, 1)) == 1);
@@ -93,8 +93,8 @@ TEST_CASE("Editing the same chunk twice leaves one dirty entry")
     World world = MakeWorld();
     world.ClearDirty();
 
-    world.SetBlock(24, 24, 24, BlockType::Solid);
-    world.SetBlock(25, 25, 25, BlockType::Solid);
+    world.SetBlock(24, 24, 24, BlockId{1});
+    world.SetBlock(25, 25, 25, BlockId{1});
 
     CHECK(world.DirtyChunks().size() == 1);
 }

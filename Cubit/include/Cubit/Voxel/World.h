@@ -36,10 +36,19 @@ public:
     World(int chunksX, int chunksY, int chunksZ);
 
     //Returns a block, treating positions outside the world as air.
-    BlockType GetBlock(int x, int y, int z) const;
+    BlockId GetBlock(int x, int y, int z) const;
 
     //Changes a block; throws when the position is outside the world.
-    void SetBlock(int x, int y, int z, BlockType block);
+    void SetBlock(int x, int y, int z, BlockId block);
+
+    //Returns the colour of a block by looking its id up in this world's palette.
+    glm::vec3 GetBlockColor(BlockId block) const { return m_Palette[block]; }
+
+    //The colours this world's block ids index into.
+    const Palette& GetPalette() const { return m_Palette; }
+
+    //Replaces the palette, e.g. with one loaded from a map file.
+    void SetPalette(const Palette& palette) { m_Palette = palette; }
 
     //Reports whether the block at this position occupies space.
     bool IsBlockSolid(int x, int y, int z) const;
@@ -85,6 +94,7 @@ private:
     int m_ChunksZ = 0;
     std::vector<Chunk> m_Chunks;
     std::set<glm::ivec3, IVec3Less> m_DirtyChunks;
+    Palette m_Palette;
 };
 
 #ifdef _MSC_VER

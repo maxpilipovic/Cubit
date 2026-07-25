@@ -112,7 +112,7 @@ namespace
         const int x = worldPosition.x;
         const int y = worldPosition.y;
         const int z = worldPosition.z;
-        const glm::vec3 color = GetBlockColor(world.GetBlock(x, y, z));
+        const glm::vec3 color = world.GetBlockColor(world.GetBlock(x, y, z));
 
         if (!world.IsBlockSolid(x, y, z + 1))
             AddFrontFace(mesh, blockX, blockY, blockZ, color);

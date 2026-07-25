@@ -7,7 +7,8 @@
 #include <stdexcept>
 
 World::World(int chunksX, int chunksY, int chunksZ)
-    : m_ChunksX(chunksX), m_ChunksY(chunksY), m_ChunksZ(chunksZ)
+    : m_ChunksX(chunksX), m_ChunksY(chunksY), m_ChunksZ(chunksZ),
+      m_Palette(DefaultPalette())
 {
     if (chunksX <= 0 || chunksY <= 0 || chunksZ <= 0)
         throw std::invalid_argument("World size must be at least one chunk on each axis");
@@ -24,10 +25,10 @@ World::World(int chunksX, int chunksY, int chunksZ)
                 m_DirtyChunks.insert(glm::ivec3(x, y, z));
 }
 
-BlockType World::GetBlock(int x, int y, int z) const
+BlockId World::GetBlock(int x, int y, int z) const
 {
     if (!IsInBounds(x, y, z))
-        return BlockType::Air;
+        return 0;
 
     const Chunk& chunk = GetChunk(
         x / Chunk::Width,
@@ -40,7 +41,7 @@ BlockType World::GetBlock(int x, int y, int z) const
         z % Chunk::Depth);
 }
 
-void World::SetBlock(int x, int y, int z, BlockType block)
+void World::SetBlock(int x, int y, int z, BlockId block)
 {
     if (!IsInBounds(x, y, z))
         throw std::out_of_range("World block coordinates are out of bounds");

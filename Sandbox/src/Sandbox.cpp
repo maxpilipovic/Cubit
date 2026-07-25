@@ -53,32 +53,32 @@ namespace
     }
 
     //Block colours selectable with the number keys, in order.
-    constexpr BlockType PlaceableBlocks[] =
+    constexpr BlockId PlaceableBlocks[] =
     {
-        BlockType::Red,
-        BlockType::Orange,
-        BlockType::Yellow,
-        BlockType::Green,
-        BlockType::Blue,
-        BlockType::Purple,
-        BlockType::White,
-        BlockType::Grey
+        BlockId{2},
+        BlockId{3},
+        BlockId{4},
+        BlockId{5},
+        BlockId{6},
+        BlockId{7},
+        BlockId{8},
+        BlockId{9}
     };
 
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
 
     //Colours the test terrain in bands so the block palette is visible.
-    BlockType GetTerrainBlock(int y, int surfaceHeight)
+    BlockId GetTerrainBlock(int y, int surfaceHeight)
     {
         if (y == surfaceHeight - 1)
-            return BlockType::Green;
+            return BlockId{5};
         if (y >= surfaceHeight - 3)
-            return BlockType::Orange;
+            return BlockId{3};
         if (y >= surfaceHeight - 5)
-            return BlockType::Grey;
+            return BlockId{9};
 
-        return BlockType::Blue;
+        return BlockId{6};
     }
 
     //Fills a world with test data whose buried blocks exercise face culling.
@@ -289,7 +289,7 @@ private:
             target.x,
             target.y,
             target.z,
-            button == MouseCode::Left ? BlockType::Air : m_PlaceBlock);
+            button == MouseCode::Left ? BlockId{0} : m_PlaceBlock);
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
@@ -328,7 +328,7 @@ private:
     std::shared_ptr<HudState> m_HudState;
     World m_World{ 4, 1, 4 };
     WorldRenderer m_WorldRenderer;
-    BlockType m_PlaceBlock = BlockType::Red;
+    BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_PlayerPosition{ SpawnPosition };
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;

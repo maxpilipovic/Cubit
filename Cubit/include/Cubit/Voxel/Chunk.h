@@ -23,10 +23,10 @@ public:
     Chunk();
 
     //Returns a block, treating positions outside this chunk as air.
-    BlockType GetBlock(int x, int y, int z) const;
+    BlockId GetBlock(int x, int y, int z) const;
 
     //Changes a block; throws when the position is outside this chunk.
-    void SetBlock(int x, int y, int z, BlockType block);
+    void SetBlock(int x, int y, int z, BlockId block);
 
     //Reports whether the block at this position occupies space.
     bool IsBlockSolid(int x, int y, int z) const;
@@ -38,7 +38,7 @@ private:
     //Converts three-dimensional local coordinates into array storage.
     static std::size_t GetIndex(int x, int y, int z);
 
-    std::array<BlockType, BlockCount> m_Blocks;
+    std::array<BlockId, BlockCount> m_Blocks;
 };
 
 #ifdef _MSC_VER

@@ -30,7 +30,7 @@ TEST_CASE("A new world contains only air")
     for (int z = 0; z < world.GetDepth(); ++z)
         for (int y = 0; y < world.GetHeight(); ++y)
             for (int x = 0; x < world.GetWidth(); ++x)
-                REQUIRE(world.GetBlock(x, y, z) == BlockType::Air);
+                REQUIRE(world.GetBlock(x, y, z) == BlockId{0});
 }
 
 TEST_CASE("Every world position stores its own block")
@@ -48,7 +48,7 @@ TEST_CASE("Every world position stores its own block")
         for (int y = 0; y < world.GetHeight(); ++y)
             for (int x = 0; x < world.GetWidth(); ++x)
                 if (expected(x, y, z))
-                    world.SetBlock(x, y, z, BlockType::Red);
+                    world.SetBlock(x, y, z, BlockId{2});
 
     for (int z = 0; z < world.GetDepth(); ++z)
         for (int y = 0; y < world.GetHeight(); ++y)
@@ -61,41 +61,41 @@ TEST_CASE("Writing a block does not disturb the neighbouring chunk")
     World world(2, 1, 1);
 
     // Either side of the boundary between chunk 0 and chunk 1.
-    world.SetBlock(Chunk::Width - 1, 4, 4, BlockType::Green);
+    world.SetBlock(Chunk::Width - 1, 4, 4, BlockId{5});
 
-    CHECK(world.GetBlock(Chunk::Width - 1, 4, 4) == BlockType::Green);
-    CHECK(world.GetBlock(Chunk::Width, 4, 4) == BlockType::Air);
+    CHECK(world.GetBlock(Chunk::Width - 1, 4, 4) == BlockId{5});
+    CHECK(world.GetBlock(Chunk::Width, 4, 4) == BlockId{0});
 
-    world.SetBlock(Chunk::Width, 4, 4, BlockType::Blue);
+    world.SetBlock(Chunk::Width, 4, 4, BlockId{6});
 
-    CHECK(world.GetBlock(Chunk::Width - 1, 4, 4) == BlockType::Green);
-    CHECK(world.GetBlock(Chunk::Width, 4, 4) == BlockType::Blue);
+    CHECK(world.GetBlock(Chunk::Width - 1, 4, 4) == BlockId{5});
+    CHECK(world.GetBlock(Chunk::Width, 4, 4) == BlockId{6});
 }
 
 TEST_CASE("Positions outside the world read as air")
 {
     World world(1, 1, 1);
-    world.SetBlock(0, 0, 0, BlockType::Solid);
+    world.SetBlock(0, 0, 0, BlockId{1});
 
-    CHECK(world.GetBlock(-1, 0, 0) == BlockType::Air);
-    CHECK(world.GetBlock(0, -1, 0) == BlockType::Air);
-    CHECK(world.GetBlock(0, 0, -1) == BlockType::Air);
-    CHECK(world.GetBlock(world.GetWidth(), 0, 0) == BlockType::Air);
-    CHECK(world.GetBlock(0, world.GetHeight(), 0) == BlockType::Air);
-    CHECK(world.GetBlock(0, 0, world.GetDepth()) == BlockType::Air);
+    CHECK(world.GetBlock(-1, 0, 0) == BlockId{0});
+    CHECK(world.GetBlock(0, -1, 0) == BlockId{0});
+    CHECK(world.GetBlock(0, 0, -1) == BlockId{0});
+    CHECK(world.GetBlock(world.GetWidth(), 0, 0) == BlockId{0});
+    CHECK(world.GetBlock(0, world.GetHeight(), 0) == BlockId{0});
+    CHECK(world.GetBlock(0, 0, world.GetDepth()) == BlockId{0});
 }
 
 TEST_CASE("Writing outside the world is rejected")
 {
     World world(2, 2, 2);
 
-    CHECK_THROWS_AS(world.SetBlock(-1, 0, 0, BlockType::Solid), std::out_of_range);
+    CHECK_THROWS_AS(world.SetBlock(-1, 0, 0, BlockId{1}), std::out_of_range);
     CHECK_THROWS_AS(
-        world.SetBlock(world.GetWidth(), 0, 0, BlockType::Solid), std::out_of_range);
+        world.SetBlock(world.GetWidth(), 0, 0, BlockId{1}), std::out_of_range);
     CHECK_THROWS_AS(
-        world.SetBlock(0, world.GetHeight(), 0, BlockType::Solid), std::out_of_range);
+        world.SetBlock(0, world.GetHeight(), 0, BlockId{1}), std::out_of_range);
     CHECK_THROWS_AS(
-        world.SetBlock(0, 0, world.GetDepth(), BlockType::Solid), std::out_of_range);
+        world.SetBlock(0, 0, world.GetDepth(), BlockId{1}), std::out_of_range);
 }
 
 TEST_CASE("A block written through the world is visible in its chunk")
@@ -107,11 +107,11 @@ TEST_CASE("A block written through the world is visible in its chunk")
     const int worldX = Chunk::Width + 3;
     const int worldY = Chunk::Height + 5;
     const int worldZ = Chunk::Depth + 7;
-    world.SetBlock(worldX, worldY, worldZ, BlockType::Yellow);
+    world.SetBlock(worldX, worldY, worldZ, BlockId{4});
 
     const Chunk& chunk = world.GetChunk(1, 1, 1);
 
-    CHECK(chunk.GetBlock(3, 5, 7) == BlockType::Yellow);
+    CHECK(chunk.GetBlock(3, 5, 7) == BlockId{4});
 }
 
 TEST_CASE("Chunk origins map back to world coordinates")
@@ -134,4 +134,23 @@ TEST_CASE("Chunk bounds cover exactly the grid")
     CHECK_FALSE(world.IsChunkInBounds(-1, 0, 0));
 
     CHECK_THROWS_AS(world.GetChunk(2, 0, 0), std::out_of_range);
+}
+
+TEST_CASE("A new world colours blocks with the default palette")
+{
+    const World world(1, 1, 1);
+
+    CHECK(world.GetBlockColor(BlockId{5}) == glm::vec3(0.35f, 0.75f, 0.35f));
+    CHECK(world.GetBlockColor(BlockId{2}) == glm::vec3(0.85f, 0.25f, 0.25f));
+}
+
+TEST_CASE("Setting a palette changes reported block colours")
+{
+    World world(1, 1, 1);
+
+    Palette palette{};
+    palette[3] = glm::vec3(0.1f, 0.2f, 0.3f);
+    world.SetPalette(palette);
+
+    CHECK(world.GetBlockColor(BlockId{3}) == glm::vec3(0.1f, 0.2f, 0.3f));
 }

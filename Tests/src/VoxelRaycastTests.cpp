@@ -26,8 +26,8 @@ TEST_CASE("A ray through empty space hits nothing")
 TEST_CASE("A ray stops at the first solid block")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 5, BlockType::Solid);
-    world.SetBlock(8, 8, 9, BlockType::Solid);
+    world.SetBlock(8, 8, 5, BlockId{1});
+    world.SetBlock(8, 8, 9, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(8, 8, 0), glm::vec3(0, 0, 1), 32.0f);
@@ -39,7 +39,7 @@ TEST_CASE("A ray stops at the first solid block")
 TEST_CASE("The hit normal points back along the ray")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     SUBCASE("travelling +Z")
     {
@@ -94,8 +94,8 @@ TEST_CASE("The block next to the hit face is always empty")
 {
     // This is the position a placed block goes into, so it must be air.
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
-    world.SetBlock(8, 8, 9, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(8, 8, 9, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(8, 8, 2), glm::vec3(0, 0, 1), 32.0f);
@@ -110,7 +110,7 @@ TEST_CASE("The block next to the hit face is always empty")
 TEST_CASE("A ray does not reach past its maximum distance")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 12, BlockType::Solid);
+    world.SetBlock(8, 8, 12, BlockId{1});
 
     const glm::vec3 origin = CentreOf(8, 8, 2);
 
@@ -126,7 +126,7 @@ TEST_CASE("A ray does not reach past its maximum distance")
 TEST_CASE("Reported distance matches the travelled length")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 10, BlockType::Solid);
+    world.SetBlock(8, 8, 10, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(8, 8, 2), glm::vec3(0, 0, 1), 32.0f);
@@ -139,7 +139,7 @@ TEST_CASE("Reported distance matches the travelled length")
 TEST_CASE("A ray starting inside a solid block reports that block")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(8, 8, 8), glm::vec3(0, 0, 1), 32.0f);
@@ -153,7 +153,7 @@ TEST_CASE("A ray starting inside a solid block reports that block")
 TEST_CASE("An unnormalized direction gives the same result")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     const glm::vec3 origin = CentreOf(8, 8, 2);
     const VoxelRayHit unit =
@@ -171,7 +171,7 @@ TEST_CASE("An unnormalized direction gives the same result")
 TEST_CASE("A zero direction cannot hit anything")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(8, 8, 2), glm::vec3(0, 0, 0), 32.0f);
@@ -185,7 +185,7 @@ TEST_CASE("A diagonal ray enters through the nearer face")
     // and only then crosses x into the target. So it enters through the -X face
     // even though the y step happened earlier.
     World world(1, 1, 1);
-    world.SetBlock(9, 9, 8, BlockType::Solid);
+    world.SetBlock(9, 9, 8, BlockId{1});
 
     const VoxelRayHit hit = VoxelRaycast::Cast(
         world,
@@ -201,7 +201,7 @@ TEST_CASE("A diagonal ray enters through the nearer face")
 TEST_CASE("A ray from outside the world reaches blocks inside it")
 {
     World world(1, 1, 1);
-    world.SetBlock(0, 8, 8, BlockType::Solid);
+    world.SetBlock(0, 8, 8, BlockId{1});
 
     const VoxelRayHit hit = VoxelRaycast::Cast(
         world,
@@ -220,7 +220,7 @@ TEST_CASE("A ray crosses a chunk boundary to reach a block in the next chunk")
     // must walk across the seam at x=16 to reach it. A single chunk could not even
     // name block 20, so this only works in world coordinates.
     World world(2, 1, 1);
-    world.SetBlock(20, 8, 8, BlockType::Solid);
+    world.SetBlock(20, 8, 8, BlockId{1});
 
     const VoxelRayHit hit =
         VoxelRaycast::Cast(world, CentreOf(2, 8, 8), glm::vec3(1, 0, 0), 32.0f);
@@ -238,7 +238,7 @@ TEST_CASE("Rays never report a block they did not enter")
     for (int z = 0; z < Chunk::Depth; ++z)
         for (int x = 0; x < Chunk::Width; ++x)
             for (int y = 0; y < 4; ++y)
-                world.SetBlock(x, y, z, BlockType::Solid);
+                world.SetBlock(x, y, z, BlockId{1});
 
     const glm::vec3 origin(8.5f, 12.5f, 8.5f);
 

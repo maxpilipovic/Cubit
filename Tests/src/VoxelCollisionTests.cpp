@@ -15,7 +15,7 @@ namespace
     {
         for (int z = 0; z < Chunk::Depth; ++z)
             for (int x = 0; x < Chunk::Width; ++x)
-                world.SetBlock(x, 0, z, BlockType::Solid);
+                world.SetBlock(x, 0, z, BlockId{1});
     }
 
     //Fills one full column layer at the given x, forming a wall.
@@ -23,7 +23,7 @@ namespace
     {
         for (int z = 0; z < Chunk::Depth; ++z)
             for (int y = 0; y < Chunk::Height; ++y)
-                world.SetBlock(wallX, y, z, BlockType::Solid);
+                world.SetBlock(wallX, y, z, BlockId{1});
     }
 }
 
@@ -101,7 +101,7 @@ TEST_CASE("A rising box stops below a ceiling")
     World world(1, 1, 1);
     for (int z = 0; z < Chunk::Depth; ++z)
         for (int x = 0; x < Chunk::Width; ++x)
-            world.SetBlock(x, 10, z, BlockType::Solid);
+            world.SetBlock(x, 10, z, BlockId{1});
 
     const VoxelMoveResult result = VoxelCollision::MoveBox(
         world,
@@ -203,7 +203,7 @@ TEST_CASE("Zero motion leaves the box where it was")
 TEST_CASE("Overlap reports whether a box intersects solid blocks")
 {
     World world(1, 1, 1);
-    world.SetBlock(5, 5, 5, BlockType::Solid);
+    world.SetBlock(5, 5, 5, BlockId{1});
 
     // Centred inside the block.
     CHECK(VoxelCollision::Overlaps(
@@ -226,7 +226,7 @@ TEST_CASE("A box never ends a move inside a solid block")
     for (int z = 0; z < Chunk::Depth; ++z)
         for (int x = 0; x < Chunk::Width; ++x)
             for (int y = 0; y < 5; ++y)
-                world.SetBlock(x, y, z, BlockType::Solid);
+                world.SetBlock(x, y, z, BlockId{1});
 
     for (int i = 0; i < 48; ++i)
     {
@@ -256,7 +256,7 @@ TEST_CASE("A box lands on a floor block in the neighbouring chunk")
     World world(2, 1, 1);
     for (int z = 0; z < Chunk::Depth; ++z)
         for (int x = Chunk::Width; x < 2 * Chunk::Width; ++x)
-            world.SetBlock(x, 0, z, BlockType::Solid);
+            world.SetBlock(x, 0, z, BlockId{1});
 
     const VoxelMoveResult result = VoxelCollision::MoveBox(
         world,

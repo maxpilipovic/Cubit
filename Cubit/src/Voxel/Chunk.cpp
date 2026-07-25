@@ -8,18 +8,18 @@
 
 Chunk::Chunk()
 {
-    m_Blocks.fill(BlockType::Air);
+    m_Blocks.fill(0);
 }
 
-BlockType Chunk::GetBlock(int x, int y, int z) const
+BlockId Chunk::GetBlock(int x, int y, int z) const
 {
     if (!IsInBounds(x, y, z))
-        return BlockType::Air;
+        return 0;
 
     return m_Blocks[GetIndex(x, y, z)];
 }
 
-void Chunk::SetBlock(int x, int y, int z, BlockType block)
+void Chunk::SetBlock(int x, int y, int z, BlockId block)
 {
     if (!IsInBounds(x, y, z))
         throw std::out_of_range("Chunk block coordinates are out of bounds");

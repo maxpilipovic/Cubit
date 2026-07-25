@@ -77,7 +77,7 @@ namespace
             for (int y = 0; y < Chunk::Height; ++y)
                 for (int x = 0; x < Chunk::Width; ++x)
                     world.SetBlock(
-                        origin.x + x, origin.y + y, origin.z + z, BlockType::Solid);
+                        origin.x + x, origin.y + y, origin.z + z, BlockId{1});
     }
 
     //Fills a world with the rolling test terrain the sandbox renders.
@@ -93,7 +93,7 @@ namespace
                 const int height = 6 + static_cast<int>(std::lround(wave * 2.0f));
 
                 for (int y = 0; y < height; ++y)
-                    world.SetBlock(x, y, z, BlockType::Solid);
+                    world.SetBlock(x, y, z, BlockId{1});
             }
         }
     }
@@ -111,7 +111,7 @@ TEST_CASE("An empty chunk produces no geometry")
 TEST_CASE("A lone block is meshed as six quads")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
@@ -124,8 +124,8 @@ TEST_CASE("A lone block is meshed as six quads")
 TEST_CASE("Touching blocks do not mesh the faces between them")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
-    world.SetBlock(9, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(9, 8, 8, BlockId{1});
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
@@ -170,14 +170,14 @@ TEST_CASE("A block is hidden by a solid block in the next chunk")
     World world(2, 1, 1);
 
     // A lone block on the last column of chunk 0.
-    world.SetBlock(Chunk::Width - 1, 8, 8, BlockType::Solid);
+    world.SetBlock(Chunk::Width - 1, 8, 8, BlockId{1});
 
     const ChunkMeshData alone = ChunkMesher::Build(world, 0, 0, 0);
     CHECK(MeshedFaceCount(alone) == 6);
 
     // Its neighbour is the first column of chunk 1, so the two hide one face
     // from each other across the seam.
-    world.SetBlock(Chunk::Width, 8, 8, BlockType::Solid);
+    world.SetBlock(Chunk::Width, 8, 8, BlockId{1});
 
     CHECK(MeshedFaceCount(ChunkMesher::Build(world, 0, 0, 0)) == 5);
 
@@ -194,20 +194,20 @@ TEST_CASE("Meshed faces match an independent count for varied terrain")
 
     SUBCASE("single block")
     {
-        world.SetBlock(0, 0, 0, BlockType::Solid);
+        world.SetBlock(0, 0, 0, BlockId{1});
     }
 
     SUBCASE("floor slab")
     {
         for (int z = 0; z < Chunk::Depth; ++z)
             for (int x = 0; x < Chunk::Width; ++x)
-                world.SetBlock(x, 0, z, BlockType::Solid);
+                world.SetBlock(x, 0, z, BlockId{1});
     }
 
     SUBCASE("column through the chunk")
     {
         for (int y = 0; y < Chunk::Height; ++y)
-            world.SetBlock(3, y, 3, BlockType::Solid);
+            world.SetBlock(3, y, 3, BlockId{1});
     }
 
     SUBCASE("hollow shell around a buried block")
@@ -215,7 +215,7 @@ TEST_CASE("Meshed faces match an independent count for varied terrain")
         for (int z = 4; z <= 6; ++z)
             for (int y = 4; y <= 6; ++y)
                 for (int x = 4; x <= 6; ++x)
-                    world.SetBlock(x, y, z, BlockType::Solid);
+                    world.SetBlock(x, y, z, BlockId{1});
     }
 
     SUBCASE("rolling terrain")
@@ -266,17 +266,17 @@ TEST_CASE("The sandbox test terrain meshes to its known size")
 TEST_CASE("A buried block contributes no geometry")
 {
     World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockType::Solid);
+    world.SetBlock(8, 8, 8, BlockId{1});
 
     const std::size_t before = MeshedFaceCount(ChunkMesher::Build(world, 0, 0, 0));
 
     // Encasing the block removes its six faces and adds the shell's own faces.
-    world.SetBlock(7, 8, 8, BlockType::Solid);
-    world.SetBlock(9, 8, 8, BlockType::Solid);
-    world.SetBlock(8, 7, 8, BlockType::Solid);
-    world.SetBlock(8, 9, 8, BlockType::Solid);
-    world.SetBlock(8, 8, 7, BlockType::Solid);
-    world.SetBlock(8, 8, 9, BlockType::Solid);
+    world.SetBlock(7, 8, 8, BlockId{1});
+    world.SetBlock(9, 8, 8, BlockId{1});
+    world.SetBlock(8, 7, 8, BlockId{1});
+    world.SetBlock(8, 9, 8, BlockId{1});
+    world.SetBlock(8, 8, 7, BlockId{1});
+    world.SetBlock(8, 8, 9, BlockId{1});
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 

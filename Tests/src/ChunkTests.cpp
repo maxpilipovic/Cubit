@@ -11,7 +11,7 @@ TEST_CASE("A new chunk contains only air")
     for (int z = 0; z < Chunk::Depth; ++z)
         for (int y = 0; y < Chunk::Height; ++y)
             for (int x = 0; x < Chunk::Width; ++x)
-                REQUIRE(chunk.GetBlock(x, y, z) == BlockType::Air);
+                REQUIRE(chunk.GetBlock(x, y, z) == BlockId{0});
 }
 
 TEST_CASE("Every position stores and returns its own block")
@@ -23,7 +23,7 @@ TEST_CASE("Every position stores and returns its own block")
         for (int y = 0; y < Chunk::Height; ++y)
             for (int x = 0; x < Chunk::Width; ++x)
                 if ((x + 2 * y + 3 * z) % 2 == 0)
-                    chunk.SetBlock(x, y, z, BlockType::Solid);
+                    chunk.SetBlock(x, y, z, BlockId{1});
 
     for (int z = 0; z < Chunk::Depth; ++z)
     {
@@ -41,7 +41,7 @@ TEST_CASE("Every position stores and returns its own block")
 TEST_CASE("Writing one block leaves its neighbours untouched")
 {
     Chunk chunk;
-    chunk.SetBlock(4, 5, 6, BlockType::Solid);
+    chunk.SetBlock(4, 5, 6, BlockId{1});
 
     CHECK(chunk.IsBlockSolid(4, 5, 6));
     CHECK_FALSE(chunk.IsBlockSolid(5, 5, 6));
@@ -52,24 +52,24 @@ TEST_CASE("Writing one block leaves its neighbours untouched")
 TEST_CASE("Positions outside the chunk read as air")
 {
     Chunk chunk;
-    chunk.SetBlock(0, 0, 0, BlockType::Solid);
+    chunk.SetBlock(0, 0, 0, BlockId{1});
 
-    CHECK(chunk.GetBlock(-1, 0, 0) == BlockType::Air);
-    CHECK(chunk.GetBlock(0, -1, 0) == BlockType::Air);
-    CHECK(chunk.GetBlock(0, 0, -1) == BlockType::Air);
-    CHECK(chunk.GetBlock(Chunk::Width, 0, 0) == BlockType::Air);
-    CHECK(chunk.GetBlock(0, Chunk::Height, 0) == BlockType::Air);
-    CHECK(chunk.GetBlock(0, 0, Chunk::Depth) == BlockType::Air);
+    CHECK(chunk.GetBlock(-1, 0, 0) == BlockId{0});
+    CHECK(chunk.GetBlock(0, -1, 0) == BlockId{0});
+    CHECK(chunk.GetBlock(0, 0, -1) == BlockId{0});
+    CHECK(chunk.GetBlock(Chunk::Width, 0, 0) == BlockId{0});
+    CHECK(chunk.GetBlock(0, Chunk::Height, 0) == BlockId{0});
+    CHECK(chunk.GetBlock(0, 0, Chunk::Depth) == BlockId{0});
 }
 
 TEST_CASE("Writing outside the chunk is rejected")
 {
     Chunk chunk;
 
-    CHECK_THROWS_AS(chunk.SetBlock(-1, 0, 0, BlockType::Solid), std::out_of_range);
-    CHECK_THROWS_AS(chunk.SetBlock(Chunk::Width, 0, 0, BlockType::Solid), std::out_of_range);
-    CHECK_THROWS_AS(chunk.SetBlock(0, Chunk::Height, 0, BlockType::Solid), std::out_of_range);
-    CHECK_THROWS_AS(chunk.SetBlock(0, 0, Chunk::Depth, BlockType::Solid), std::out_of_range);
+    CHECK_THROWS_AS(chunk.SetBlock(-1, 0, 0, BlockId{1}), std::out_of_range);
+    CHECK_THROWS_AS(chunk.SetBlock(Chunk::Width, 0, 0, BlockId{1}), std::out_of_range);
+    CHECK_THROWS_AS(chunk.SetBlock(0, Chunk::Height, 0, BlockId{1}), std::out_of_range);
+    CHECK_THROWS_AS(chunk.SetBlock(0, 0, Chunk::Depth, BlockId{1}), std::out_of_range);
 }
 
 TEST_CASE("Bounds checking accepts only interior positions")
