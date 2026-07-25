@@ -17,11 +17,8 @@ struct PlayerDiedEvent
 
 namespace
 {
-    //Where the world's chunk (0,0,0) is placed in view, in world units. Chosen
-    //so the camera starts looking at terrain within editing reach. The rest of
-    //the grid extends from here. Player physics still live in chunk (0,0,0)'s
-    //local space until step 4, so this is not yet a centred offset.
-    const glm::vec3 WorldOffset{ -8.0f, -6.0f, -18.0f };
+    //Centre the 128x48x128 map roughly on the origin for the view.
+    const glm::vec3 WorldOffset{ -64.0f, -24.0f, -64.0f };
 
     //How far the player can reach to edit terrain, in blocks.
     constexpr float ReachDistance = 12.0f;
@@ -29,8 +26,10 @@ namespace
     //Half extents of the player's 0.6 x 1.8 x 0.6 collision box.
     const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
 
-    //Where the player starts, in chunk space, above the terrain surface.
-    const glm::vec3 SpawnPosition{ 8.5f, 12.0f, 8.5f };
+    //Spawn out on the open field and drop onto the terrain. The camera looks
+    //along -z (its default facing) across the battlefield: the river valley to the
+    //left, Fort B to the right, and the flank mountains on the horizon.
+    const glm::vec3 SpawnPosition{ 80.5f, 30.0f, 112.5f };
 
     //Eye height above the centre of the player box.
     constexpr float EyeOffset = 0.7f;
@@ -39,8 +38,8 @@ namespace
     constexpr float JumpSpeed = 9.0f;
     constexpr float Gravity = 24.0f;
 
-    //Height below the chunk at which a fallen player is returned to spawn.
-    constexpr float FallResetHeight = -20.0f;
+    //Below the map floor: a fallen player is returned to spawn.
+    constexpr float FallResetHeight = -8.0f;
 
     //Palette indices selectable with the number keys 1-8, in order.
     constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -65,7 +64,7 @@ public:
                 OnPlayerDied(event);
             });
 
-        m_World = BuildWorld(VoxLoader::LoadFile("assets/maps/starter.vox"));
+        m_World = BuildWorld(VoxLoader::LoadFile("assets/maps/battlefield.vox"));
         //The world starts with every chunk dirty, so the first render meshes it.
 
         UpdateCameraPosition();
