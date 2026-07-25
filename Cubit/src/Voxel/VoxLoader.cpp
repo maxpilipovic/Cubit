@@ -157,9 +157,17 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
     return model;
 }
 
-VoxModel VoxLoader::LoadFile(const std::string&)
+VoxModel VoxLoader::LoadFile(const std::string& path)
 {
-    throw std::runtime_error("vox: LoadFile not implemented");
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("vox: cannot open file: " + path);
+
+    std::vector<std::uint8_t> bytes(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+
+    return Parse(bytes);
 }
 
 World BuildWorld(const VoxModel&)

@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <vector>
 
@@ -126,4 +128,30 @@ TEST_CASE("Parsing rejects a truncated buffer")
     auto bytes = MakeVoxBytes(2, 2, 2, { { 0, 0, 0, 1 } });
     bytes.resize(bytes.size() - 8); // chop off part of the RGBA chunk
     CHECK_THROWS_AS(VoxLoader::Parse(bytes), std::runtime_error);
+}
+
+TEST_CASE("LoadFile round-trips a written .vox file")
+{
+    const auto bytes = MakeVoxBytes(2, 2, 2, { { 1, 0, 1, 3 } });
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "cubit_loadfile_test.vox";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+    }
+
+    const VoxModel model = VoxLoader::LoadFile(path.string());
+    std::filesystem::remove(path);
+
+    CHECK(model.Size == glm::ivec3(2, 2, 2));
+    CHECK(model.At(1, 1, 0) == 3); // vox (1,0,1) -> cubit (1,1,0)
+}
+
+TEST_CASE("LoadFile throws when the file is missing")
+{
+    CHECK_THROWS_AS(
+        VoxLoader::LoadFile("this_file_does_not_exist.vox"),
+        std::runtime_error);
 }
