@@ -170,7 +170,26 @@ VoxModel VoxLoader::LoadFile(const std::string& path)
     return Parse(bytes);
 }
 
-World BuildWorld(const VoxModel&)
+World BuildWorld(const VoxModel& model)
 {
-    throw std::runtime_error("vox: BuildWorld not implemented");
+    const int chunksX = (model.Size.x + Chunk::Width - 1) / Chunk::Width;
+    const int chunksY = (model.Size.y + Chunk::Height - 1) / Chunk::Height;
+    const int chunksZ = (model.Size.z + Chunk::Depth - 1) / Chunk::Depth;
+
+    World world(
+        chunksX > 0 ? chunksX : 1,
+        chunksY > 0 ? chunksY : 1,
+        chunksZ > 0 ? chunksZ : 1);
+    world.SetPalette(model.Colors);
+
+    for (int z = 0; z < model.Size.z; ++z)
+        for (int y = 0; y < model.Size.y; ++y)
+            for (int x = 0; x < model.Size.x; ++x)
+            {
+                const std::uint8_t id = model.At(x, y, z);
+                if (id != 0)
+                    world.SetBlock(x, y, z, id);
+            }
+
+    return world;
 }
