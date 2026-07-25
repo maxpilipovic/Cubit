@@ -139,7 +139,6 @@ public:
     void OnRender() override
     {
         m_WorldRenderer.Update(m_World);
-        m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
 
         Renderer::BeginScene(m_CameraController.GetCamera());
         m_WorldRenderer.Render(
@@ -147,6 +146,11 @@ public:
             m_CameraController.GetCamera().GetViewProjectionMatrix(),
             WorldOffset);
         Renderer::EndScene();
+
+        m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
+        m_HudState->DrawnChunks = m_WorldRenderer.DrawnChunkCount();
+        m_HudState->TotalChunks = m_WorldRenderer.TotalChunkCount();
+        m_HudState->PendingChunks = m_WorldRenderer.PendingCount();
     }
 
     //Routes one-time key presses through the typed platform dispatcher.

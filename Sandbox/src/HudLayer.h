@@ -6,6 +6,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -18,6 +19,9 @@ struct HudState
     glm::vec3 PlayerPosition{ 0.0f };
     bool Grounded = false;
     std::uint32_t MeshFaceCount = 0;
+    std::size_t DrawnChunks = 0;
+    std::size_t TotalChunks = 0;
+    std::size_t PendingChunks = 0;
 };
 
 //Draws screen-space overlay art on top of the rendered scene.
@@ -181,6 +185,13 @@ private:
 
         y -= lineHeight;
         DrawText("FACES " + std::to_string(m_State->MeshFaceCount), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("DRAWN " + std::to_string(m_State->DrawnChunks) +
+            "/" + std::to_string(m_State->TotalChunks), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("PENDING " + std::to_string(m_State->PendingChunks), TextMargin, y);
 
         y -= lineHeight;
         DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)), TextMargin, y);
