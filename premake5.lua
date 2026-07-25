@@ -226,6 +226,57 @@ project "Sandbox"
         defines "CB_DIST"
         optimize "On"
 
+project "MapGen"
+    location "MapGen"
+    kind "ConsoleApp"
+    language "C++"
+    cppdialect "C++20"
+
+    targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+    objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
+
+    files
+    {
+        "MapGen/src/**.h",
+        "MapGen/src/**.cpp"
+    }
+
+    includedirs
+    {
+        "Cubit/include",
+        "vendor/GLM"
+    }
+
+    links
+    {
+        "Cubit"
+    }
+
+    defines
+    {
+        "CB_PLATFORM_WINDOWS"
+    }
+
+    filter "system:windows"
+        systemversion "latest"
+
+        postbuildcommands
+        {
+            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/MapGen")
+        }
+
+    filter "configurations:Debug"
+        defines "CB_DEBUG"
+        symbols "On"
+
+    filter "configurations:Release"
+        defines "CB_RELEASE"
+        optimize "On"
+
+    filter "configurations:Dist"
+        defines "CB_DIST"
+        optimize "On"
+
 group "Tests"
 
 project "Tests"
