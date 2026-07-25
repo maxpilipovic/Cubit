@@ -154,8 +154,49 @@ namespace
         }
     }
 
+    void PlaceTree(VoxModel& m, const TerrainConfig& c, int x, int baseY, int z)
+    {
+        const std::uint32_t r = Hash(Fold(c, x), z, c.Seed + 71u);
+        const int trunkH = 4 + static_cast<int>(r % 4u); // 4..7
+        for (int i = 0; i < trunkH; ++i)
+            Set(m, x, baseY + i, z, MapBlocks::Wood);
+
+        const int cy = baseY + trunkH;      // canopy centre
+        const int rad = 2;
+        for (int dz = -rad; dz <= rad; ++dz)
+            for (int dy = -rad; dy <= rad; ++dy)
+                for (int dx = -rad; dx <= rad; ++dx)
+                {
+                    if (dx * dx + dy * dy + dz * dz > rad * rad + 1)
+                        continue;
+                    const bool light = ((dx + dy + dz) & 1) != 0;
+                    // Never overwrite trunk wood: a canopy that clipped a nearby
+                    // tree's trunk would split it (a wood block left above a leaf).
+                    if (Get(m, x + dx, cy + dy, z + dz) == MapBlocks::Wood)
+                        continue;
+                    Set(m, x + dx, cy + dy, z + dz,
+                        light ? MapBlocks::LeavesLight : MapBlocks::Leaves);
+                }
+    }
+
+    void PlantForests(VoxModel& m, const TerrainConfig& c)
+    {
+        for (int z = 2; z < c.Size.z - 2; ++z)
+            for (int x = 2; x < c.Size.x - 2; ++x)
+            {
+                const int top = SurfaceHeight(c, x, z) - 1; // surface block y
+                const std::uint8_t surface = Get(m, x, top, z);
+                if (surface != MapBlocks::Grass && surface != MapBlocks::GrassDark)
+                    continue;                              // only on grass
+                if (top <= c.WaterLevel)
+                    continue;                              // not in wet lowland
+                const float roll = (Hash(Fold(c, x), z, c.Seed + 91u) & 0xFFFF) / 65535.0f;
+                if (roll < c.ForestDensity)
+                    PlaceTree(m, c, x, top + 1, z);
+            }
+    }
+
     // Filled in by later tasks. No-ops for now.
-    void PlantForests(VoxModel&, const TerrainConfig&) {}
     void BuildForts(VoxModel&, const TerrainConfig&) {}
 }
 

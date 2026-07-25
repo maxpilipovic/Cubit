@@ -45,9 +45,18 @@ TEST_CASE("Every ground column has grass on its surface and solid below")
     const VoxModel m = TerrainGen::Generate(SmallConfig());
     // Sample a column away from the centre river line.
     const int x = 10, z = 10;
+
+    auto isVeg = [](std::uint8_t id)
+    {
+        return id == MapBlocks::Wood || id == MapBlocks::Leaves ||
+               id == MapBlocks::LeavesLight;
+    };
+
+    // The terrain surface is the highest non-vegetation solid block (a tree may
+    // sit on top of it).
     int top = -1;
     for (int y = m.Size.y - 1; y >= 0; --y)
-        if (IsSolid(m.At(x, y, z))) { top = y; break; }
+        if (IsSolid(m.At(x, y, z)) && !isVeg(m.At(x, y, z))) { top = y; break; }
 
     REQUIRE(top >= 0);
     CHECK(IsGrass(m.At(x, top, z)));
@@ -114,4 +123,33 @@ TEST_CASE("The river has sand somewhere on its banks")
     for (std::size_t i = 0; i < m.Voxels.size() && !sand; ++i)
         if (m.Voxels[i] == MapBlocks::Sand) sand = true;
     CHECK(sand);
+}
+
+TEST_CASE("Forests place tree trunks whose base rests on grass")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+
+    int trunks = 0;
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = 1; y < m.Size.y; ++y)
+            for (int x = 0; x < m.Size.x; ++x)
+                if (m.At(x, y, z) == MapBlocks::Wood &&
+                    m.At(x, y - 1, z) != MapBlocks::Wood)
+                {
+                    // This is a trunk base: the block under it must be grass.
+                    const std::uint8_t below = m.At(x, y - 1, z);
+                    CHECK((below == MapBlocks::Grass || below == MapBlocks::GrassDark));
+                    ++trunks;
+                }
+    CHECK(trunks > 0); // at least some trees exist
+}
+
+TEST_CASE("Leaves exist above trunks")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    bool leaves = false;
+    for (std::size_t i = 0; i < m.Voxels.size() && !leaves; ++i)
+        if (m.Voxels[i] == MapBlocks::Leaves || m.Voxels[i] == MapBlocks::LeavesLight)
+            leaves = true;
+    CHECK(leaves);
 }
