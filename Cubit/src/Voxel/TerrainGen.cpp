@@ -83,20 +83,31 @@ namespace
         const int fx = Fold(c, x);
         const float hills = Fbm(fx * 0.06f, z * 0.06f, c.Seed);
         int h = c.GroundBase + static_cast<int>(std::lround(hills * 8.0f - 2.0f));
+
+        // Ridge rising toward the z=0 and z=max flanks (0 at mid-z, 1 at edges).
+        const float zc = (c.Size.z > 1) ? z / static_cast<float>(c.Size.z - 1) : 0.5f;
+        const float edge = std::pow(std::abs(zc - 0.5f) * 2.0f, 2.0f);
+        const float ridge = Fbm(fx * 0.03f, z * 0.03f, c.Seed + 7u);
+        h += static_cast<int>(std::lround(c.MountainHeight * edge * ridge));
+
         return std::clamp(h, 1, c.Size.y - 1);
     }
 
-    //Fills one column with stone/dirt/grass up to its surface. Task 3 adds snow.
+    //Fills one column with stone/dirt/grass up to its surface, snow-capping peaks.
     void FillColumn(VoxModel& m, const TerrainConfig& c, int x, int z)
     {
         const int top = SurfaceHeight(c, x, z);
         const bool dark = (Hash(Fold(c, x), z, c.Seed + 5u) & 1u) != 0;
+        const bool snowy = (top - 1) >= c.SnowLine;
         for (int y = 0; y < top; ++y)
         {
             BlockId id;
-            if (y == top - 1)      id = dark ? GrassDark : Grass;
-            else if (y >= top - 4) id = Dirt;
-            else                   id = Stone;
+            if (y == top - 1)
+                id = snowy ? Snow : (dark ? GrassDark : Grass);
+            else if (y >= top - 4)
+                id = snowy ? StoneDark : Dirt;
+            else
+                id = Stone;
             Set(m, x, y, z, id);
         }
     }

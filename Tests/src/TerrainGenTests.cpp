@@ -54,3 +54,34 @@ TEST_CASE("Every ground column has grass on its surface and solid below")
     CHECK(IsSolid(m.At(x, top - 1, z)));
     CHECK(m.At(x, 0, z) == MapBlocks::Stone);
 }
+
+TEST_CASE("Flanks rise into mountains higher than the central lanes")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+
+    auto topAt = [&](int x, int z)
+    {
+        for (int y = m.Size.y - 1; y >= 0; --y)
+            if (IsSolid(m.At(x, y, z))) return y;
+        return -1;
+    };
+
+    // Average surface height near a z-edge (flank) vs. mid-z (lane), same x band.
+    int flank = 0, lane = 0, n = 0;
+    for (int x = 4; x < 20; ++x, ++n)
+    {
+        flank += topAt(x, 1);
+        lane  += topAt(x, m.Size.z / 2);
+    }
+    CHECK(flank > lane); // flanks are taller
+}
+
+TEST_CASE("Snow only appears at or above the snow line")
+{
+    const VoxModel m = TerrainGen::Generate(SmallConfig());
+    const TerrainConfig c = SmallConfig();
+    for (int z = 0; z < m.Size.z; ++z)
+        for (int y = 0; y < c.SnowLine; ++y)
+            for (int x = 0; x < m.Size.x; ++x)
+                CHECK(m.At(x, y, z) != MapBlocks::Snow);
+}
