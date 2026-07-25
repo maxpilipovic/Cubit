@@ -155,3 +155,14 @@ TEST_CASE("LoadFile throws when the file is missing")
         VoxLoader::LoadFile("this_file_does_not_exist.vox"),
         std::runtime_error);
 }
+
+TEST_CASE("The starter map parses into a single chunk")
+{
+    const std::filesystem::path path = "Sandbox/assets/maps/starter.vox";
+    if (!std::filesystem::exists(path))
+        return; // asset not reachable from this working directory; skip
+
+    const VoxModel model = VoxLoader::LoadFile(path.string());
+    CHECK(model.Size == glm::ivec3(16, 6, 16));
+    CHECK(model.At(0, 0, 0) == 1); // floor corner is the green index
+}

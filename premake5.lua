@@ -179,6 +179,10 @@ project "Sandbox"
     targetdir ("bin/" .. outputdir .. "/%{prj.name}")
     objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
 
+    --Run with the target dir as the working directory so the app resolves
+    --"assets/..." next to the exe, the same layout a shipped build would have.
+    debugdir ("bin/" .. outputdir .. "/%{prj.name}")
+
     files
     {
         "Sandbox/src/**.h",
@@ -206,7 +210,8 @@ project "Sandbox"
 
         postbuildcommands
         {
-            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Sandbox")
+            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Sandbox"),
+            ('{COPYDIR} "assets" "%{cfg.targetdir}/assets"')
         }
 
     filter "configurations:Debug"

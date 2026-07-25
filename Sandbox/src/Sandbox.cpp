@@ -1,9 +1,9 @@
 #include "Cubit/Cubit.h"
+#include "Cubit/Voxel/VoxLoader.h"
 
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -42,60 +42,11 @@ namespace
     //Height below the chunk at which a fallen player is returned to spawn.
     constexpr float FallResetHeight = -20.0f;
 
-    //Returns how many solid blocks are stacked in one chunk column.
-    int GetTerrainHeight(int x, int z)
-    {
-        const float wave =
-            std::sin(static_cast<float>(x) * 0.35f) +
-            std::cos(static_cast<float>(z) * 0.35f);
-
-        return 6 + static_cast<int>(std::lround(wave * 2.0f));
-    }
-
-    //Block colours selectable with the number keys, in order.
-    constexpr BlockId PlaceableBlocks[] =
-    {
-        BlockId{2},
-        BlockId{3},
-        BlockId{4},
-        BlockId{5},
-        BlockId{6},
-        BlockId{7},
-        BlockId{8},
-        BlockId{9}
-    };
+    //Palette indices selectable with the number keys 1-8, in order.
+    constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
 
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
-
-    //Colours the test terrain in bands so the block palette is visible.
-    BlockId GetTerrainBlock(int y, int surfaceHeight)
-    {
-        if (y == surfaceHeight - 1)
-            return BlockId{5};
-        if (y >= surfaceHeight - 3)
-            return BlockId{3};
-        if (y >= surfaceHeight - 5)
-            return BlockId{9};
-
-        return BlockId{6};
-    }
-
-    //Fills a world with test data whose buried blocks exercise face culling.
-    //This is sandbox fixture data, not a world generator.
-    void BuildTestTerrain(World& world)
-    {
-        for (int z = 0; z < world.GetDepth(); ++z)
-        {
-            for (int x = 0; x < world.GetWidth(); ++x)
-            {
-                const int height = GetTerrainHeight(x, z);
-
-                for (int y = 0; y < height; ++y)
-                    world.SetBlock(x, y, z, GetTerrainBlock(y, height));
-            }
-        }
-    }
 }
 
 class SandboxLayer final : public Layer
@@ -114,7 +65,7 @@ public:
                 OnPlayerDied(event);
             });
 
-        BuildTestTerrain(m_World);
+        m_World = BuildWorld(VoxLoader::LoadFile("assets/maps/starter.vox"));
         //The world starts with every chunk dirty, so the first render meshes it.
 
         UpdateCameraPosition();
@@ -326,7 +277,7 @@ private:
 
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
-    World m_World{ 4, 1, 4 };
+    World m_World{ 1, 1, 1 };
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_PlayerPosition{ SpawnPosition };
