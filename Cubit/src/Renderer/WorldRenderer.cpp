@@ -4,6 +4,8 @@
 
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Renderer/Shader.h"
+#include "Cubit/Renderer/Frustum.h"
+#include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -53,20 +55,29 @@ void WorldRenderer::Update(World& world)
     }
 }
 
-void WorldRenderer::Render(const Shader& shader, const glm::vec3& worldOffset) const
+void WorldRenderer::Render(const Shader& shader, const glm::mat4& viewProjection,
+    const glm::vec3& worldOffset)
 {
+    const Frustum frustum(viewProjection);
+    m_LastDrawnChunks = 0;
+
     for (const auto& entry : m_Meshes)
     {
         const glm::ivec3& coord = entry.first;
         const ChunkMesh& mesh = entry.second;
 
-        const glm::ivec3 origin =
-            World::GetChunkOrigin(coord.x, coord.y, coord.z);
-        const glm::mat4 transform = glm::translate(
-            glm::mat4(1.0f),
-            worldOffset + glm::vec3(origin));
+        const glm::vec3 origin =
+            glm::vec3(World::GetChunkOrigin(coord.x, coord.y, coord.z));
+        const glm::vec3 min = worldOffset + origin;
+        const glm::vec3 max = min + glm::vec3(
+            Chunk::Width, Chunk::Height, Chunk::Depth);
 
+        if (!frustum.IntersectsAABB(min, max))
+            continue; // outside the view
+
+        const glm::mat4 transform = glm::translate(glm::mat4(1.0f), min);
         Renderer::Submit(*mesh.Array, *mesh.Indices, shader, transform);
+        ++m_LastDrawnChunks;
     }
 }
 

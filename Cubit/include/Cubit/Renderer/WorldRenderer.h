@@ -40,9 +40,13 @@ public:
     //set. Call once per frame before Render. Needs a current GL context.
     void Update(World& world);
 
-    //Draws every non-empty chunk mesh, each translated to its chunk origin plus
-    //worldOffset.
-    void Render(const Shader& shader, const glm::vec3& worldOffset) const;
+    //Draws every non-empty chunk mesh that is inside the camera frustum, each
+    //translated to its chunk origin plus worldOffset. Records the drawn count.
+    void Render(const Shader& shader, const glm::mat4& viewProjection,
+        const glm::vec3& worldOffset);
+
+    //Chunks actually submitted in the last Render (after frustum culling).
+    std::size_t DrawnChunkCount() const { return m_LastDrawnChunks; }
 
     //Total exposed faces across all chunk meshes, for the HUD.
     std::uint32_t TotalFaceCount() const;
@@ -70,6 +74,7 @@ private:
 
     std::map<glm::ivec3, ChunkMesh, IVec3Less> m_Meshes;
     std::set<glm::ivec3, IVec3Less> m_Pending;
+    std::size_t m_LastDrawnChunks = 0;
 };
 
 #ifdef _MSC_VER

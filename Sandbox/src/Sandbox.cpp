@@ -142,7 +142,10 @@ public:
         m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
 
         Renderer::BeginScene(m_CameraController.GetCamera());
-        m_WorldRenderer.Render(*m_Shader, WorldOffset);
+        m_WorldRenderer.Render(
+            *m_Shader,
+            m_CameraController.GetCamera().GetViewProjectionMatrix(),
+            WorldOffset);
         Renderer::EndScene();
     }
 
