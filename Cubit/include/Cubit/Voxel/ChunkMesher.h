@@ -30,4 +30,18 @@ public:
     //the next chunk is not emitted. Vertices are in chunk-local coordinates, so
     //the caller positions the mesh by the chunk's origin.
     static ChunkMeshData Build(const World& world, int chunkX, int chunkY, int chunkZ);
+
+    //Brightness multiplier per ambient-occlusion level: index 0 is the most
+    //enclosed corner, index 3 is fully open.
+    static constexpr float AoShade[4] = { 0.55f, 0.70f, 0.85f, 1.00f };
+
+    //How exposed one corner of a face is, from 0 (fully enclosed) to 3 (open).
+    //airCell is the cell in front of the face; sideA and sideB are the offsets
+    //from it toward the two edges meeting at the corner. Public so it can be
+    //tested directly, and so a future greedy mesher can merge on equal values.
+    static int CornerAoLevel(
+        const World& world,
+        const glm::ivec3& airCell,
+        const glm::ivec3& sideA,
+        const glm::ivec3& sideB);
 };

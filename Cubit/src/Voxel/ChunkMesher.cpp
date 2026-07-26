@@ -152,3 +152,29 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
     return mesh;
 }
 
+int ChunkMesher::CornerAoLevel(
+    const World& world,
+    const glm::ivec3& airCell,
+    const glm::ivec3& sideA,
+    const glm::ivec3& sideB)
+{
+    const glm::ivec3 a = airCell + sideA;
+    const glm::ivec3 b = airCell + sideB;
+
+    const bool solidA = world.IsBlockSolid(a.x, a.y, a.z);
+    const bool solidB = world.IsBlockSolid(b.x, b.y, b.z);
+
+    // Two walls meeting at a right angle seal the corner completely, so what
+    // sits diagonally behind them cannot lighten it.
+    if (solidA && solidB)
+        return 0;
+
+    const glm::ivec3 c = airCell + sideA + sideB;
+    const bool solidCorner = world.IsBlockSolid(c.x, c.y, c.z);
+
+    return 3
+        - static_cast<int>(solidA)
+        - static_cast<int>(solidB)
+        - static_cast<int>(solidCorner);
+}
+
