@@ -10,7 +10,8 @@
 namespace
 {
     //Adds two triangles referencing the four vertices most recently appended.
-    void AddFaceIndices(ChunkMeshData& mesh)
+    //A quad can be split along either diagonal; flipping picks the other one.
+    void AddFaceIndices(ChunkMeshData& mesh, bool flip)
     {
         CB_CORE_ASSERT(
             mesh.Vertices.size() >= 4,
@@ -19,12 +20,24 @@ namespace
         const std::uint32_t firstVertex =
             static_cast<std::uint32_t>(mesh.Vertices.size()) - 4;
 
-        mesh.Indices.push_back(firstVertex + 0);
-        mesh.Indices.push_back(firstVertex + 1);
-        mesh.Indices.push_back(firstVertex + 2);
-        mesh.Indices.push_back(firstVertex + 2);
-        mesh.Indices.push_back(firstVertex + 3);
-        mesh.Indices.push_back(firstVertex + 0);
+        if (flip)
+        {
+            mesh.Indices.push_back(firstVertex + 1);
+            mesh.Indices.push_back(firstVertex + 2);
+            mesh.Indices.push_back(firstVertex + 3);
+            mesh.Indices.push_back(firstVertex + 3);
+            mesh.Indices.push_back(firstVertex + 0);
+            mesh.Indices.push_back(firstVertex + 1);
+        }
+        else
+        {
+            mesh.Indices.push_back(firstVertex + 0);
+            mesh.Indices.push_back(firstVertex + 1);
+            mesh.Indices.push_back(firstVertex + 2);
+            mesh.Indices.push_back(firstVertex + 2);
+            mesh.Indices.push_back(firstVertex + 3);
+            mesh.Indices.push_back(firstVertex + 0);
+        }
     }
 
     //Per-face brightness, so a solid-coloured block still reads as a cube.
@@ -36,64 +49,106 @@ namespace
     constexpr float BackShade = 0.72f;
     constexpr float BottomShade = 0.60f;
 
-    void AddFrontFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
+    //One block face, described rather than hand-written. Corner holds the four
+    //vertex offsets from the block's minimum corner, in the winding order the
+    //face is emitted in. U and V are the two axes spanning the face, and
+    //CornerU/CornerV give each vertex's sign along them — which is what lets a
+    //corner's two occluding neighbours be found without a switch per face.
+    struct FaceGeometry
     {
-        const glm::vec3 color = blockColor * FrontShade;
-        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
-        AddFaceIndices(mesh);
-    }
+        glm::ivec3 Normal;
+        glm::vec3 Corner[4];
+        glm::ivec3 U;
+        glm::ivec3 V;
+        int CornerU[4];
+        int CornerV[4];
+        float Shade;
+    };
 
-    void AddBackFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
+    constexpr FaceGeometry Faces[6] =
     {
-        const glm::vec3 color = blockColor * BackShade;
-        mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
-        mesh.Vertices.push_back({ { x, y, z }, color });
-        mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
-        AddFaceIndices(mesh);
-    }
+        // Front (+Z)
+        { {  0,  0,  1 },
+          { { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 1.0f },
+            { 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f, 1.0f } },
+          { 1, 0, 0 }, { 0, 1, 0 },
+          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
+          FrontShade },
 
-    void AddRightFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
-    {
-        const glm::vec3 color = blockColor * RightShade;
-        mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
-        AddFaceIndices(mesh);
-    }
+        // Back (-Z)
+        { {  0,  0, -1 },
+          { { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 0.0f } },
+          { 1, 0, 0 }, { 0, 1, 0 },
+          { +1, -1, -1, +1 }, { -1, -1, +1, +1 },
+          BackShade },
 
-    void AddLeftFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
-    {
-        const glm::vec3 color = blockColor * LeftShade;
-        mesh.Vertices.push_back({ { x, y, z }, color });
-        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
-        AddFaceIndices(mesh);
-    }
+        // Right (+X)
+        { {  1,  0,  0 },
+          { { 1.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f },
+            { 1.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } },
+          { 0, 0, 1 }, { 0, 1, 0 },
+          { +1, -1, -1, +1 }, { -1, -1, +1, +1 },
+          RightShade },
 
-    void AddTopFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
-    {
-        const glm::vec3 color = blockColor * TopShade;
-        mesh.Vertices.push_back({ { x, y + 1.0f, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y + 1.0f, z }, color });
-        mesh.Vertices.push_back({ { x, y + 1.0f, z }, color });
-        AddFaceIndices(mesh);
-    }
+        // Left (-X)
+        { { -1,  0,  0 },
+          { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f },
+            { 0.0f, 1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } },
+          { 0, 0, 1 }, { 0, 1, 0 },
+          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
+          LeftShade },
 
-    void AddBottomFace(ChunkMeshData& mesh, float x, float y, float z, const glm::vec3& blockColor)
+        // Top (+Y)
+        { {  0,  1,  0 },
+          { { 0.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f },
+            { 1.0f, 1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+          { 1, 0, 0 }, { 0, 0, 1 },
+          { -1, +1, +1, -1 }, { +1, +1, -1, -1 },
+          TopShade },
+
+        // Bottom (-Y)
+        { {  0, -1,  0 },
+          { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f },
+            { 1.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
+          { 1, 0, 0 }, { 0, 0, 1 },
+          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
+          BottomShade },
+    };
+
+    //Emits one face: four vertices shaded by their own corner occlusion, then
+    //the two triangles joining them.
+    void AddFace(
+        ChunkMeshData& mesh,
+        const World& world,
+        const glm::ivec3& worldPosition,
+        const glm::vec3& blockOrigin,
+        const FaceGeometry& face,
+        const glm::vec3& blockColor)
     {
-        const glm::vec3 color = blockColor * BottomShade;
-        mesh.Vertices.push_back({ { x, y, z }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y, z }, color });
-        mesh.Vertices.push_back({ { x + 1.0f, y, z + 1.0f }, color });
-        mesh.Vertices.push_back({ { x, y, z + 1.0f }, color });
-        AddFaceIndices(mesh);
+        const glm::ivec3 airCell = worldPosition + face.Normal;
+
+        int ao[4];
+        for (int i = 0; i < 4; ++i)
+        {
+            ao[i] = ChunkMesher::CornerAoLevel(
+                world,
+                airCell,
+                face.U * face.CornerU[i],
+                face.V * face.CornerV[i]);
+        }
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const glm::vec3 color =
+                blockColor * face.Shade * ChunkMesher::AoShade[ao[i]];
+
+            mesh.Vertices.push_back({ blockOrigin + face.Corner[i], color });
+        }
+
+        // Splitting a quad along its darker diagonal keeps the shading gradient
+        // smooth; splitting the other way leaves a visible seam across it.
+        AddFaceIndices(mesh, ao[0] + ao[2] > ao[1] + ao[3]);
     }
 
     //Emits the faces of one block that are exposed to air. Neighbours are looked
@@ -105,27 +160,17 @@ namespace
         const glm::ivec3& worldPosition,
         const glm::ivec3& localPosition)
     {
-        const float blockX = static_cast<float>(localPosition.x);
-        const float blockY = static_cast<float>(localPosition.y);
-        const float blockZ = static_cast<float>(localPosition.z);
+        const glm::vec3 blockOrigin(localPosition);
+        const glm::vec3 color = world.GetBlockColor(
+            world.GetBlock(worldPosition.x, worldPosition.y, worldPosition.z));
 
-        const int x = worldPosition.x;
-        const int y = worldPosition.y;
-        const int z = worldPosition.z;
-        const glm::vec3 color = world.GetBlockColor(world.GetBlock(x, y, z));
+        for (const FaceGeometry& face : Faces)
+        {
+            const glm::ivec3 neighbour = worldPosition + face.Normal;
 
-        if (!world.IsBlockSolid(x, y, z + 1))
-            AddFrontFace(mesh, blockX, blockY, blockZ, color);
-        if (!world.IsBlockSolid(x, y, z - 1))
-            AddBackFace(mesh, blockX, blockY, blockZ, color);
-        if (!world.IsBlockSolid(x + 1, y, z))
-            AddRightFace(mesh, blockX, blockY, blockZ, color);
-        if (!world.IsBlockSolid(x - 1, y, z))
-            AddLeftFace(mesh, blockX, blockY, blockZ, color);
-        if (!world.IsBlockSolid(x, y + 1, z))
-            AddTopFace(mesh, blockX, blockY, blockZ, color);
-        if (!world.IsBlockSolid(x, y - 1, z))
-            AddBottomFace(mesh, blockX, blockY, blockZ, color);
+            if (!world.IsBlockSolid(neighbour.x, neighbour.y, neighbour.z))
+                AddFace(mesh, world, worldPosition, blockOrigin, face, color);
+        }
     }
 }
 
