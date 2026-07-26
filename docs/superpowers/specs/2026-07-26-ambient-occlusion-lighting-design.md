@@ -89,9 +89,14 @@ public:
 ```
 
 **Propagation rule.** Breadth-first from the sky. Solid blocks hold light 0 and do not
-propagate. A step **downward into air preserves the value** (sky light falls without
-attenuation); every other direction costs 1. A cell is enqueued when a neighbour can
-raise its value.
+propagate. A step downward into air preserves the value **only at full strength (15)**
+— that is what keeps an open shaft lit all the way to the bottom. Every other step,
+including a downward step by light that has already dimmed, costs 1. A cell is
+enqueued when a neighbour can raise its value.
+
+The "only at full strength" qualifier matters: if dimmed light also fell for free,
+light that had crept 1 block sideways under an overhang would then drop 30 blocks
+still at level 14, and deep interiors would never go dark.
 
 **`PropagateAll`** seeds every air cell in the world's top layer to 15 and floods.
 Called once at map load, ~4.19M cells — a load-time cost, not a per-frame one.
