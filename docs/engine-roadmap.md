@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
@@ -35,12 +35,14 @@ Ranked by leverage. Performance items are detailed in
 [performance.md](performance.md).
 
 ### Performance / scale
-1. **Threaded / amortized meshing** — the whole world currently meshes in one frame
-   at load (`WorldRenderer::Update`). Gating bigger maps. **← next up.**
-2. **Frustum culling** — `WorldRenderer::Render` draws every chunk every frame,
-   regardless of the camera view.
+1. ~~**Threaded / amortized meshing**~~ **DONE 2026-07-25** — `WorldRenderer::Update`
+   meshes at most a per-frame budget of chunks instead of the whole world at load.
+   True threading remains deferred.
+2. ~~**Frustum culling**~~ **DONE 2026-07-25** — `WorldRenderer::Render` tests each
+   chunk's world-space AABB against the camera frustum before submitting.
 3. **Greedy meshing** — the mesher emits one quad per exposed face; coplanar faces
-   are never merged, so flat areas produce far more geometry than needed.
+   are never merged, so flat areas produce far more geometry than needed. **← next
+   perf item** (see the AO ordering note below).
 
 ### Visual quality
 4. **Lighting / ambient occlusion** — currently fixed per-face shading constants
@@ -75,3 +77,8 @@ A bounded sequence — genuinely finishable, not endless:
 
 After these, the engine is "done" for our purposes, and the remaining work is all
 gameplay.
+
+**Ordering note — AO before greedy meshing.** Both touch `ChunkMesher`, and they
+interact: per-vertex AO means two coplanar faces can only be merged if their AO
+values match. Doing AO first lets the greedy pass be written AO-aware from the
+start, instead of retrofitting the merge criterion afterwards.

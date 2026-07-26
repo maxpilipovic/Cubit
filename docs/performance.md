@@ -1,14 +1,14 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
 tick items off as they are addressed. See also [engine-roadmap.md](engine-roadmap.md).
 
-Context: the shipped battlefield map is 128×48×128 = **192 chunks**, meshing ~120k
-faces. Everything below is fine at that size; the problems bite as maps grow toward
-the single-`.vox` max of 256×256×256 (up to ~4096 chunks) and beyond.
+Context: the shipped battlefield map is 256×64×256 = **602 chunks**, meshing ~476k
+faces. The problems below bite harder as maps grow toward the single-`.vox` max of
+256×256×256 (up to ~4096 chunks) and beyond.
 
 ---
 
