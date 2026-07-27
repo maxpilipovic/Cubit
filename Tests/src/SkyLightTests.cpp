@@ -238,6 +238,15 @@ TEST_CASE("Bounded repropagation matches a full propagation")
         block = BlockId{0};
     }
 
+    SUBCASE("opening a hole at the far world edge")
+    {
+        // Drives the box against the upper clamp: minX/minZ stay interior
+        // while maxX/maxZ are pinned to the world's last column, the mirror
+        // of the (0,0) case above.
+        edit = glm::ivec3(world.GetWidth() - 1, roof, world.GetDepth() - 1);
+        block = BlockId{0};
+    }
+
     world.SetBlock(edit.x, edit.y, edit.z, block);
     SkyLight::Repropagate(world, edit.x, edit.y, edit.z);
     const std::vector<std::uint8_t> bounded = LightSnapshot(world);
