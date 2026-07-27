@@ -98,26 +98,37 @@ void World::MarkChunkDirtyAt(int x, int y, int z)
     const int chunkX = x / Chunk::Width;
     const int chunkY = y / Chunk::Height;
     const int chunkZ = z / Chunk::Depth;
-    m_DirtyChunks.insert(glm::ivec3(chunkX, chunkY, chunkZ));
 
-    //A block on a chunk's boundary plane also changes the shared faces of the
-    //neighbour on that side, so that neighbour's mesh is dirty too.
     const int localX = x % Chunk::Width;
     const int localY = y % Chunk::Height;
     const int localZ = z % Chunk::Depth;
 
-    const auto markNeighbour = [this](int cx, int cy, int cz)
+    //A chunk's mesh samples the cells diagonally around each face corner, so a
+    //block on a chunk edge or corner affects the diagonal neighbours too, not
+    //just the ones sharing a face. Step to a neighbour along an axis only when
+    //the position lies on that face, so an interior edit only marks its own
+    //chunk.
+    for (int dz = -1; dz <= 1; ++dz)
     {
-        if (IsChunkInBounds(cx, cy, cz))
-            m_DirtyChunks.insert(glm::ivec3(cx, cy, cz));
-    };
+        if ((dz < 0 && localZ != 0) || (dz > 0 && localZ != Chunk::Depth - 1))
+            continue;
 
-    if (localX == 0)                 markNeighbour(chunkX - 1, chunkY, chunkZ);
-    if (localX == Chunk::Width - 1)  markNeighbour(chunkX + 1, chunkY, chunkZ);
-    if (localY == 0)                 markNeighbour(chunkX, chunkY - 1, chunkZ);
-    if (localY == Chunk::Height - 1) markNeighbour(chunkX, chunkY + 1, chunkZ);
-    if (localZ == 0)                 markNeighbour(chunkX, chunkY, chunkZ - 1);
-    if (localZ == Chunk::Depth - 1)  markNeighbour(chunkX, chunkY, chunkZ + 1);
+        for (int dy = -1; dy <= 1; ++dy)
+        {
+            if ((dy < 0 && localY != 0) || (dy > 0 && localY != Chunk::Height - 1))
+                continue;
+
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                if ((dx < 0 && localX != 0) || (dx > 0 && localX != Chunk::Width - 1))
+                    continue;
+
+                if (IsChunkInBounds(chunkX + dx, chunkY + dy, chunkZ + dz))
+                    m_DirtyChunks.insert(
+                        glm::ivec3(chunkX + dx, chunkY + dy, chunkZ + dz));
+            }
+        }
+    }
 }
 
 bool World::IsBlockSolid(int x, int y, int z) const
