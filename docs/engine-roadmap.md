@@ -45,9 +45,9 @@ Ranked by leverage. Performance items are detailed in
    perf item** (see the AO ordering note below).
 
 ### Visual quality
-4. **Lighting / ambient occlusion** — currently fixed per-face shading constants
-   (`ChunkMesher` `TopShade`/`BottomShade`/…). Smooth lighting + AO is the single
-   biggest step up in how "real" the world looks.
+4. ~~**Lighting / ambient occlusion**~~ **DONE 2026-07-26** — per-vertex corner AO
+   plus sky light propagated through the world (`SkyLight::PropagateAll`/
+   `Repropagate`) replace the old fixed per-face shading constants.
 5. **Transparency / alpha blending** — none today; needed for real water and glass
    (water currently renders as an opaque solid).
 
@@ -71,8 +71,8 @@ A bounded sequence — genuinely finishable, not endless:
 
 1. ~~**Amortized meshing + frustum culling**~~ **DONE 2026-07-25** — the map now
    ships at 256×64×256 and loads without a stall. Threading still deferred.
-2. **Ambient-occlusion lighting** (the visual leap). ← next.
-3. **Transparency** (real water) + **world save** (small, high value).
+2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
+3. **Transparency** (real water) + **world save** (small, high value). ← next.
 4. **Multi-model stitching** (full AoS-scale maps).
 
 After these, the engine is "done" for our purposes, and the remaining work is all

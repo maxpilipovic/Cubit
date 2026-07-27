@@ -1,4 +1,5 @@
 #include "Cubit/Cubit.h"
+#include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/VoxLoader.h"
 
 #include "HudLayer.h"
@@ -66,6 +67,10 @@ public:
 
         m_World = BuildWorld(VoxLoader::LoadFile("assets/maps/battlefield.vox"));
         //The world starts with every chunk dirty, so the first render meshes it.
+
+        // Light has to exist before anything meshes, or the first frames bake
+        // a fully dark world into their vertex colours.
+        SkyLight::PropagateAll(m_World);
 
         UpdateCameraPosition();
 
@@ -247,6 +252,10 @@ private:
             target.y,
             target.z,
             button == MouseCode::Left ? BlockId{0} : m_PlaceBlock);
+
+        // Relight the region the edit could have affected, and mark whatever
+        // chunks actually changed dirty so they remesh with the new light.
+        SkyLight::Repropagate(m_World, target.x, target.y, target.z);
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +

@@ -76,7 +76,11 @@ faces are mostly mergeable flat terrain). More geometry to build, upload, and dr
 
 **Fix:** greedy meshing — merge adjacent coplanar faces of the same block/colour into
 larger quads per chunk face-plane. Significant vertex-count reduction, and it makes
-P1/P2 cheaper too. Larger change to the mesher; do after P1/P2.
+P1/P2 cheaper too. Larger change to the mesher; do after P1/P2. Now that faces carry
+per-vertex AO and sky light, the merge criterion has to widen: two coplanar faces can
+only merge when their AO *and* light values match, not just their block/colour, or the
+merged quad's corner-interpolated shading would misrepresent one of the faces it
+absorbed.
 
 **Priority:** medium-high. **Status:** open.
 
