@@ -9,6 +9,7 @@
 Chunk::Chunk()
 {
     m_Blocks.fill(0);
+    m_SkyLight.fill(0);
 }
 
 BlockId Chunk::GetBlock(int x, int y, int z) const
@@ -30,6 +31,22 @@ void Chunk::SetBlock(int x, int y, int z, BlockId block)
 bool Chunk::IsBlockSolid(int x, int y, int z) const
 {
     return IsSolid(GetBlock(x, y, z));
+}
+
+std::uint8_t Chunk::GetSkyLight(int x, int y, int z) const
+{
+    if (!IsInBounds(x, y, z))
+        return 15; // Outside the chunk is open sky, not darkness.
+
+    return m_SkyLight[GetIndex(x, y, z)];
+}
+
+void Chunk::SetSkyLight(int x, int y, int z, std::uint8_t level)
+{
+    if (!IsInBounds(x, y, z))
+        throw std::out_of_range("Chunk sky light coordinates are out of bounds");
+
+    m_SkyLight[GetIndex(x, y, z)] = level;
 }
 
 bool Chunk::IsInBounds(int x, int y, int z)

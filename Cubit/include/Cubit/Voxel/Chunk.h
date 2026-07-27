@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -31,6 +32,14 @@ public:
     //Reports whether the block at this position occupies space.
     bool IsBlockSolid(int x, int y, int z) const;
 
+    //Returns a cell's sky light, treating positions outside this chunk as open
+    //sky. The mesher samples corners that straddle a chunk edge, so an
+    //out-of-range read must not read as darkness.
+    std::uint8_t GetSkyLight(int x, int y, int z) const;
+
+    //Sets a cell's sky light; throws when the position is outside this chunk.
+    void SetSkyLight(int x, int y, int z, std::uint8_t level);
+
     //Reports whether local coordinates are inside the chunk.
     static bool IsInBounds(int x, int y, int z);
 
@@ -39,6 +48,7 @@ private:
     static std::size_t GetIndex(int x, int y, int z);
 
     std::array<BlockId, BlockCount> m_Blocks;
+    std::array<std::uint8_t, BlockCount> m_SkyLight;
 };
 
 #ifdef _MSC_VER

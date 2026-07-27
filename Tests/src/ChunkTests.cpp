@@ -79,3 +79,32 @@ TEST_CASE("Bounds checking accepts only interior positions")
     CHECK_FALSE(Chunk::IsInBounds(-1, 0, 0));
     CHECK_FALSE(Chunk::IsInBounds(0, 0, Chunk::Depth));
 }
+
+TEST_CASE("A new chunk starts with no sky light")
+{
+    const Chunk chunk;
+
+    CHECK(chunk.GetSkyLight(0, 0, 0) == 0);
+    CHECK(chunk.GetSkyLight(8, 8, 8) == 0);
+}
+
+TEST_CASE("Sky light can be set and read back")
+{
+    Chunk chunk;
+    chunk.SetSkyLight(3, 4, 5, 12);
+
+    CHECK(chunk.GetSkyLight(3, 4, 5) == 12);
+
+    // Setting one cell must not disturb its neighbours.
+    CHECK(chunk.GetSkyLight(4, 4, 5) == 0);
+    CHECK(chunk.GetSkyLight(3, 5, 5) == 0);
+}
+
+TEST_CASE("Sky light outside a chunk reads as open sky")
+{
+    const Chunk chunk;
+
+    CHECK(chunk.GetSkyLight(-1, 0, 0) == 15);
+    CHECK(chunk.GetSkyLight(0, Chunk::Height, 0) == 15);
+    CHECK(chunk.GetSkyLight(0, 0, Chunk::Depth) == 15);
+}
