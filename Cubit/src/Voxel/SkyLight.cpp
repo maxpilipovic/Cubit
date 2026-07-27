@@ -6,7 +6,9 @@
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <deque>
+#include <vector>
 
 namespace
 {
@@ -88,4 +90,91 @@ void SkyLight::PropagateAll(World& world)
     }
 
     Flood(world, queue);
+}
+
+void SkyLight::Repropagate(World& world, int x, int y, int z)
+{
+    (void)y; // The box always spans the full height, so the edit's y is unused.
+
+    const int radius = Max;
+    const int minX = std::max(0, x - radius);
+    const int maxX = std::min(world.GetWidth() - 1, x + radius);
+    const int minZ = std::max(0, z - radius);
+    const int maxZ = std::min(world.GetDepth() - 1, z + radius);
+    const int top = world.GetHeight() - 1;
+
+    // Remember what the box held, so only genuinely changed chunks are marked.
+    std::vector<std::uint8_t> before;
+    before.reserve(
+        static_cast<std::size_t>(maxX - minX + 1) *
+        (maxZ - minZ + 1) * (top + 1));
+
+    for (int cz = minZ; cz <= maxZ; ++cz)
+        for (int cy = 0; cy <= top; ++cy)
+            for (int cx = minX; cx <= maxX; ++cx)
+                before.push_back(world.GetSkyLight(cx, cy, cz));
+
+    for (int cz = minZ; cz <= maxZ; ++cz)
+        for (int cy = 0; cy <= top; ++cy)
+            for (int cx = minX; cx <= maxX; ++cx)
+                world.SetSkyLight(cx, cy, cz, 0);
+
+    std::deque<glm::ivec3> queue;
+
+    // Seed one: the open sky above the box.
+    for (int cz = minZ; cz <= maxZ; ++cz)
+    {
+        for (int cx = minX; cx <= maxX; ++cx)
+        {
+            if (world.IsBlockSolid(cx, top, cz))
+                continue;
+
+            world.SetSkyLight(cx, top, cz, Max);
+            queue.push_back(glm::ivec3(cx, top, cz));
+        }
+    }
+
+    // Seed two: the ring of cells just outside the box. They kept their values
+    // through the clear, and light flows from them back in. Enqueuing them is
+    // safe because Flood only ever raises a cell, and nothing outside the box
+    // can be too dark.
+    for (int cy = 0; cy <= top; ++cy)
+    {
+        for (int cz = minZ - 1; cz <= maxZ + 1; ++cz)
+        {
+            for (int cx = minX - 1; cx <= maxX + 1; ++cx)
+            {
+                const bool insideBox =
+                    cx >= minX && cx <= maxX && cz >= minZ && cz <= maxZ;
+
+                if (insideBox)
+                    continue;
+                if (!world.IsInBounds(cx, cy, cz))
+                    continue;
+                if (world.IsBlockSolid(cx, cy, cz))
+                    continue;
+                if (world.GetSkyLight(cx, cy, cz) == 0)
+                    continue;
+
+                queue.push_back(glm::ivec3(cx, cy, cz));
+            }
+        }
+    }
+
+    Flood(world, queue);
+
+    std::size_t index = 0;
+    for (int cz = minZ; cz <= maxZ; ++cz)
+    {
+        for (int cy = 0; cy <= top; ++cy)
+        {
+            for (int cx = minX; cx <= maxX; ++cx)
+            {
+                if (world.GetSkyLight(cx, cy, cz) != before[index])
+                    world.MarkChunkDirtyAt(cx, cy, cz);
+
+                ++index;
+            }
+        }
+    }
 }

@@ -21,4 +21,10 @@ public:
     //Called once after a map loads. Marks nothing dirty: a freshly loaded world
     //already has every chunk dirty.
     static void PropagateAll(World& world);
+
+    //Re-floods the region an edit at this position can affect, and marks every
+    //chunk whose light actually changed dirty. Light cannot travel more than
+    //Max blocks horizontally, so a box of that radius is provably enough; it
+    //spans the world's full height because full-strength light falls for free.
+    static void Repropagate(World& world, int x, int y, int z);
 };

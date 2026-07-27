@@ -129,3 +129,151 @@ TEST_CASE("Propagation is idempotent")
 
     CHECK(world.GetSkyLight(5, 20, 5) == sample);
 }
+
+#include <vector>
+
+namespace
+{
+    //Every light value in the world, for comparing two propagations.
+    std::vector<std::uint8_t> LightSnapshot(const World& world)
+    {
+        std::vector<std::uint8_t> values;
+        values.reserve(
+            static_cast<std::size_t>(world.GetWidth()) *
+            world.GetHeight() * world.GetDepth());
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 0; y < world.GetHeight(); ++y)
+                for (int x = 0; x < world.GetWidth(); ++x)
+                    values.push_back(world.GetSkyLight(x, y, z));
+
+        return values;
+    }
+
+    //A world with a roof over everything but one open shaft, so there is both
+    //bright and dark space for an edit to disturb.
+    World BuildRoofedWorld()
+    {
+        World world(3, 4, 3);
+        const int roof = 20;
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                if (x != 24 || z != 24)
+                    world.SetBlock(x, roof, z, BlockId{1});
+
+        return world;
+    }
+}
+
+TEST_CASE("Breaking a roof block lets light into the space below")
+{
+    World world = BuildRoofedWorld();
+    SkyLight::PropagateAll(world);
+
+    const int roof = 20;
+    REQUIRE(world.GetSkyLight(5, roof - 1, 5) == 0);
+
+    world.SetBlock(5, roof, 5, BlockId{0});
+    SkyLight::Repropagate(world, 5, roof, 5);
+
+    CHECK(world.GetSkyLight(5, roof - 1, 5) == SkyLight::Max);
+    CHECK(world.GetSkyLight(5, 0, 5) == SkyLight::Max);
+}
+
+TEST_CASE("Sealing a shaft takes the light back out of it")
+{
+    World world = BuildRoofedWorld();
+    SkyLight::PropagateAll(world);
+
+    const int roof = 20;
+    REQUIRE(world.GetSkyLight(24, roof - 1, 24) == SkyLight::Max);
+
+    world.SetBlock(24, roof, 24, BlockId{1});
+    SkyLight::Repropagate(world, 24, roof, 24);
+
+    CHECK(world.GetSkyLight(24, roof - 1, 24) == 0);
+    CHECK(world.GetSkyLight(24, 0, 24) == 0);
+}
+
+TEST_CASE("Bounded repropagation matches a full propagation")
+{
+    // The test that proves the box is big enough. Whatever the edit, relighting
+    // only the box must leave the world in exactly the state a from-scratch
+    // flood would have produced.
+    World world = BuildRoofedWorld();
+    SkyLight::PropagateAll(world);
+
+    const int roof = 20;
+    glm::ivec3 edit{ 0, 0, 0 };
+    BlockId block{ 0 };
+
+    SUBCASE("opening a hole in the roof")
+    {
+        edit = glm::ivec3(5, roof, 5);
+        block = BlockId{0};
+    }
+
+    SUBCASE("sealing the open shaft")
+    {
+        edit = glm::ivec3(24, roof, 24);
+        block = BlockId{1};
+    }
+
+    SUBCASE("opening a hole beside the shaft")
+    {
+        edit = glm::ivec3(23, roof, 24);
+        block = BlockId{0};
+    }
+
+    SUBCASE("placing a block in open air under the shaft")
+    {
+        edit = glm::ivec3(24, roof - 5, 24);
+        block = BlockId{1};
+    }
+
+    SUBCASE("opening a hole at the world edge")
+    {
+        edit = glm::ivec3(0, roof, 0);
+        block = BlockId{0};
+    }
+
+    world.SetBlock(edit.x, edit.y, edit.z, block);
+    SkyLight::Repropagate(world, edit.x, edit.y, edit.z);
+    const std::vector<std::uint8_t> bounded = LightSnapshot(world);
+
+    SkyLight::PropagateAll(world);
+    const std::vector<std::uint8_t> full = LightSnapshot(world);
+
+    CHECK(bounded == full);
+}
+
+TEST_CASE("Repropagation marks the chunks whose light changed")
+{
+    World world = BuildRoofedWorld();
+    SkyLight::PropagateAll(world);
+    world.ClearDirty();
+
+    const int roof = 20;
+    world.SetBlock(5, roof, 5, BlockId{0});
+    world.ClearDirty(); // Ignore the block edit's own marking.
+
+    SkyLight::Repropagate(world, 5, roof, 5);
+
+    // The column below the new hole relit, so its chunks must be dirty.
+    CHECK(world.DirtyChunks().count(glm::ivec3(0, 0, 0)) == 1);
+    CHECK(!world.DirtyChunks().empty());
+}
+
+TEST_CASE("Repropagation after a no-op edit marks nothing dirty")
+{
+    World world = BuildRoofedWorld();
+    SkyLight::PropagateAll(world);
+    world.ClearDirty();
+
+    // Placing a block where one already stands changes no light at all.
+    const int roof = 20;
+    SkyLight::Repropagate(world, 5, roof, 5);
+
+    CHECK(world.DirtyChunks().empty());
+}
