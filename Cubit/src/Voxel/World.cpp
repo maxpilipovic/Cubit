@@ -57,10 +57,43 @@ void World::SetBlock(int x, int y, int z, BlockId block)
         z % Chunk::Depth,
         block);
 
-    MarkChunkDirtyForEdit(x, y, z);
+    MarkChunkDirtyAt(x, y, z);
 }
 
-void World::MarkChunkDirtyForEdit(int x, int y, int z)
+std::uint8_t World::GetSkyLight(int x, int y, int z) const
+{
+    if (!IsInBounds(x, y, z))
+        return 15; // Outside the world is open sky.
+
+    const Chunk& chunk = GetChunk(
+        x / Chunk::Width,
+        y / Chunk::Height,
+        z / Chunk::Depth);
+
+    return chunk.GetSkyLight(
+        x % Chunk::Width,
+        y % Chunk::Height,
+        z % Chunk::Depth);
+}
+
+void World::SetSkyLight(int x, int y, int z, std::uint8_t level)
+{
+    if (!IsInBounds(x, y, z))
+        throw std::out_of_range("World block coordinates are out of bounds");
+
+    Chunk& chunk = m_Chunks[GetChunkIndex(
+        x / Chunk::Width,
+        y / Chunk::Height,
+        z / Chunk::Depth)];
+
+    chunk.SetSkyLight(
+        x % Chunk::Width,
+        y % Chunk::Height,
+        z % Chunk::Depth,
+        level);
+}
+
+void World::MarkChunkDirtyAt(int x, int y, int z)
 {
     const int chunkX = x / Chunk::Width;
     const int chunkY = y / Chunk::Height;

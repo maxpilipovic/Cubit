@@ -6,6 +6,7 @@
 
 #include <glm/glm.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <set>
 #include <vector>
 
@@ -53,6 +54,22 @@ public:
     //Reports whether the block at this position occupies space.
     bool IsBlockSolid(int x, int y, int z) const;
 
+    //Returns a cell's sky light, treating positions outside the world as open
+    //sky so the map's edges and the space above it are lit.
+    std::uint8_t GetSkyLight(int x, int y, int z) const;
+
+    //Sets a cell's sky light; throws when the position is outside the world.
+    //Does not mark anything dirty — propagation decides which chunks actually
+    //changed and marks those, so clearing and re-flooding a cell to the same
+    //value costs no remeshing.
+    void SetSkyLight(int x, int y, int z, std::uint8_t level);
+
+    //Marks the chunk holding this position dirty, plus any chunk sharing a face
+    //the position lies on. Public because a chunk's mesh samples light from the
+    //cells just across its boundary, so a light change at an edge invalidates
+    //the neighbour's mesh too.
+    void MarkChunkDirtyAt(int x, int y, int z);
+
     //Reports whether world block coordinates are inside the world.
     bool IsInBounds(int x, int y, int z) const;
 
@@ -84,10 +101,6 @@ public:
 private:
     //Returns the chunk holding a world position, which must be in bounds.
     std::size_t GetChunkIndex(int chunkX, int chunkY, int chunkZ) const;
-
-    //Marks the chunk holding a world position dirty, plus any chunk sharing a
-    //face the position lies on, when that neighbour is inside the world.
-    void MarkChunkDirtyForEdit(int x, int y, int z);
 
     int m_ChunksX = 0;
     int m_ChunksY = 0;

@@ -154,3 +154,45 @@ TEST_CASE("Setting a palette changes reported block colours")
 
     CHECK(world.GetBlockColor(BlockId{3}) == glm::vec3(0.1f, 0.2f, 0.3f));
 }
+
+TEST_CASE("World sky light round-trips through the chunk grid")
+{
+    World world(2, 2, 2);
+    world.SetSkyLight(20, 3, 5, 9);
+
+    CHECK(world.GetSkyLight(20, 3, 5) == 9);
+    CHECK(world.GetSkyLight(21, 3, 5) == 0);
+}
+
+TEST_CASE("Sky light outside the world reads as open sky")
+{
+    const World world(1, 1, 1);
+
+    CHECK(world.GetSkyLight(-1, 0, 0) == 15);
+    CHECK(world.GetSkyLight(0, world.GetHeight(), 0) == 15);
+    CHECK(world.GetSkyLight(0, 0, world.GetDepth()) == 15);
+}
+
+TEST_CASE("Sky light crosses a chunk boundary independently")
+{
+    // The last column of chunk 0 and the first of chunk 1 are neighbours in
+    // world space but live in different chunks, so this catches an accessor
+    // that forgets to convert to chunk-local coordinates.
+    World world(2, 1, 1);
+    world.SetSkyLight(Chunk::Width - 1, 0, 0, 7);
+    world.SetSkyLight(Chunk::Width, 0, 0, 4);
+
+    CHECK(world.GetSkyLight(Chunk::Width - 1, 0, 0) == 7);
+    CHECK(world.GetSkyLight(Chunk::Width, 0, 0) == 4);
+}
+
+TEST_CASE("Marking a position dirty also marks the chunk across a shared face")
+{
+    World world(2, 1, 1);
+    world.ClearDirty();
+
+    world.MarkChunkDirtyAt(Chunk::Width - 1, 0, 0);
+
+    CHECK(world.DirtyChunks().count(glm::ivec3(0, 0, 0)) == 1);
+    CHECK(world.DirtyChunks().count(glm::ivec3(1, 0, 0)) == 1);
+}
