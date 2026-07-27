@@ -3,6 +3,7 @@
 #include "Cubit/Voxel/ChunkMesher.h"
 
 #include "Cubit/Voxel/Chunk.h"
+#include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
 #include "Core/CoreLogger.h"
@@ -129,19 +130,23 @@ namespace
         const glm::ivec3 airCell = worldPosition + face.Normal;
 
         int ao[4];
+        float light[4];
         for (int i = 0; i < 4; ++i)
         {
-            ao[i] = ChunkMesher::CornerAoLevel(
-                world,
-                airCell,
-                face.U * face.CornerU[i],
-                face.V * face.CornerV[i]);
+            const glm::ivec3 sideA = face.U * face.CornerU[i];
+            const glm::ivec3 sideB = face.V * face.CornerV[i];
+
+            ao[i] = ChunkMesher::CornerAoLevel(world, airCell, sideA, sideB);
+            light[i] =
+                ChunkMesher::CornerLightShade(world, airCell, sideA, sideB);
         }
 
         for (int i = 0; i < 4; ++i)
         {
-            const glm::vec3 color =
-                blockColor * face.Shade * ChunkMesher::AoShade[ao[i]];
+            const glm::vec3 color = blockColor
+                * face.Shade
+                * ChunkMesher::AoShade[ao[i]]
+                * light[i];
 
             mesh.Vertices.push_back({ blockOrigin + face.Corner[i], color });
         }
@@ -223,3 +228,39 @@ int ChunkMesher::CornerAoLevel(
         - static_cast<int>(solidCorner);
 }
 
+float ChunkMesher::CornerLightShade(
+    const World& world,
+    const glm::ivec3& airCell,
+    const glm::ivec3& sideA,
+    const glm::ivec3& sideB)
+{
+    const glm::ivec3 cells[4] =
+    {
+        airCell,
+        airCell + sideA,
+        airCell + sideB,
+        airCell + sideA + sideB,
+    };
+
+    int total = 0;
+    int counted = 0;
+
+    for (const glm::ivec3& cell : cells)
+    {
+        if (world.IsBlockSolid(cell.x, cell.y, cell.z))
+            continue;
+
+        total += world.GetSkyLight(cell.x, cell.y, cell.z);
+        ++counted;
+    }
+
+    // A corner boxed in on every side has nowhere for light to sit; it is not
+    // sampled by any visible face, but guard the division anyway.
+    if (counted == 0)
+        return LightFloor;
+
+    const float average =
+        static_cast<float>(total) / (static_cast<float>(counted) * SkyLight::Max);
+
+    return LightFloor + (1.0f - LightFloor) * average;
+}

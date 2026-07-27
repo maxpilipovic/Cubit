@@ -2,6 +2,7 @@
 
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
+#include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
 namespace
@@ -94,8 +95,8 @@ TEST_CASE("The occlusion shade table darkens monotonically")
 
 namespace
 {
-    //The colour a fully open top face has: the palette colour at full top shade
-    //and no occlusion. Any darker vertex on a top face is occluded.
+    //The colour a fully open, fully lit top face has: the palette colour at full
+    //top shade, no occlusion, and full sky light.
     glm::vec3 OpenTopColor(const World& world)
     {
         return world.GetBlockColor(BlockId{1}) * ChunkMesher::AoShade[3];
@@ -138,12 +139,25 @@ namespace
 
         return darkest;
     }
+
+    //Fills every cell with full daylight, so lighting contributes exactly 1.0
+    //and ambient occlusion is the only thing varying a face's colour. Real
+    //propagation would also shade the floor beside a wall and the underside of
+    //a block, which would let these tests pass even if occlusion were broken.
+    void FloodFullDaylight(World& world)
+    {
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 0; y < world.GetHeight(); ++y)
+                for (int x = 0; x < world.GetWidth(); ++x)
+                    world.SetSkyLight(x, y, z, SkyLight::Max);
+    }
 }
 
 TEST_CASE("A lone block's top face is unoccluded on every corner")
 {
     World world(1, 1, 1);
     world.SetBlock(8, 8, 8, BlockId{1});
+    FloodFullDaylight(world);
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
     const std::vector<VoxelVertex> top = QuadsInPlane(mesh, 1, 9.0f);
@@ -164,12 +178,16 @@ TEST_CASE("An inside corner darkens the floor beside it")
         for (int x = 0; x < Chunk::Width; ++x)
             world.SetBlock(x, 0, z, BlockId{1});
 
+    FloodFullDaylight(world);
     const ChunkMeshData open = ChunkMesher::Build(world, 0, 0, 0);
     const float openFloor = Darkest(QuadsInPlane(open, 1, 1.0f));
 
     for (int z = 0; z < Chunk::Depth; ++z)
         world.SetBlock(8, 1, z, BlockId{1});
 
+    // World::SetBlock does not touch light, so this is technically redundant
+    // with the flood above — but being explicit keeps the test readable.
+    FloodFullDaylight(world);
     const ChunkMeshData walled = ChunkMesher::Build(world, 0, 0, 0);
 
     CHECK(openFloor == doctest::Approx(OpenTopColor(world).r));
@@ -253,6 +271,7 @@ TEST_CASE("Every face of a lone block carries its own shade")
     // it, so a mismatched shade cannot hide behind occlusion.
     World world(1, 1, 1);
     world.SetBlock(8, 8, 8, BlockId{1});
+    FloodFullDaylight(world);
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
     const float base = world.GetBlockColor(BlockId{1}).r;
@@ -278,4 +297,81 @@ TEST_CASE("Every face of a lone block carries its own shade")
         for (const VoxelVertex& vertex : quad)
             CHECK(vertex.Color.r == doctest::Approx(base * face.Shade));
     }
+}
+
+TEST_CASE("Unlit faces are darker than lit ones but never black")
+{
+    World world(1, 4, 1);
+
+    // A slab with a roofed pocket cut under it: the pocket's floor is lit only
+    // by whatever creeps in, the open slab top is under full sky.
+    const int floor = 4;
+    for (int z = 0; z < Chunk::Depth; ++z)
+        for (int x = 0; x < Chunk::Width; ++x)
+            world.SetBlock(x, floor, z, BlockId{1});
+
+    SkyLight::PropagateAll(world);
+
+    const ChunkMeshData lit = ChunkMesher::Build(world, 0, 0, 0);
+    const float openTop = Darkest(QuadsInPlane(lit, 1, static_cast<float>(floor + 1)));
+
+    // Now roof the whole world well above the slab, cutting the sky off.
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int x = 0; x < world.GetWidth(); ++x)
+            world.SetBlock(x, 40, z, BlockId{1});
+
+    SkyLight::PropagateAll(world);
+
+    const ChunkMeshData dark = ChunkMesher::Build(world, 0, 0, 0);
+    const float roofedTop = Darkest(QuadsInPlane(dark, 1, static_cast<float>(floor + 1)));
+
+    CHECK(roofedTop < openTop);
+    CHECK(roofedTop > 0.0f);
+}
+
+TEST_CASE("The light shade curve spans the intended range")
+{
+    World world(1, 1, 1);
+
+    // A cell under full sky shades at 1.0; a fully dark one at the floor.
+    world.SetSkyLight(8, 9, 8, SkyLight::Max);
+    const glm::ivec3 air{ 8, 9, 8 };
+    const glm::ivec3 sideX{ 1, 0, 0 };
+    const glm::ivec3 sideZ{ 0, 0, 1 };
+
+    // Every sampled cell is air at Max, so the average is Max.
+    world.SetSkyLight(9, 9, 8, SkyLight::Max);
+    world.SetSkyLight(8, 9, 9, SkyLight::Max);
+    world.SetSkyLight(9, 9, 9, SkyLight::Max);
+
+    CHECK(ChunkMesher::CornerLightShade(world, air, sideX, sideZ)
+        == doctest::Approx(1.0f));
+
+    world.SetSkyLight(8, 9, 8, 0);
+    world.SetSkyLight(9, 9, 8, 0);
+    world.SetSkyLight(8, 9, 9, 0);
+    world.SetSkyLight(9, 9, 9, 0);
+
+    CHECK(ChunkMesher::CornerLightShade(world, air, sideX, sideZ)
+        == doctest::Approx(0.15f));
+}
+
+TEST_CASE("Corner light ignores solid cells when averaging")
+{
+    // A solid neighbour holds light 0, but it is not a place light could be —
+    // averaging it in would darken the surface for no reason.
+    World world(1, 1, 1);
+    const glm::ivec3 air{ 8, 9, 8 };
+    const glm::ivec3 sideX{ 1, 0, 0 };
+    const glm::ivec3 sideZ{ 0, 0, 1 };
+
+    world.SetSkyLight(8, 9, 8, SkyLight::Max);
+    world.SetSkyLight(9, 9, 8, SkyLight::Max);
+    world.SetSkyLight(8, 9, 9, SkyLight::Max);
+
+    world.SetBlock(9, 9, 9, BlockId{1});
+    world.SetSkyLight(9, 9, 9, 0);
+
+    CHECK(ChunkMesher::CornerLightShade(world, air, sideX, sideZ)
+        == doctest::Approx(1.0f));
 }

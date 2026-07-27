@@ -44,4 +44,18 @@ public:
         const glm::ivec3& airCell,
         const glm::ivec3& sideA,
         const glm::ivec3& sideB);
+
+    //Brightness a face corner gets from sky light, between LightFloor and 1.
+    //Averages the light of the air cells touching the corner, which is what
+    //makes lighting graduate smoothly across a surface instead of stepping from
+    //block to block. Solid cells hold no light and are left out of the average.
+    static float CornerLightShade(
+        const World& world,
+        const glm::ivec3& airCell,
+        const glm::ivec3& sideA,
+        const glm::ivec3& sideB);
+
+    //How dark a fully unlit surface goes. Not zero: an unlit bunker should read
+    //as dark but still be navigable, rather than being a black void.
+    static constexpr float LightFloor = 0.15f;
 };
