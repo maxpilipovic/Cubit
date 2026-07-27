@@ -5,6 +5,9 @@
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace
 {
     //The cell just above a block at (8, 8, 8): the air side of its top face.
@@ -89,9 +92,6 @@ TEST_CASE("The occlusion shade table darkens monotonically")
     CHECK(ChunkMesher::AoShade[0] < ChunkMesher::AoShade[1]);
     CHECK(ChunkMesher::AoShade[0] > 0.0f);
 }
-
-#include <algorithm>
-#include <vector>
 
 namespace
 {
@@ -276,15 +276,22 @@ TEST_CASE("Every face of a lone block carries its own shade")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
     const float base = world.GetBlockColor(BlockId{1}).r;
 
+    // Full daylight and no occlusion, so face.Shade is the only variable — but
+    // the floor now applies to the finished product, not to light alone, so
+    // the expected multiplier is LightFloor + (1 - LightFloor) * face.Shade,
+    // not face.Shade directly.
+    const float floor = ChunkMesher::LightFloor;
+    const auto remapped = [floor](float shade) { return floor + (1.0f - floor) * shade; };
+
     struct ExpectedFace { int Axis; float Value; float Shade; };
     const ExpectedFace faces[6] =
     {
-        { 1, 9.0f, 1.00f }, // top
-        { 1, 8.0f, 0.60f }, // bottom
-        { 0, 9.0f, 0.92f }, // right
-        { 0, 8.0f, 0.80f }, // left
-        { 2, 9.0f, 0.86f }, // front
-        { 2, 8.0f, 0.72f }, // back
+        { 1, 9.0f, remapped(1.00f) }, // top
+        { 1, 8.0f, remapped(0.60f) }, // bottom
+        { 0, 9.0f, remapped(0.92f) }, // right
+        { 0, 8.0f, remapped(0.80f) }, // left
+        { 2, 9.0f, remapped(0.86f) }, // front
+        { 2, 8.0f, remapped(0.72f) }, // back
     };
 
     for (const ExpectedFace& face : faces)
@@ -326,14 +333,23 @@ TEST_CASE("Unlit faces are darker than lit ones but never black")
     const float roofedTop = Darkest(QuadsInPlane(dark, 1, static_cast<float>(floor + 1)));
 
     CHECK(roofedTop < openTop);
-    CHECK(roofedTop > 0.0f);
+
+    // The floor now applies to the whole finished shade product, not to light
+    // alone, so the guaranteed minimum is base * LightFloor regardless of
+    // face shade or occlusion — the sampled faces are top faces (shade 1.0),
+    // but the floor term isn't multiplied by face shade at all, so this bound
+    // holds unconditionally, not just because these faces happen to be 1.0.
+    const float base = world.GetBlockColor(BlockId{1}).r;
+    CHECK(roofedTop >= base * ChunkMesher::LightFloor * 0.99f);
 }
 
-TEST_CASE("The light shade curve spans the intended range")
+TEST_CASE("The light shade curve spans the raw 0 to 1 range")
 {
     World world(1, 1, 1);
 
-    // A cell under full sky shades at 1.0; a fully dark one at the floor.
+    // A cell under full sky averages to 1.0; a fully dark one to 0.0. The
+    // floor is no longer applied here — it is applied once, to the finished
+    // shading, in AddFace.
     world.SetSkyLight(8, 9, 8, SkyLight::Max);
     const glm::ivec3 air{ 8, 9, 8 };
     const glm::ivec3 sideX{ 1, 0, 0 };
@@ -353,7 +369,7 @@ TEST_CASE("The light shade curve spans the intended range")
     world.SetSkyLight(9, 9, 9, 0);
 
     CHECK(ChunkMesher::CornerLightShade(world, air, sideX, sideZ)
-        == doctest::Approx(0.15f));
+        == doctest::Approx(0.0f));
 }
 
 TEST_CASE("Corner light ignores solid cells when averaging")
@@ -374,4 +390,105 @@ TEST_CASE("Corner light ignores solid cells when averaging")
 
     CHECK(ChunkMesher::CornerLightShade(world, air, sideX, sideZ)
         == doctest::Approx(1.0f));
+}
+
+namespace
+{
+    //Locates the quad (a contiguous run of 4 vertices) whose corners exactly
+    //match the given four positions, in any order. QuadsInPlane alone isn't
+    //enough to isolate one specific face: two different faces (e.g. a block's
+    //top and a neighbouring block's bottom) can share the same plane, so
+    //filtering by plane can return more than one quad's vertices interleaved.
+    std::size_t FindQuadByCorners(
+        const ChunkMeshData& mesh, const glm::vec3 (&corners)[4])
+    {
+        for (std::size_t quad = 0; quad * 4 < mesh.Vertices.size(); ++quad)
+        {
+            bool matched[4] = { false, false, false, false };
+
+            for (int i = 0; i < 4; ++i)
+                for (int e = 0; e < 4; ++e)
+                    if (mesh.Vertices[quad * 4 + i].Position == corners[e])
+                        matched[e] = true;
+
+            if (matched[0] && matched[1] && matched[2] && matched[3])
+                return quad;
+        }
+
+        return static_cast<std::size_t>(-1);
+    }
+}
+
+TEST_CASE("Ambient occlusion darkens exactly the occluded corner, not its neighbours")
+{
+    // Every existing AO test that goes through Build is permutation-invariant:
+    // the lone-block tests have all four corners equal, and the inside-corner
+    // test only checks the darkest value across a whole plane. Nothing pins
+    // FaceGeometry's CornerU/CornerV signs to a specific vertex, so permuting
+    // them would still pass every other test. This one binds the dark corner
+    // to its exact position.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(9, 9, 9, BlockId{1}); // Diagonally across one top corner.
+    FloodFullDaylight(world);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    const glm::vec3 corners[4] =
+    {
+        { 8.0f, 9.0f, 9.0f }, { 9.0f, 9.0f, 9.0f },
+        { 9.0f, 9.0f, 8.0f }, { 8.0f, 9.0f, 8.0f },
+    };
+    const std::size_t quad = FindQuadByCorners(mesh, corners);
+    REQUIRE(quad != static_cast<std::size_t>(-1));
+
+    const VoxelVertex* top = &mesh.Vertices[quad * 4];
+
+    int darkIndex = -1;
+    for (int i = 0; i < 4; ++i)
+        if (top[i].Position == glm::vec3(9.0f, 9.0f, 9.0f))
+            darkIndex = i;
+
+    REQUIRE(darkIndex >= 0);
+
+    std::vector<float> others;
+    for (int i = 0; i < 4; ++i)
+        if (i != darkIndex)
+            others.push_back(top[i].Color.r);
+
+    REQUIRE(others.size() == 3);
+    CHECK(others[0] == doctest::Approx(others[1]));
+    CHECK(others[1] == doctest::Approx(others[2]));
+    CHECK(top[darkIndex].Color.r < others[0]);
+}
+
+TEST_CASE("A quad flips to split along its darker diagonal, at the right vertex")
+{
+    // With ao = {3, 2, 3, 3} (index 1 is the occluded corner at (9,9,9)),
+    // ao[0]+ao[2] = 6 > ao[1]+ao[3] = 5, so the quad must flip: indices
+    // first+1,+2,+3,+3,+0,+1 rather than the unflipped 0,1,2,2,3,0.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(9, 9, 9, BlockId{1});
+    FloodFullDaylight(world);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    const glm::vec3 corners[4] =
+    {
+        { 8.0f, 9.0f, 9.0f }, { 9.0f, 9.0f, 9.0f },
+        { 9.0f, 9.0f, 8.0f }, { 8.0f, 9.0f, 8.0f },
+    };
+    const std::size_t quad = FindQuadByCorners(mesh, corners);
+    REQUIRE(quad != static_cast<std::size_t>(-1));
+
+    const std::uint32_t first = static_cast<std::uint32_t>(quad) * 4;
+    const std::size_t indexBase = quad * 6;
+
+    CHECK(mesh.Indices[indexBase + 0] == first + 1);
+    CHECK(mesh.Indices[indexBase + 1] == first + 2);
+    CHECK(mesh.Indices[indexBase + 2] == first + 3);
+    CHECK(mesh.Indices[indexBase + 3] == first + 3);
+    CHECK(mesh.Indices[indexBase + 4] == first + 0);
+    CHECK(mesh.Indices[indexBase + 5] == first + 1);
 }

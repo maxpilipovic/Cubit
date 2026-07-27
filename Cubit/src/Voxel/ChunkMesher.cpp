@@ -143,10 +143,14 @@ namespace
 
         for (int i = 0; i < 4; ++i)
         {
+            const float lit = face.Shade * ChunkMesher::AoShade[ao[i]] * light[i];
+
+            // The floor applies to the finished shading, not to light alone:
+            // the three factors multiply, so flooring only the light term still
+            // lets an occluded ceiling underside reach near-black.
             const glm::vec3 color = blockColor
-                * face.Shade
-                * ChunkMesher::AoShade[ao[i]]
-                * light[i];
+                * (ChunkMesher::LightFloor
+                    + (1.0f - ChunkMesher::LightFloor) * lit);
 
             mesh.Vertices.push_back({ blockOrigin + face.Corner[i], color });
         }
@@ -257,10 +261,7 @@ float ChunkMesher::CornerLightShade(
     // A corner boxed in on every side has nowhere for light to sit; it is not
     // sampled by any visible face, but guard the division anyway.
     if (counted == 0)
-        return LightFloor;
+        return 0.0f;
 
-    const float average =
-        static_cast<float>(total) / (static_cast<float>(counted) * SkyLight::Max);
-
-    return LightFloor + (1.0f - LightFloor) * average;
+    return static_cast<float>(total) / (static_cast<float>(counted) * SkyLight::Max);
 }
