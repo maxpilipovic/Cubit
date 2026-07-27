@@ -2,7 +2,6 @@
 
 #include "Cubit/Voxel/SkyLight.h"
 
-#include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>

@@ -4,6 +4,9 @@
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
+#include <set>
+#include <vector>
+
 TEST_CASE("An open column is lit from top to bottom")
 {
     World world(1, 4, 1);
@@ -129,8 +132,6 @@ TEST_CASE("Propagation is idempotent")
 
     CHECK(world.GetSkyLight(5, 20, 5) == sample);
 }
-
-#include <vector>
 
 namespace
 {
@@ -269,9 +270,43 @@ TEST_CASE("Repropagation marks the chunks whose light changed")
 
     SkyLight::Repropagate(world, 5, roof, 5);
 
-    // The column below the new hole relit, so its chunks must be dirty.
-    CHECK(world.DirtyChunks().count(glm::ivec3(0, 0, 0)) == 1);
-    CHECK(!world.DirtyChunks().empty());
+    // The exact set of chunks whose light changed, derived from the geometry:
+    //
+    // Opening (5, roof, 5) lets full-strength light free-fall straight down
+    // that whole column (nothing else blocks below the single-layer roof), so
+    // every cell from y = 0 to the roof was previously dark (unreachable —
+    // more than Max=15 sideways steps from the world's other opening at
+    // (24,24)) and is now lit. That column sits in chunk (0,0,0) for y = 0-15
+    // and chunk (0,1,0) for y = 16-20, so both are dirty.
+    //
+    // At each lit y level below the roof, light also spreads sideways from
+    // (5,5) up to 14 steps before dying out (a 15th step computes to exactly
+    // 0, which is not an improvement over the existing 0 and so doesn't
+    // brighten anything or get marked). Along +X that reaches x = 16-19 (still
+    // z = 5, chunk z = 0) — into chunk (1, ·, 0); along +Z it symmetrically
+    // reaches z = 16-19 (still x = 5, chunk x = 0) — into chunk (0, ·, 1). In
+    // both directions the reach spans y = 0-19, so both the y = 0 chunk and
+    // the y = 1 chunk pick up newly lit cells: (1,0,0), (1,1,0), (0,0,1),
+    // (0,1,1).
+    //
+    // Reaching chunk (1,·,1) would need dx >= 11 (to cross into the x = 1
+    // chunk) and dz >= 11 (to cross into the z = 1 chunk) simultaneously,
+    // costing at least 22 steps — well past the 14-step budget — so that
+    // chunk is never touched by this edit, however close it sits to the
+    // world's other, unrelated shaft at (24,24). No y-chunk above 1 is
+    // touched either: nothing above the roof changes.
+    //
+    // That is six chunks total, confirmed by an instrumented run of the fixed
+    // code rather than assumed from it: (0,0,0), (0,0,1), (0,1,0), (0,1,1),
+    // (1,0,0), (1,1,0).
+    const std::set<glm::ivec3, IVec3Less> expected =
+    {
+        glm::ivec3(0, 0, 0), glm::ivec3(0, 0, 1),
+        glm::ivec3(0, 1, 0), glm::ivec3(0, 1, 1),
+        glm::ivec3(1, 0, 0), glm::ivec3(1, 1, 0),
+    };
+
+    CHECK(world.DirtyChunks() == expected);
 }
 
 TEST_CASE("Repropagation after a no-op edit marks nothing dirty")
@@ -280,7 +315,8 @@ TEST_CASE("Repropagation after a no-op edit marks nothing dirty")
     SkyLight::PropagateAll(world);
     world.ClearDirty();
 
-    // Placing a block where one already stands changes no light at all.
+    // Reflooding without any preceding edit changes no light at all, so a
+    // repeat propagation is idempotent and marks nothing dirty.
     const int roof = 20;
     SkyLight::Repropagate(world, 5, roof, 5);
 
