@@ -5,9 +5,9 @@
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
-#include <algorithm>
 #include <deque>
-#include <vector>
+#include <map>
+#include <utility>
 
 namespace
 {
@@ -25,10 +25,61 @@ namespace
 
     constexpr int DownIndex = 5;
 
+    //Remembers what every cell it writes held beforehand, so that once the
+    //light has settled it can mark exactly the chunks whose light really moved.
+    //Relighting an edit blanks cells and refills most of them to the value they
+    //already had; those cost no remeshing, and only the genuine changes should
+    //reach the renderer.
+    class LightRecorder
+    {
+    public:
+        explicit LightRecorder(World& world) : m_World(world) {}
+
+        void Set(const glm::ivec3& cell, int level)
+        {
+            //Only the first write records, so the original survives however
+            //many times a cell is rewritten on the way to its final value.
+            m_Original.try_emplace(
+                cell, m_World.GetSkyLight(cell.x, cell.y, cell.z));
+
+            m_World.SetSkyLight(
+                cell.x, cell.y, cell.z, static_cast<std::uint8_t>(level));
+        }
+
+        void MarkChangedChunks() const
+        {
+            for (const auto& entry : m_Original)
+            {
+                const glm::ivec3& cell = entry.first;
+
+                if (m_World.GetSkyLight(cell.x, cell.y, cell.z) != entry.second)
+                    m_World.MarkChunkDirtyAt(cell.x, cell.y, cell.z);
+            }
+        }
+
+    private:
+        World& m_World;
+        std::map<glm::ivec3, std::uint8_t, IVec3Less> m_Original;
+    };
+
+    //Writes a light value, through the recorder when there is one. A full
+    //propagation rewrites the whole world and has nothing to compare against,
+    //so it passes none.
+    void SetLight(World& world, LightRecorder* recorder,
+        const glm::ivec3& cell, int level)
+    {
+        if (recorder != nullptr)
+            recorder->Set(cell, level);
+        else
+            world.SetSkyLight(
+                cell.x, cell.y, cell.z, static_cast<std::uint8_t>(level));
+    }
+
     //Spreads light outward from every cell already in the queue until nothing
     //can be brightened. A cell is only enqueued when its value actually rises,
     //so this terminates: each cell can rise at most Max times.
-    void Flood(World& world, std::deque<glm::ivec3>& queue)
+    void Flood(World& world, std::deque<glm::ivec3>& queue,
+        LightRecorder* recorder)
     {
         while (!queue.empty())
         {
@@ -58,9 +109,69 @@ namespace
                 if (world.GetSkyLight(next.x, next.y, next.z) >= value)
                     continue;
 
-                world.SetSkyLight(
-                    next.x, next.y, next.z, static_cast<std::uint8_t>(value));
+                SetLight(world, recorder, next, value);
                 queue.push_back(next);
+            }
+        }
+    }
+
+    //Takes light back out of the region a newly solid cell used to light, and
+    //collects the still-lit cells bordering that region into readd, so the
+    //caller can let them spread back in. Clearing a cell that some other source
+    //still reaches is harmless: the flood that follows only raises values, and
+    //that source is in readd.
+    void Unflood(World& world, LightRecorder& recorder,
+        const glm::ivec3& origin, std::deque<glm::ivec3>& readd)
+    {
+        //The cell still holds the light it had while it was open, which is
+        //exactly the light the new block has just cut off.
+        std::deque<std::pair<glm::ivec3, int>> queue;
+        queue.emplace_back(origin, world.GetSkyLight(origin.x, origin.y, origin.z));
+        recorder.Set(origin, 0);
+
+        while (!queue.empty())
+        {
+            const glm::ivec3 cell = queue.front().first;
+            const int level = queue.front().second;
+            queue.pop_front();
+
+            if (level <= 0)
+                continue; // Lit nothing, so it darkened nothing.
+
+            for (int d = 0; d < 6; ++d)
+            {
+                const glm::ivec3 next = cell + Directions[d];
+
+                if (!world.IsInBounds(next.x, next.y, next.z))
+                    continue;
+                if (world.IsBlockSolid(next.x, next.y, next.z))
+                    continue;
+
+                const int nextLevel = world.GetSkyLight(next.x, next.y, next.z);
+                if (nextLevel == 0)
+                    continue; // Already dark; nothing to take back.
+
+                // A dimmer neighbour was lit by this cell. So was the cell
+                // directly below a free-falling one, which holds the *same*
+                // level rather than a lower one — the case that separates sky
+                // light from a plain flood fill, and the one a removal that
+                // only looks for dimmer neighbours leaves wrongly lit.
+                const bool litByThisCell =
+                    nextLevel < level ||
+                    (d == DownIndex && level == SkyLight::Max &&
+                        nextLevel == SkyLight::Max);
+
+                if (litByThisCell)
+                {
+                    queue.emplace_back(next, nextLevel);
+                    recorder.Set(next, 0);
+                }
+                else
+                {
+                    // Lit by something the edit did not touch, so it survives
+                    // and can fill the space just cleared.
+                    readd.push_back(next);
+                }
             }
         }
     }
@@ -88,92 +199,45 @@ void SkyLight::PropagateAll(World& world)
         }
     }
 
-    Flood(world, queue);
+    Flood(world, queue, nullptr);
 }
 
 void SkyLight::Repropagate(World& world, int x, int y, int z)
 {
-    (void)y; // The box always spans the full height, so the edit's y is unused.
+    const glm::ivec3 edit(x, y, z);
 
-    const int radius = Max;
-    const int minX = std::max(0, x - radius);
-    const int maxX = std::min(world.GetWidth() - 1, x + radius);
-    const int minZ = std::max(0, z - radius);
-    const int maxZ = std::min(world.GetDepth() - 1, z + radius);
-    const int top = world.GetHeight() - 1;
-
-    // Remember what the box held, so only genuinely changed chunks are marked.
-    std::vector<std::uint8_t> before;
-    before.reserve(
-        static_cast<std::size_t>(maxX - minX + 1) *
-        (maxZ - minZ + 1) * (top + 1));
-
-    for (int cz = minZ; cz <= maxZ; ++cz)
-        for (int cy = 0; cy <= top; ++cy)
-            for (int cx = minX; cx <= maxX; ++cx)
-                before.push_back(world.GetSkyLight(cx, cy, cz));
-
-    for (int cz = minZ; cz <= maxZ; ++cz)
-        for (int cy = 0; cy <= top; ++cy)
-            for (int cx = minX; cx <= maxX; ++cx)
-                world.SetSkyLight(cx, cy, cz, 0);
-
+    LightRecorder recorder(world);
     std::deque<glm::ivec3> queue;
 
-    // Seed one: the open sky above the box.
-    for (int cz = minZ; cz <= maxZ; ++cz)
+    if (world.IsBlockSolid(x, y, z))
     {
-        for (int cx = minX; cx <= maxX; ++cx)
+        // The edit filled this cell in. Take back the light it used to give,
+        // keeping whatever still-lit cells border the darkened region.
+        Unflood(world, recorder, edit, queue);
+    }
+    else
+    {
+        // The edit opened this cell up. A cell at the very top is open sky and
+        // lights itself; anywhere else, the surrounding cells fill it in.
+        if (y == world.GetHeight() - 1)
         {
-            if (world.IsBlockSolid(cx, top, cz))
+            recorder.Set(edit, Max);
+            queue.push_back(edit);
+        }
+
+        for (const glm::ivec3& direction : Directions)
+        {
+            const glm::ivec3 next = edit + direction;
+
+            if (!world.IsInBounds(next.x, next.y, next.z))
+                continue;
+            if (world.GetSkyLight(next.x, next.y, next.z) == 0)
                 continue;
 
-            world.SetSkyLight(cx, top, cz, Max);
-            queue.push_back(glm::ivec3(cx, top, cz));
+            queue.push_back(next);
         }
     }
 
-    // Seed two: the ring of cells just outside the box. They kept their values
-    // through the clear, and light flows from them back in. Enqueuing them is
-    // safe because Flood only ever raises a cell, and nothing outside the box
-    // can be too dark.
-    for (int cy = 0; cy <= top; ++cy)
-    {
-        for (int cz = minZ - 1; cz <= maxZ + 1; ++cz)
-        {
-            for (int cx = minX - 1; cx <= maxX + 1; ++cx)
-            {
-                const bool insideBox =
-                    cx >= minX && cx <= maxX && cz >= minZ && cz <= maxZ;
-
-                if (insideBox)
-                    continue;
-                if (!world.IsInBounds(cx, cy, cz))
-                    continue;
-                if (world.IsBlockSolid(cx, cy, cz))
-                    continue;
-                if (world.GetSkyLight(cx, cy, cz) == 0)
-                    continue;
-
-                queue.push_back(glm::ivec3(cx, cy, cz));
-            }
-        }
-    }
-
-    Flood(world, queue);
-
-    std::size_t index = 0;
-    for (int cz = minZ; cz <= maxZ; ++cz)
-    {
-        for (int cy = 0; cy <= top; ++cy)
-        {
-            for (int cx = minX; cx <= maxX; ++cx)
-            {
-                if (world.GetSkyLight(cx, cy, cz) != before[index])
-                    world.MarkChunkDirtyAt(cx, cy, cz);
-
-                ++index;
-            }
-        }
-    }
+    Flood(world, queue, &recorder);
+    recorder.MarkChangedChunks();
 }

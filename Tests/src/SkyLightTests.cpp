@@ -1,9 +1,10 @@
-#include <doctest.h>
+﻿#include <doctest.h>
 
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
+#include <chrono>
 #include <set>
 #include <vector>
 
@@ -90,7 +91,7 @@ TEST_CASE("Light that has already dimmed does not fall for free")
     // A solid world with an L carved into it: a shaft open to the sky, and a
     // pocket hanging off its foot. The pocket's only entrance is one sideways
     // step out of the shaft, so everything below its top is reached by light
-    // that has already dimmed falling — the case a free fall would mask.
+    // that has already dimmed falling â€” the case a free fall would mask.
     World world(1, 4, 1);
 
     for (int z = 0; z < world.GetDepth(); ++z)
@@ -151,6 +152,21 @@ namespace
         return values;
     }
 
+    //A world with solid ground under open sky, the shape most of a real map
+    //has. An edit on that surface disturbs almost nothing, which is what makes
+    //it the case that separates relighting the change from relighting a box.
+    World BuildOpenGroundWorld()
+    {
+        World world(3, 4, 3);
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 0; y <= 10; ++y)
+                for (int x = 0; x < world.GetWidth(); ++x)
+                    world.SetBlock(x, y, z, BlockId{1});
+
+        return world;
+    }
+
     //A world with a roof over everything but one open shaft, so there is both
     //bright and dark space for an edit to disturb.
     World BuildRoofedWorld()
@@ -197,11 +213,11 @@ TEST_CASE("Sealing a shaft takes the light back out of it")
     CHECK(world.GetSkyLight(24, 0, 24) == 0);
 }
 
-TEST_CASE("Bounded repropagation matches a full propagation")
+TEST_CASE("Repropagation under a roof matches a full propagation")
 {
-    // The test that proves the box is big enough. Whatever the edit, relighting
-    // only the box must leave the world in exactly the state a from-scratch
-    // flood would have produced.
+    // The test that proves the incremental relight reaches far enough. Whatever
+    // the edit, settling the light around it must leave the world in exactly the
+    // state a from-scratch flood would have produced.
     World world = BuildRoofedWorld();
     SkyLight::PropagateAll(world);
 
@@ -274,7 +290,7 @@ TEST_CASE("Repropagation marks the chunks whose light changed")
     //
     // Opening (5, roof, 5) lets full-strength light free-fall straight down
     // that whole column (nothing else blocks below the single-layer roof), so
-    // every cell from y = 0 to the roof was previously dark (unreachable —
+    // every cell from y = 0 to the roof was previously dark (unreachable â€”
     // more than Max=15 sideways steps from the world's other opening at
     // (24,24)) and is now lit. That column sits in chunk (0,0,0) for y = 0-15
     // and chunk (0,1,0) for y = 16-20, so both are dirty.
@@ -283,15 +299,15 @@ TEST_CASE("Repropagation marks the chunks whose light changed")
     // (5,5) up to 14 steps before dying out (a 15th step computes to exactly
     // 0, which is not an improvement over the existing 0 and so doesn't
     // brighten anything or get marked). Along +X that reaches x = 16-19 (still
-    // z = 5, chunk z = 0) — into chunk (1, ·, 0); along +Z it symmetrically
-    // reaches z = 16-19 (still x = 5, chunk x = 0) — into chunk (0, ·, 1). In
+    // z = 5, chunk z = 0) â€” into chunk (1, Â·, 0); along +Z it symmetrically
+    // reaches z = 16-19 (still x = 5, chunk x = 0) â€” into chunk (0, Â·, 1). In
     // both directions the reach spans y = 0-19, so both the y = 0 chunk and
     // the y = 1 chunk pick up newly lit cells: (1,0,0), (1,1,0), (0,0,1),
     // (0,1,1).
     //
-    // Reaching chunk (1,·,1) would need dx >= 11 (to cross into the x = 1
+    // Reaching chunk (1,Â·,1) would need dx >= 11 (to cross into the x = 1
     // chunk) and dz >= 11 (to cross into the z = 1 chunk) simultaneously,
-    // costing at least 22 steps — well past the 14-step budget — so that
+    // costing at least 22 steps â€” well past the 14-step budget â€” so that
     // chunk is never touched by this edit, however close it sits to the
     // world's other, unrelated shaft at (24,24). No y-chunk above 1 is
     // touched either: nothing above the roof changes.
@@ -307,6 +323,108 @@ TEST_CASE("Repropagation marks the chunks whose light changed")
     };
 
     CHECK(world.DirtyChunks() == expected);
+}
+
+TEST_CASE("Repropagation over open ground matches a full propagation")
+{
+    // The roofed world exercises light creeping under an overhang. This one
+    // exercises the other rule: full-strength light falling for free down an
+    // open column. Interrupting such a column is the case a relight that only
+    // removes dimmer neighbours gets wrong, because the cell below a
+    // free-falling one holds the *same* level, not a lower one.
+    World world = BuildOpenGroundWorld();
+    SkyLight::PropagateAll(world);
+
+    const int surface = 10;
+    glm::ivec3 edit{ 0, 0, 0 };
+    BlockId block{ 0 };
+
+    SUBCASE("breaking the surface block")
+    {
+        edit = glm::ivec3(24, surface, 24);
+        block = BlockId{0};
+    }
+
+    SUBCASE("placing a block on the surface")
+    {
+        edit = glm::ivec3(24, surface + 1, 24);
+        block = BlockId{1};
+    }
+
+    SUBCASE("placing a block in mid-air, interrupting a free-falling column")
+    {
+        edit = glm::ivec3(24, 30, 24);
+        block = BlockId{1};
+    }
+
+    SUBCASE("placing a block in mid-air at the world edge")
+    {
+        edit = glm::ivec3(0, 30, 0);
+        block = BlockId{1};
+    }
+
+    world.SetBlock(edit.x, edit.y, edit.z, block);
+    SkyLight::Repropagate(world, edit.x, edit.y, edit.z);
+    const std::vector<std::uint8_t> bounded = LightSnapshot(world);
+
+    SkyLight::PropagateAll(world);
+    const std::vector<std::uint8_t> full = LightSnapshot(world);
+
+    CHECK(bounded == full);
+}
+
+TEST_CASE("Placing a block darkens the whole column it shades")
+{
+    // Stated directly rather than only through the equivalence check, so the
+    // free-fall removal rule has a test that names what it is for.
+    World world = BuildOpenGroundWorld();
+    SkyLight::PropagateAll(world);
+
+    REQUIRE(world.GetSkyLight(24, 20, 24) == SkyLight::Max);
+    REQUIRE(world.GetSkyLight(24, 11, 24) == SkyLight::Max);
+
+    world.SetBlock(24, 30, 24, BlockId{1});
+    SkyLight::Repropagate(world, 24, 30, 24);
+
+    // Everything under the new block loses its free fall. It is not pitch dark
+    // â€” light creeps back in sideways from the open columns around it â€” but it
+    // must no longer be at full strength.
+    CHECK(world.GetSkyLight(24, 29, 24) < SkyLight::Max);
+    CHECK(world.GetSkyLight(24, 20, 24) < SkyLight::Max);
+    CHECK(world.GetSkyLight(24, 11, 24) < SkyLight::Max);
+
+    // Above the block is untouched.
+    CHECK(world.GetSkyLight(24, 31, 24) == SkyLight::Max);
+}
+
+TEST_CASE("Relighting an edit costs what the edit changed, not what it might have")
+{
+    // The bug this guards: relighting used to blank a fixed radius-15,
+    // full-height box around every edit and flood it again from scratch, so a
+    // block broken on open ground cost tens of thousands of cell visits to
+    // discover that one cell had changed. Each toggle below changes a single
+    // cell's light, so a hundred of them is a small amount of real work.
+    World world = BuildOpenGroundWorld();
+    SkyLight::PropagateAll(world);
+
+    const int surface = 10;
+    constexpr int edits = 100;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < edits; ++i)
+    {
+        world.SetBlock(24, surface, 24, i % 2 == 0 ? BlockId{0} : BlockId{1});
+        SkyLight::Repropagate(world, 24, surface, 24);
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    const double ms =
+        std::chrono::duration<double, std::milli>(elapsed).count();
+
+    INFO("100 single-cell edits took ", ms, " ms");
+
+    // Deliberately loose: this is a Debug build and the point is the order of
+    // magnitude, not a stopwatch. Relighting the box costs well over 100x this.
+    CHECK(ms < 250.0);
 }
 
 TEST_CASE("Repropagation after a no-op edit marks nothing dirty")

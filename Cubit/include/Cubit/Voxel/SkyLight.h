@@ -22,9 +22,13 @@ public:
     //already has every chunk dirty.
     static void PropagateAll(World& world);
 
-    //Re-floods the region an edit at this position can affect, and marks every
-    //chunk whose light actually changed dirty. Light cannot travel more than
-    //Max blocks horizontally, so a box of that radius is provably enough; it
-    //spans the world's full height because full-strength light falls for free.
+    //Settles the light around an edit already made at this position, and marks
+    //every chunk whose light actually changed dirty. Works outward from the
+    //edit and stops where the light stops moving, so the cost follows what the
+    //edit disturbed rather than the size of the region it might have.
+    //
+    //Call it after the block has been set: a cell that has just been filled in
+    //still holds the light it had while it was open, which is what tells this
+    //how much light the new block cut off.
     static void Repropagate(World& world, int x, int y, int z);
 };
