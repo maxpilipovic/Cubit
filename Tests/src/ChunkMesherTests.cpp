@@ -1,9 +1,11 @@
-#include <doctest.h>
+﻿#include <doctest.h>
 
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
+#include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 
@@ -284,4 +286,39 @@ TEST_CASE("A buried block contributes no geometry")
     RequireWellFormed(mesh);
     CHECK(MeshedFaceCount(mesh) == CountExposedFaces(world, 0, 0, 0));
     CHECK(MeshedFaceCount(mesh) == 30);
+}
+
+TEST_CASE("Meshing a chunk costs little more than reading its blocks")
+{
+    // Build used to sample every ambient-occlusion and light cell straight out
+    // of World, which turns a world position into a chunk and an offset on
+    // every single read â€” tens of thousands of times per chunk. Now that
+    // relighting an edit is cheap, remeshing is what an edit costs, so a chunk
+    // rebuild has to stay near the cost of walking its blocks once.
+    World world(4, 1, 4);
+    BuildTestTerrain(world);
+    SkyLight::PropagateAll(world);
+
+    const auto start = std::chrono::steady_clock::now();
+
+    std::size_t faces = 0;
+    for (int chunkZ = 0; chunkZ < world.GetChunksZ(); ++chunkZ)
+        for (int chunkX = 0; chunkX < world.GetChunksX(); ++chunkX)
+            faces += MeshedFaceCount(ChunkMesher::Build(world, chunkX, 0, chunkZ));
+
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    const double ms =
+        std::chrono::duration<double, std::milli>(elapsed).count();
+
+    REQUIRE(faces > 0); // Meshing nothing would pass any budget.
+    INFO("meshing ", world.GetChunksX() * world.GetChunksZ(),
+        " chunks (", faces, " faces) took ", ms, " ms");
+
+    // Sampling through World cost about 98 ms here; reading a cached
+    // neighbourhood by flat index costs about 31, drifting a couple of ms
+    // either way between runs. The bound is set well clear of that spread
+    // rather than against it: this is a Debug build on whatever machine runs
+    // it, so the test is here to catch a return to the old order of magnitude,
+    // not to hold a stopwatch to the current one.
+    CHECK(ms < 50.0);
 }

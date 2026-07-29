@@ -492,3 +492,109 @@ TEST_CASE("A quad flips to split along its darker diagonal, at the right vertex"
     CHECK(mesh.Indices[indexBase + 4] == first + 0);
     CHECK(mesh.Indices[indexBase + 5] == first + 1);
 }
+
+namespace
+{
+    //Finds the vertex at one corner of a face, among vertices already narrowed
+    //to that face. A corner position on its own is shared by the three faces
+    //meeting there, so the caller picks the face first.
+    const VoxelVertex& CornerAt(
+        const std::vector<VoxelVertex>& face, float x, float z)
+    {
+        const VoxelVertex* found = nullptr;
+
+        for (const VoxelVertex& vertex : face)
+            if (vertex.Position.x == x && vertex.Position.z == z)
+            {
+                REQUIRE(found == nullptr); // Ambiguous, so the test is wrong.
+                found = &vertex;
+            }
+
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    //The red channel a top-face vertex ends up with, worked out from the shading
+    //rule rather than read back from the mesher: the block's colour scaled by
+    //the floor plus the finished shade, which for a top face is occlusion times
+    //light.
+    float ExpectedTopRed(const World& world, int ao, float lightShade)
+    {
+        const float lit = ChunkMesher::AoShade[ao] * lightShade;
+
+        return world.GetBlockColor(BlockId{1}) .r *
+            (ChunkMesher::LightFloor +
+                (1.0f - ChunkMesher::LightFloor) * lit);
+    }
+}
+
+TEST_CASE("Occlusion samples blocks across a chunk boundary")
+{
+    // A block on the last column of chunk 0, with its occluder sitting in
+    // chunk 1. Meshing chunk 0 has to reach across the seam to find it: the
+    // two corners on that side are occluded, the two on the far side are open.
+    World world(2, 1, 1);
+    const int edge = Chunk::Width - 1;
+
+    world.SetBlock(edge, 8, 8, BlockId{1});
+    world.SetBlock(Chunk::Width, 9, 8, BlockId{1}); // in the next chunk
+    FloodFullDaylight(world);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+    const std::vector<VoxelVertex> top = QuadsInPlane(mesh, 1, 9.0f);
+    REQUIRE(top.size() == 4);
+
+    // The top face's four corners, named by the x they sit at.
+    const float nearX = static_cast<float>(edge);      // 15, away from the seam
+    const float farX = static_cast<float>(edge + 1);   // 16, against the seam
+
+    CHECK(CornerAt(top, farX, 9.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 2, 1.0f)));
+    CHECK(CornerAt(top, farX, 8.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 2, 1.0f)));
+
+    CHECK(CornerAt(top, nearX, 9.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 1.0f)));
+    CHECK(CornerAt(top, nearX, 8.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 1.0f)));
+}
+
+TEST_CASE("Corner light samples cells across a chunk boundary")
+{
+    // Same seam, but darkening cells in the next chunk instead of filling them.
+    // Each corner averages the four cells around it, so the two corners against
+    // the seam pick up the darkness in proportion to how many of their cells
+    // lie beyond it.
+    World world(2, 1, 1);
+    const int edge = Chunk::Width - 1;
+
+    world.SetBlock(edge, 8, 8, BlockId{1});
+    FloodFullDaylight(world);
+
+    // Two of the three cells the seam-side corners sample, blacked out.
+    world.SetSkyLight(Chunk::Width, 9, 8, 0);
+    world.SetSkyLight(Chunk::Width, 9, 9, 0);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+    const std::vector<VoxelVertex> top = QuadsInPlane(mesh, 1, 9.0f);
+    REQUIRE(top.size() == 4);
+
+    const float nearX = static_cast<float>(edge);
+    const float farX = static_cast<float>(edge + 1);
+
+    // Corner at (16, 9, 9) averages (15,9,8), (16,9,8), (15,9,9), (16,9,9):
+    // two lit, two dark.
+    CHECK(CornerAt(top, farX, 9.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 0.5f)));
+
+    // Corner at (16, 9, 8) averages (15,9,8), (16,9,8), (15,9,7), (16,9,7):
+    // only the one dark cell.
+    CHECK(CornerAt(top, farX, 8.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 0.75f)));
+
+    // The far side never crosses the seam, so it stays fully lit.
+    CHECK(CornerAt(top, nearX, 9.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 1.0f)));
+    CHECK(CornerAt(top, nearX, 8.0f).Color.r ==
+        doctest::Approx(ExpectedTopRed(world, 3, 1.0f)));
+}

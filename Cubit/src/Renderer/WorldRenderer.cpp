@@ -10,6 +10,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <chrono>
+
 void WorldRenderer::Update(World& world)
 {
     // Absorb this frame's changes into the pending set, then let the world forget
@@ -18,10 +20,12 @@ void WorldRenderer::Update(World& world)
         m_Pending.insert(coord);
     world.ClearDirty();
 
-    // Mesh up to the per-frame budget, removing each chunk as it is handled.
-    std::size_t built = 0;
-    for (auto it = m_Pending.begin();
-         it != m_Pending.end() && built < MeshBudgetPerFrame; )
+    // Mesh until this frame's slice is spent, removing each chunk as it is
+    // handled. The budget is checked after building rather than before, so one
+    // chunk is always built however long it takes and the set always drains.
+    const auto start = std::chrono::steady_clock::now();
+
+    for (auto it = m_Pending.begin(); it != m_Pending.end(); )
     {
         const glm::ivec3 coord = *it;
         const ChunkMeshData mesh =
@@ -51,7 +55,12 @@ void WorldRenderer::Update(World& world)
         }
 
         it = m_Pending.erase(it);
-        ++built;
+
+        const std::chrono::duration<double, std::milli> spent =
+            std::chrono::steady_clock::now() - start;
+
+        if (spent.count() >= MeshBudgetMilliseconds)
+            break;
     }
 }
 

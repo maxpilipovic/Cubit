@@ -68,9 +68,18 @@ private:
         std::uint32_t FaceCount = 0;
     };
 
-    //How many chunks to (re)mesh per Update, so a full load spreads over frames
-    //instead of stalling one.
-    static constexpr std::size_t MeshBudgetPerFrame = 16;
+    //How long one Update may spend rebuilding chunk meshes, so a burst of them
+    //spreads over frames instead of stalling one.
+    //
+    //A count cannot do this job. Chunks differ several-fold in how much
+    //geometry they carry, and the same count costs very different amounts in a
+    //debug and an optimised build, so any count is either a stall in one of
+    //them or needless dawdling in the other. A slice of the frame holds either
+    //way.
+    //
+    //Update always builds at least one chunk, so however small this is, the
+    //pending set still drains.
+    static constexpr double MeshBudgetMilliseconds = 4.0;
 
     std::map<glm::ivec3, ChunkMesh, IVec3Less> m_Meshes;
     std::set<glm::ivec3, IVec3Less> m_Pending;

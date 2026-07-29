@@ -8,8 +8,175 @@
 
 #include "Core/CoreLogger.h"
 
+#include <array>
+
 namespace
 {
+    //A chunk plus the one-block shell around it, copied out of the world once
+    //per mesh. Occlusion and light sampling reach exactly one cell past a block
+    //on each axis, so one block of shell is enough to mesh without touching the
+    //world again — which matters because resolving a world position to a chunk
+    //and an offset, tens of thousands of times a chunk, was most of what
+    //meshing cost.
+    //
+    //Reads outside the world go through World on the way in, so the shell keeps
+    //its answers: air, and open sky.
+    class Neighbourhood
+    {
+    public:
+        static constexpr int Shell = 1;
+        static constexpr int SpanX = Chunk::Width + 2 * Shell;
+        static constexpr int SpanY = Chunk::Height + 2 * Shell;
+        static constexpr int SpanZ = Chunk::Depth + 2 * Shell;
+        static constexpr int Count = SpanX * SpanY * SpanZ;
+
+        Neighbourhood(const World& world, const glm::ivec3& chunkOrigin)
+        {
+            //The middle of the neighbourhood is exactly one chunk, which can be
+            //read by local coordinates; only the shell has to go through the
+            //world and pay for the conversion.
+            const Chunk& chunk = world.GetChunk(
+                chunkOrigin.x / Chunk::Width,
+                chunkOrigin.y / Chunk::Height,
+                chunkOrigin.z / Chunk::Depth);
+
+            const glm::ivec3 base = chunkOrigin - glm::ivec3(Shell);
+            int index = 0;
+
+            for (int z = 0; z < SpanZ; ++z)
+            {
+                const bool insideZ = z >= Shell && z < Shell + Chunk::Depth;
+
+                for (int y = 0; y < SpanY; ++y)
+                {
+                    const bool insideY =
+                        insideZ && y >= Shell && y < Shell + Chunk::Height;
+
+                    for (int x = 0; x < SpanX; ++x, ++index)
+                    {
+                        if (insideY && x >= Shell && x < Shell + Chunk::Width)
+                        {
+                            m_Blocks[index] = chunk.GetBlock(
+                                x - Shell, y - Shell, z - Shell);
+                            m_Light[index] = chunk.GetSkyLight(
+                                x - Shell, y - Shell, z - Shell);
+                            continue;
+                        }
+
+                        const glm::ivec3 cell = base + glm::ivec3(x, y, z);
+                        m_Blocks[index] =
+                            world.GetBlock(cell.x, cell.y, cell.z);
+                        m_Light[index] =
+                            world.GetSkyLight(cell.x, cell.y, cell.z);
+                    }
+                }
+            }
+        }
+
+        //The flat index of a block at chunk-local coordinates.
+        static int At(int localX, int localY, int localZ)
+        {
+            return (localX + Shell) +
+                SpanX * ((localY + Shell) + SpanY * (localZ + Shell));
+        }
+
+        //The flat offset matching a step of v. Linear in v, so scaling a face's
+        //tangent axis scales its offset the same way — which is what lets a
+        //corner be addressed by adding two integers.
+        static int Step(const glm::ivec3& v)
+        {
+            return v.x + SpanX * v.y + SpanX * SpanY * v.z;
+        }
+
+        BlockId Block(int cell) const { return m_Blocks[cell]; }
+        bool IsSolid(int cell) const { return ::IsSolid(m_Blocks[cell]); }
+        int Light(int cell) const { return m_Light[cell]; }
+
+    private:
+        //Raw arrays rather than std::array: meshing subscripts these tens of
+        //thousands of times per chunk, and a debug build checks every
+        //std::array subscript. Every index comes from At plus a Step, so it
+        //stays inside the shell by construction.
+        BlockId m_Blocks[Count];
+        std::uint8_t m_Light[Count];
+    };
+
+    //Reads straight from the world, for the callers that hand one over rather
+    //than meshing a whole chunk.
+    struct WorldCells
+    {
+        const World& Cells;
+
+        bool IsSolid(const glm::ivec3& cell) const
+        {
+            return Cells.IsBlockSolid(cell.x, cell.y, cell.z);
+        }
+
+        int Light(const glm::ivec3& cell) const
+        {
+            return Cells.GetSkyLight(cell.x, cell.y, cell.z);
+        }
+    };
+
+    //How exposed one corner is. Written against anything that can answer
+    //IsSolid and Light, so the chunk cache and a bare world share one rule
+    //rather than drifting apart as two copies. A cell is whatever that source
+    //addresses cells by — a flat index for the cache, a position for the world
+    //— and a side is a step in the same terms.
+    template <typename Cells, typename Cell, typename Side>
+    int CornerAo(const Cells& cells, const Cell& airCell,
+        const Side& sideA, const Side& sideB)
+    {
+        const bool solidA = cells.IsSolid(airCell + sideA);
+        const bool solidB = cells.IsSolid(airCell + sideB);
+
+        // Two walls meeting at a right angle seal the corner completely, so what
+        // sits diagonally behind them cannot lighten it.
+        if (solidA && solidB)
+            return 0;
+
+        const bool solidCorner = cells.IsSolid(airCell + sideA + sideB);
+
+        return 3
+            - static_cast<int>(solidA)
+            - static_cast<int>(solidB)
+            - static_cast<int>(solidCorner);
+    }
+
+    //The light sitting at one corner: the mean of the open cells touching it.
+    template <typename Cells, typename Cell, typename Side>
+    float CornerLight(const Cells& cells, const Cell& airCell,
+        const Side& sideA, const Side& sideB)
+    {
+        const Cell corners[4] =
+        {
+            airCell,
+            airCell + sideA,
+            airCell + sideB,
+            airCell + sideA + sideB,
+        };
+
+        int total = 0;
+        int counted = 0;
+
+        for (const Cell& cell : corners)
+        {
+            if (cells.IsSolid(cell))
+                continue;
+
+            total += cells.Light(cell);
+            ++counted;
+        }
+
+        // A corner boxed in on every side has nowhere for light to sit; it is
+        // not sampled by any visible face, but guard the division anyway.
+        if (counted == 0)
+            return 0.0f;
+
+        return static_cast<float>(total) /
+            (static_cast<float>(counted) * SkyLight::Max);
+    }
+
     //Adds two triangles referencing the four vertices most recently appended.
     //A quad can be split along either diagonal; flipping picks the other one.
     void AddFaceIndices(ChunkMeshData& mesh, bool flip)
@@ -119,26 +286,36 @@ namespace
 
     //Emits one face: four vertices shaded by their own corner occlusion, then
     //the two triangles joining them.
+    //A face's normal and tangent axes as flat neighbourhood offsets, worked out
+    //once per mesh instead of per block.
+    struct FaceSteps
+    {
+        int Normal;
+        int U;
+        int V;
+    };
+
+
     void AddFace(
         ChunkMeshData& mesh,
-        const World& world,
-        const glm::ivec3& worldPosition,
+        const Neighbourhood& cells,
+        int blockCell,
         const glm::vec3& blockOrigin,
         const FaceGeometry& face,
+        const FaceSteps& steps,
         const glm::vec3& blockColor)
     {
-        const glm::ivec3 airCell = worldPosition + face.Normal;
+        const int airCell = blockCell + steps.Normal;
 
         int ao[4];
         float light[4];
         for (int i = 0; i < 4; ++i)
         {
-            const glm::ivec3 sideA = face.U * face.CornerU[i];
-            const glm::ivec3 sideB = face.V * face.CornerV[i];
+            const int sideA = steps.U * face.CornerU[i];
+            const int sideB = steps.V * face.CornerV[i];
 
-            ao[i] = ChunkMesher::CornerAoLevel(world, airCell, sideA, sideB);
-            light[i] =
-                ChunkMesher::CornerLightShade(world, airCell, sideA, sideB);
+            ao[i] = CornerAo(cells, airCell, sideA, sideB);
+            light[i] = CornerLight(cells, airCell, sideA, sideB);
         }
 
         for (int i = 0; i < 4; ++i)
@@ -165,20 +342,19 @@ namespace
     //vertices use chunk-local coordinates.
     void AddExposedFaces(
         ChunkMeshData& mesh,
-        const World& world,
-        const glm::ivec3& worldPosition,
-        const glm::ivec3& localPosition)
+        const Neighbourhood& cells,
+        const Palette& palette,
+        const FaceSteps (&steps)[6],
+        int blockCell,
+        const glm::vec3& blockOrigin)
     {
-        const glm::vec3 blockOrigin(localPosition);
-        const glm::vec3 color = world.GetBlockColor(
-            world.GetBlock(worldPosition.x, worldPosition.y, worldPosition.z));
+        const glm::vec3 color = palette[cells.Block(blockCell)];
 
-        for (const FaceGeometry& face : Faces)
+        for (int f = 0; f < 6; ++f)
         {
-            const glm::ivec3 neighbour = worldPosition + face.Normal;
-
-            if (!world.IsBlockSolid(neighbour.x, neighbour.y, neighbour.z))
-                AddFace(mesh, world, worldPosition, blockOrigin, face, color);
+            if (!cells.IsSolid(blockCell + steps[f].Normal))
+                AddFace(mesh, cells, blockCell, blockOrigin,
+                    Faces[f], steps[f], color);
         }
     }
 }
@@ -188,17 +364,30 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
     ChunkMeshData mesh;
     const glm::ivec3 origin = World::GetChunkOrigin(chunkX, chunkY, chunkZ);
 
+    const Neighbourhood cells(world, origin);
+    const Palette& palette = world.GetPalette();
+
+    FaceSteps steps[6];
+    for (int f = 0; f < 6; ++f)
+        steps[f] = {
+            Neighbourhood::Step(Faces[f].Normal),
+            Neighbourhood::Step(Faces[f].U),
+            Neighbourhood::Step(Faces[f].V) };
+
     for (int z = 0; z < Chunk::Depth; ++z)
     {
         for (int y = 0; y < Chunk::Height; ++y)
         {
             for (int x = 0; x < Chunk::Width; ++x)
             {
-                const glm::ivec3 local(x, y, z);
-                const glm::ivec3 position = origin + local;
+                const int cell = Neighbourhood::At(x, y, z);
+                if (!cells.IsSolid(cell))
+                    continue;
 
-                if (world.IsBlockSolid(position.x, position.y, position.z))
-                    AddExposedFaces(mesh, world, position, local);
+                // Vertices are chunk-local, so the loop counters are already
+                // the block's origin.
+                AddExposedFaces(mesh, cells, palette, steps, cell,
+                    glm::vec3(x, y, z));
             }
         }
     }
@@ -212,24 +401,7 @@ int ChunkMesher::CornerAoLevel(
     const glm::ivec3& sideA,
     const glm::ivec3& sideB)
 {
-    const glm::ivec3 a = airCell + sideA;
-    const glm::ivec3 b = airCell + sideB;
-
-    const bool solidA = world.IsBlockSolid(a.x, a.y, a.z);
-    const bool solidB = world.IsBlockSolid(b.x, b.y, b.z);
-
-    // Two walls meeting at a right angle seal the corner completely, so what
-    // sits diagonally behind them cannot lighten it.
-    if (solidA && solidB)
-        return 0;
-
-    const glm::ivec3 c = airCell + sideA + sideB;
-    const bool solidCorner = world.IsBlockSolid(c.x, c.y, c.z);
-
-    return 3
-        - static_cast<int>(solidA)
-        - static_cast<int>(solidB)
-        - static_cast<int>(solidCorner);
+    return CornerAo(WorldCells{ world }, airCell, sideA, sideB);
 }
 
 float ChunkMesher::CornerLightShade(
@@ -238,30 +410,5 @@ float ChunkMesher::CornerLightShade(
     const glm::ivec3& sideA,
     const glm::ivec3& sideB)
 {
-    const glm::ivec3 cells[4] =
-    {
-        airCell,
-        airCell + sideA,
-        airCell + sideB,
-        airCell + sideA + sideB,
-    };
-
-    int total = 0;
-    int counted = 0;
-
-    for (const glm::ivec3& cell : cells)
-    {
-        if (world.IsBlockSolid(cell.x, cell.y, cell.z))
-            continue;
-
-        total += world.GetSkyLight(cell.x, cell.y, cell.z);
-        ++counted;
-    }
-
-    // A corner boxed in on every side has nowhere for light to sit; it is not
-    // sampled by any visible face, but guard the division anyway.
-    if (counted == 0)
-        return 0.0f;
-
-    return static_cast<float>(total) / (static_cast<float>(counted) * SkyLight::Max);
+    return CornerLight(WorldCells{ world }, airCell, sideA, sideB);
 }
