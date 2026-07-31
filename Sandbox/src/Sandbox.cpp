@@ -51,6 +51,10 @@ namespace
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
 
+    //The map the sandbox starts on, resolved against the working directory like
+    //SavePath below.
+    constexpr const char* MapPath = "assets/maps/battlefield.vox";
+
     //Where F5 writes the edited world, resolved against the current working
     //directory (the project launches from the target directory, so in practice
     //that's beside the executable). Deliberately not the map that was loaded:
@@ -77,14 +81,10 @@ public:
                 OnPlayerDied(event);
             });
 
-        m_World = BuildWorld(VoxLoader::LoadFile("assets/maps/battlefield.vox"));
         //The world starts with every chunk dirty, so the first render meshes it.
-
-        // Light has to exist before anything meshes, or the first frames bake
-        // a fully dark world into their vertex colours.
-        SkyLight::PropagateAll(m_World);
-
-        UpdateCameraPosition();
+        //A sandbox that cannot load its map has nothing to do, so unlike F9 this
+        //does not catch — the failure propagates out of the constructor.
+        LoadWorld(MapPath);
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -285,6 +285,43 @@ private:
             " was defeated by player " + std::to_string(event.Killer));
     }
 
+    //Replaces the world with the map at this path and settles the player into it.
+    //Throws when the file cannot be read or parsed.
+    void LoadWorld(const char* path)
+    {
+        // Assigning only after LoadFile returns means a bad file leaves the
+        // current world untouched, rather than half-replaced.
+        m_World = BuildWorld(VoxLoader::LoadFile(path));
+
+        // Light has to exist before anything meshes, or the first frames bake
+        // a fully dark world into their vertex colours.
+        SkyLight::PropagateAll(m_World);
+
+        LiftPlayerClearOfTerrain();
+        m_VerticalVelocity = 0.0f;
+        UpdateCameraPosition();
+    }
+
+    //Steps the player up until their box is clear of solid blocks.
+    //
+    //A reload can restore terrain where the player was standing, and
+    //VoxelCollision only pushes a box out of a block on a move it detects, so a
+    //player who starts embedded stays embedded with no escape but falling out of
+    //the world. Keeping x and z preserves the part of the map being worked on,
+    //which is the point of reloading quickly.
+    void LiftPlayerClearOfTerrain()
+    {
+        const float top = static_cast<float>(m_World.GetHeight());
+
+        while (m_PlayerPosition.y < top &&
+            VoxelCollision::Overlaps(m_World, m_PlayerPosition, PlayerHalfExtents))
+            m_PlayerPosition.y += 1.0f;
+
+        // A column solid to the sky has nowhere to stand.
+        if (VoxelCollision::Overlaps(m_World, m_PlayerPosition, PlayerHalfExtents))
+            m_PlayerPosition = SpawnPosition;
+    }
+
     //Writes the edited world beside the executable and logs where it went.
     void SaveWorld() const
     {
@@ -304,6 +341,25 @@ private:
         }
     }
 
+    //Restores the world from the last F5 save, leaving the current one alone if
+    //there isn't one.
+    void ReloadWorld()
+    {
+        // Same reason SaveWorld catches: this runs inside a GLFW key callback,
+        // which is C code, and throwing across a C frame is undefined.
+        try
+        {
+            LoadWorld(SavePath);
+
+            CB_INFO("Reloaded world from " +
+                std::filesystem::absolute(SavePath).string());
+        }
+        catch (const std::exception& error)
+        {
+            CB_ERROR(std::string("Could not reload world: ") + error.what());
+        }
+    }
+
     //Selects the colour used when placing blocks, or logs an unhandled press.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
@@ -313,6 +369,12 @@ private:
         if (event.GetKeyCode() == KeyCode::F5)
         {
             SaveWorld();
+            return true;
+        }
+
+        if (event.GetKeyCode() == KeyCode::F9)
+        {
+            ReloadWorld();
             return true;
         }
 
