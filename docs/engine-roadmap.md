@@ -54,8 +54,9 @@ Ranked by leverage. Performance items are detailed in
 ### Format / smaller gaps
 6. **Multi-model stitching** — load maps larger than 256³ (true Ace-of-Spades
    512×512 scale needs several stitched `.vox` models).
-7. **World persistence** — save an *edited* world back to `.vox`. Nearly free now
-   that `VoxWriter` exists (World → `VoxModel` → `Write`).
+7. ~~**World persistence**~~ **DONE 2026-07-31** — `ToVoxModel` plus
+   `VoxWriter::WriteFile` write an edited world back to `.vox`; the Sandbox binds
+   it to `F5`.
 8. **Camera aim API** — `PerspectiveCameraController` exposes only `SetPosition`, no
    yaw/pitch setter, so a spawn cannot choose its facing.
 
@@ -72,7 +73,7 @@ A bounded sequence — genuinely finishable, not endless:
 1. ~~**Amortized meshing + frustum culling**~~ **DONE 2026-07-25** — the map now
    ships at 256×64×256 and loads without a stall. Threading still deferred.
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
-3. **Transparency** (real water) + **world save** (small, high value). ← next.
+3. **Transparency** (real water). World save landed 2026-07-31. ← next.
 4. **Multi-model stitching** (full AoS-scale maps).
 
 After these, the engine is "done" for our purposes, and the remaining work is all

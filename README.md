@@ -67,6 +67,8 @@ sky light and ambient occlusion. The current map is a 256x64x256 battlefield.
 - `VoxLoader` parses MagicaVoxel `.vox` into Cubit's Y-up space and `BuildWorld` sizes
   a world to hold it, palette included
 - `VoxWriter` is the exact inverse, so a model round-trips through the loader
+- `ToVoxModel` and `VoxWriter::WriteFile` save an edited world back out, so a map
+  can be fixed by playing it — the sandbox binds this to `F5`
 - `TerrainGen` generates a symmetric Ace-of-Spades-style map: noise hills, mountain
   flanks with snow caps, a central river with sand banks, scattered forests, and two
   mirrored team-coloured forts
@@ -156,8 +158,7 @@ at load: the initial sky-light flood over the whole world.
 Finishing the engine first, in this order — see
 [`docs/engine-roadmap.md`](docs/engine-roadmap.md):
 
-- **Transparency** so water and glass are not opaque solids, and **saving an edited
-  world** back to `.vox`, which is nearly free now that `VoxWriter` exists
+- **Transparency** so water and glass are not opaque solids
 - **Greedy meshing** — the mesher still emits one quad per exposed face, so flat ground
   costs far more geometry than it needs. Ambient occlusion landed first deliberately, so
   the merge criterion can be written to require matching AO and light from the start
