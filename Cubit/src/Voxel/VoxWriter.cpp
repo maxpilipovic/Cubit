@@ -4,6 +4,8 @@
 
 #include <cstddef>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -25,6 +27,25 @@ namespace
         if (c < 0.0f) c = 0.0f;
         if (c > 1.0f) c = 1.0f;
         return static_cast<std::uint8_t>(c * 255.0f + 0.5f);
+    }
+
+    //The largest model a single .vox can address, matching VoxLoader's own limit
+    //on the way in.
+    constexpr int MaxDimension = 256;
+
+    //Rejects a world a single .vox model cannot hold. Write stores each voxel
+    //coordinate in one byte, so a larger world would wrap silently and produce a
+    //file that loads back as garbage — a corrupt save is worse than a refused
+    //one.
+    void RequireWritableSize(const glm::ivec3& size)
+    {
+        const char* const axes[3] = { "x", "y", "z" };
+
+        for (int i = 0; i < 3; ++i)
+            if (size[i] > MaxDimension)
+                throw std::runtime_error(
+                    std::string("vox: world is too large for a single .vox model (")
+                    + axes[i] + " = " + std::to_string(size[i]) + ")");
     }
 }
 
@@ -101,6 +122,7 @@ VoxModel ToVoxModel(const World& world)
     VoxModel model;
     model.Size = glm::ivec3(
         world.GetWidth(), world.GetHeight(), world.GetDepth());
+    RequireWritableSize(model.Size);
     model.Colors = world.GetPalette();
     model.Voxels.assign(
         static_cast<std::size_t>(model.Size.x) *

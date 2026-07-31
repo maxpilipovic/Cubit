@@ -5,6 +5,7 @@
 #include "Cubit/Voxel/World.h"
 
 #include <cstdint>
+#include <stdexcept>
 
 namespace
 {
@@ -116,4 +117,22 @@ TEST_CASE("A world survives a round trip through .vox bytes")
 
     REQUIRE(restored.Size == model.Size);
     CHECK(FirstVoxelMismatch(model, restored) == glm::ivec3(-1));
+}
+
+TEST_CASE("A world too wide for a single .vox model is rejected")
+{
+    // 17 chunks on x is 272 blocks. Write stores a coordinate in one byte, so
+    // without this guard the file would wrap round and load back as garbage.
+    const World world(17, 1, 1);
+
+    CHECK_THROWS_AS(ToVoxModel(world), std::runtime_error);
+}
+
+TEST_CASE("A world exactly 256 blocks on an axis is accepted")
+{
+    // 256 is the largest legal size, not the first illegal one: coordinates run
+    // 0 to 255, which is exactly a byte.
+    const World world(16, 1, 1);
+
+    CHECK(ToVoxModel(world).Size.x == 256);
 }

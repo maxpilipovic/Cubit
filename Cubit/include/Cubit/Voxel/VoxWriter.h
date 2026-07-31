@@ -24,4 +24,8 @@ public:
 //
 //Sky light is not carried. The .vox format has nowhere to put it, and
 //SkyLight::PropagateAll recomputes it when the map loads.
+//
+//Throws when the world is larger than 256 on any axis, which a single .vox
+//model cannot address. Splitting such a world across several models is
+//multi-model stitching, which does not exist yet.
 CB_API VoxModel ToVoxModel(const World& world);
