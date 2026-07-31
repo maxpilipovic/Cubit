@@ -52,6 +52,8 @@ namespace
 
 std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)
 {
+    RequireWritableSize(model.Size);
+
     // SIZE: vox axes are (x, z, y) relative to Cubit.
     std::vector<std::uint8_t> size;
     PushTag(size, "SIZE");
@@ -129,8 +131,10 @@ void VoxWriter::WriteFile(const VoxModel& model, const std::string& path)
     file.write(reinterpret_cast<const char*>(bytes.data()),
         static_cast<std::streamsize>(bytes.size()));
 
-    //A stream that failed mid-write leaves a truncated file behind, which would
-    //otherwise be discovered only when someone tried to load it.
+    //Closing explicitly (rather than letting the destructor do it) puts any
+    //flush failure into the stream state before this check, so a truncated
+    //file is caught instead of discovered only when someone tried to load it.
+    file.close();
     if (!file)
         throw std::runtime_error("vox: failed writing file: " + path);
 }

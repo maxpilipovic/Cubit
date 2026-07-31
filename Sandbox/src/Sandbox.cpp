@@ -51,8 +51,10 @@ namespace
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
 
-    //Where F5 writes the edited world, relative to the executable. Deliberately
-    //not the map that was loaded: the assets directory beside the exe is a build
+    //Where F5 writes the edited world, resolved against the current working
+    //directory (the project launches from the target directory, so in practice
+    //that's beside the executable). Deliberately not the map that was loaded:
+    //the assets directory beside the exe is a build
     //artifact that the next Sandbox build overwrites, so a save written over
     //battlefield.vox there would vanish without warning. Promoting a save into
     //Sandbox/assets stays a deliberate copy.

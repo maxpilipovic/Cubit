@@ -36,6 +36,25 @@ namespace
 
         return glm::ivec3(-1);
     }
+
+    //Builds a VoxModel directly (no parsing), matching BuildWorldTests.cpp's helper.
+    VoxModel MakeModel(int sx, int sy, int sz)
+    {
+        VoxModel model;
+        model.Size = glm::ivec3(sx, sy, sz);
+        model.Voxels.assign(
+            static_cast<std::size_t>(sx) * sy * sz, 0);
+        model.Colors = DefaultPalette();
+        return model;
+    }
+
+    void Set(VoxModel& model, int x, int y, int z, std::uint8_t id)
+    {
+        model.Voxels[static_cast<std::size_t>(x) +
+            static_cast<std::size_t>(model.Size.x) *
+            (static_cast<std::size_t>(y) +
+             static_cast<std::size_t>(model.Size.y) * static_cast<std::size_t>(z))] = id;
+    }
 }
 
 TEST_CASE("ToVoxModel reports the world's padded block size")
@@ -132,10 +151,31 @@ TEST_CASE("A world too wide for a single .vox model is rejected")
 TEST_CASE("A world exactly 256 blocks on an axis is accepted")
 {
     // 256 is the largest legal size, not the first illegal one: coordinates run
-    // 0 to 255, which is exactly a byte.
-    const World world(16, 1, 1);
+    // 0 to 255, which is exactly a byte. Round-trip an actual voxel at x=255
+    // through Write/Parse, since that's the exact coordinate the single-byte
+    // encoding could wrap on.
+    World world(16, 1, 1);
+    world.SetBlock(255, 15, 15, BlockId{3});
 
-    CHECK(ToVoxModel(world).Size.x == 256);
+    const VoxModel model = ToVoxModel(world);
+    CHECK(model.Size.x == 256);
+
+    const VoxModel restored = VoxLoader::Parse(VoxWriter::Write(model));
+
+    CHECK(restored.Size.x == 256);
+    CHECK(restored.At(255, 15, 15) == 3);
+}
+
+TEST_CASE("A world too deep for a single .vox model is rejected")
+{
+    // 17 chunks on z is 272 blocks. The guard tests above only vary x, so this
+    // pins that every axis is checked, not just x three times over, and that
+    // the failing axis is named correctly in the message.
+    const World world(1, 1, 17);
+
+    CHECK_THROWS_WITH_AS(ToVoxModel(world),
+        "vox: world is too large for a single .vox model (z = 272)",
+        std::runtime_error);
 }
 
 TEST_CASE("WriteFile round-trips a world through disk")
@@ -152,6 +192,26 @@ TEST_CASE("WriteFile round-trips a world through disk")
 
     CHECK(restored.Size == glm::ivec3(16, 16, 16));
     CHECK(restored.At(2, 3, 4) == 5);
+}
+
+TEST_CASE("A model shorter than one chunk on y is padded on the way back out")
+{
+    // The headline behaviour documented on ToVoxModel: a 16x6x16 map comes
+    // back as 16x16x16, with the added layers as air.
+    VoxModel model = MakeModel(16, 6, 16);
+    Set(model, 1, 2, 3, 6);
+    Set(model, 15, 5, 0, 4);
+
+    const VoxModel restored = ToVoxModel(BuildWorld(model));
+
+    REQUIRE(restored.Size == glm::ivec3(16, 16, 16));
+    CHECK(restored.At(1, 2, 3) == 6);
+    CHECK(restored.At(15, 5, 0) == 4);
+
+    for (int z = 0; z < restored.Size.z; ++z)
+        for (int y = 6; y < restored.Size.y; ++y)
+            for (int x = 0; x < restored.Size.x; ++x)
+                CHECK(restored.At(x, y, z) == 0);
 }
 
 TEST_CASE("WriteFile throws when the path cannot be opened")
