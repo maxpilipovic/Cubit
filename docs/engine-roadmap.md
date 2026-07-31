@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-31_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
