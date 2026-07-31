@@ -14,3 +14,14 @@ class CB_API VoxWriter
 public:
     static std::vector<std::uint8_t> Write(const VoxModel& model);
 };
+
+//Converts a World back into a Cubit-space VoxModel: the inverse of BuildWorld.
+//
+//Writes the world's full padded size. A World is always a whole number of
+//chunks, so a map whose size is not a multiple of 16 comes back larger than it
+//went in — the added layers are air and cost nothing on disk, because Write
+//stores voxels sparsely.
+//
+//Sky light is not carried. The .vox format has nowhere to put it, and
+//SkyLight::PropagateAll recomputes it when the map loads.
+CB_API VoxModel ToVoxModel(const World& world);

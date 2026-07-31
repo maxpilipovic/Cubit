@@ -2,6 +2,7 @@
 
 #include "Cubit/Voxel/VoxWriter.h"
 
+#include <cstddef>
 #include <cstring>
 
 namespace
@@ -93,4 +94,33 @@ std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)
     bytes.insert(bytes.end(), xyzi.begin(), xyzi.end());
     bytes.insert(bytes.end(), rgba.begin(), rgba.end());
     return bytes;
+}
+
+VoxModel ToVoxModel(const World& world)
+{
+    VoxModel model;
+    model.Size = glm::ivec3(
+        world.GetWidth(), world.GetHeight(), world.GetDepth());
+    model.Colors = world.GetPalette();
+    model.Voxels.assign(
+        static_cast<std::size_t>(model.Size.x) *
+        static_cast<std::size_t>(model.Size.y) *
+        static_cast<std::size_t>(model.Size.z), 0);
+
+    for (int z = 0; z < model.Size.z; ++z)
+        for (int y = 0; y < model.Size.y; ++y)
+            for (int x = 0; x < model.Size.x; ++x)
+            {
+                const BlockId id = world.GetBlock(x, y, z);
+                if (id == 0)
+                    continue;
+
+                model.Voxels[static_cast<std::size_t>(x) +
+                    static_cast<std::size_t>(model.Size.x) *
+                    (static_cast<std::size_t>(y) +
+                     static_cast<std::size_t>(model.Size.y) *
+                     static_cast<std::size_t>(z))] = id;
+            }
+
+    return model;
 }
