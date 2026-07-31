@@ -68,8 +68,8 @@ sky light and ambient occlusion. The current map is a 256x64x256 battlefield.
   a world to hold it, palette included
 - `VoxWriter` is the exact inverse, so a model round-trips through the loader
 - `ToVoxModel` and `VoxWriter::WriteFile` save an edited world back out, so a map
-  can be fixed by playing it — the sandbox binds this to `F5`, though promoting
-  a save over the shipped map still takes a manual copy and rebuild
+  can be fixed by playing it — the sandbox binds this to `F5` and `F9`, though
+  promoting a save over the shipped map still takes a manual copy and rebuild
 - `TerrainGen` generates a symmetric Ace-of-Spades-style map: noise hills, mountain
   flanks with snow caps, a central river with sand banks, scattered forests, and two
   mirrored team-coloured forts
@@ -86,7 +86,8 @@ sky light and ambient occlusion. The current map is a 256x64x256 battlefield.
   bitmap font defined in code
 
 **Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
-a block, right click places one, and `1`–`8` pick the colour.
+a block, right click places one, and `1`–`8` pick the colour. `F5` saves the edited
+world, `F9` restores it — a checkpoint pair for authoring a map by playing it.
 
 ## Building
 
