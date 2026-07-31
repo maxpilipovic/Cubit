@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -115,6 +116,23 @@ std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)
     bytes.insert(bytes.end(), xyzi.begin(), xyzi.end());
     bytes.insert(bytes.end(), rgba.begin(), rgba.end());
     return bytes;
+}
+
+void VoxWriter::WriteFile(const VoxModel& model, const std::string& path)
+{
+    const std::vector<std::uint8_t> bytes = Write(model);
+
+    std::ofstream file(path, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("vox: cannot open file for writing: " + path);
+
+    file.write(reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+
+    //A stream that failed mid-write leaves a truncated file behind, which would
+    //otherwise be discovered only when someone tried to load it.
+    if (!file)
+        throw std::runtime_error("vox: failed writing file: " + path);
 }
 
 VoxModel ToVoxModel(const World& world)

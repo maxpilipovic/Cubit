@@ -5,6 +5,7 @@
 #include "Cubit/Voxel/World.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
 
 namespace
@@ -135,4 +136,32 @@ TEST_CASE("A world exactly 256 blocks on an axis is accepted")
     const World world(16, 1, 1);
 
     CHECK(ToVoxModel(world).Size.x == 256);
+}
+
+TEST_CASE("WriteFile round-trips a world through disk")
+{
+    World world(1, 1, 1);
+    world.SetBlock(2, 3, 4, BlockId{5});
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "cubit_worldsave_test.vox";
+
+    VoxWriter::WriteFile(ToVoxModel(world), path.string());
+    const VoxModel restored = VoxLoader::LoadFile(path.string());
+    std::filesystem::remove(path);
+
+    CHECK(restored.Size == glm::ivec3(16, 16, 16));
+    CHECK(restored.At(2, 3, 4) == 5);
+}
+
+TEST_CASE("WriteFile throws when the path cannot be opened")
+{
+    const World world(1, 1, 1);
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "cubit_no_such_directory" / "out.vox";
+
+    CHECK_THROWS_AS(
+        VoxWriter::WriteFile(ToVoxModel(world), path.string()),
+        std::runtime_error);
 }

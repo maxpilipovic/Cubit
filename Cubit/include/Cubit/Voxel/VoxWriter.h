@@ -4,6 +4,7 @@
 #include "Cubit/Voxel/VoxLoader.h"   // VoxModel
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 //Serializes a Cubit-space VoxModel into MagicaVoxel .vox bytes. The exact inverse
@@ -13,6 +14,10 @@ class CB_API VoxWriter
 {
 public:
     static std::vector<std::uint8_t> Write(const VoxModel& model);
+
+    //Writes a model to a .vox file, mirroring VoxLoader::LoadFile. Throws when
+    //the path cannot be opened or the write fails.
+    static void WriteFile(const VoxModel& model, const std::string& path);
 };
 
 //Converts a World back into a Cubit-space VoxModel: the inverse of BuildWorld.
