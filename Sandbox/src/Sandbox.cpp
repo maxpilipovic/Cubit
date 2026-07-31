@@ -1,11 +1,14 @@
 #include "Cubit/Cubit.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/VoxLoader.h"
+#include "Cubit/Voxel/VoxWriter.h"
 
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstdint>
+#include <exception>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -47,6 +50,13 @@ namespace
 
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
+
+    //Where F5 writes the edited world, relative to the executable. Deliberately
+    //not the map that was loaded: the assets directory beside the exe is a build
+    //artifact that the next Sandbox build overwrites, so a save written over
+    //battlefield.vox there would vanish without warning. Promoting a save into
+    //Sandbox/assets stays a deliberate copy.
+    constexpr const char* SavePath = "assets/maps/saved.vox";
 }
 
 class SandboxLayer final : public Layer
@@ -273,11 +283,36 @@ private:
             " was defeated by player " + std::to_string(event.Killer));
     }
 
+    //Writes the edited world beside the executable and logs where it went.
+    void SaveWorld() const
+    {
+        // This runs inside a GLFW key callback, which is C code, and throwing
+        // across a C frame is undefined. A failed save has to end here, as a log
+        // line rather than a crash.
+        try
+        {
+            VoxWriter::WriteFile(ToVoxModel(m_World), SavePath);
+
+            CB_INFO("Saved world to " +
+                std::filesystem::absolute(SavePath).string());
+        }
+        catch (const std::exception& error)
+        {
+            CB_ERROR(std::string("Could not save world: ") + error.what());
+        }
+    }
+
     //Selects the colour used when placing blocks, or logs an unhandled press.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
         if (event.IsRepeat())
             return false;
+
+        if (event.GetKeyCode() == KeyCode::F5)
+        {
+            SaveWorld();
+            return true;
+        }
 
         const int key = static_cast<int>(event.GetKeyCode());
         const int first = static_cast<int>(KeyCode::D1);
