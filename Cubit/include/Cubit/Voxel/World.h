@@ -5,6 +5,7 @@
 #include "Cubit/Voxel/Chunk.h"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <set>
@@ -49,8 +50,22 @@ public:
     //The colours this world's block ids index into.
     const Palette& GetPalette() const { return m_Palette; }
 
-    //Replaces the palette, e.g. with one loaded from a map file.
-    void SetPalette(const Palette& palette) { m_Palette = palette; }
+    //Replaces the palette, e.g. with one loaded from a map file, and rebuilds the
+    //derived opacity table.
+    void SetPalette(const Palette& palette);
+
+    //Reports whether a block id hides what is behind it.
+    //
+    //A table lookup rather than a comparison against the palette: the mesher
+    //samples this tens of thousands of times per chunk, and resolving it per
+    //sample is exactly the cost that made chunk builds slow before (see
+    //docs/performance.md, P7).
+    bool IsIdOpaque(BlockId block) const { return m_Opaque[block]; }
+
+    //Reports whether the block at this position hides what is behind it.
+    //Positions outside the world are not opaque, matching GetBlock reading as
+    //air and GetSkyLight reading as open sky.
+    bool IsBlockOpaque(int x, int y, int z) const;
 
     //Reports whether the block at this position occupies space.
     bool IsBlockSolid(int x, int y, int z) const;
@@ -109,6 +124,7 @@ private:
     std::vector<Chunk> m_Chunks;
     std::set<glm::ivec3, IVec3Less> m_DirtyChunks;
     Palette m_Palette;
+    std::array<bool, 256> m_Opaque{};
 };
 
 #ifdef _MSC_VER

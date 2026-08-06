@@ -10,6 +10,9 @@ World::World(int chunksX, int chunksY, int chunksZ)
     : m_ChunksX(chunksX), m_ChunksY(chunksY), m_ChunksZ(chunksZ),
       m_Palette(DefaultPalette())
 {
+    //The member-init list bypasses SetPalette, so the derived table starts empty.
+    SetPalette(m_Palette);
+
     if (chunksX <= 0 || chunksY <= 0 || chunksZ <= 0)
         throw std::invalid_argument("World size must be at least one chunk on each axis");
 
@@ -134,6 +137,22 @@ void World::MarkChunkDirtyAt(int x, int y, int z)
 bool World::IsBlockSolid(int x, int y, int z) const
 {
     return IsSolid(GetBlock(x, y, z));
+}
+
+void World::SetPalette(const Palette& palette)
+{
+    m_Palette = palette;
+
+    for (std::size_t i = 0; i < m_Opaque.size(); ++i)
+        m_Opaque[i] = IsOpaqueColor(m_Palette[i]);
+}
+
+bool World::IsBlockOpaque(int x, int y, int z) const
+{
+    if (!IsInBounds(x, y, z))
+        return false;
+
+    return IsIdOpaque(GetBlock(x, y, z));
 }
 
 bool World::IsInBounds(int x, int y, int z) const

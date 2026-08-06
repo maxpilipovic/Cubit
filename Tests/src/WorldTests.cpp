@@ -196,3 +196,62 @@ TEST_CASE("Marking a position dirty also marks the chunk across a shared face")
     CHECK(world.DirtyChunks().count(glm::ivec3(0, 0, 0)) == 1);
     CHECK(world.DirtyChunks().count(glm::ivec3(1, 0, 0)) == 1);
 }
+
+TEST_CASE("A block is opaque when its palette alpha is full")
+{
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f);
+    palette[5] = glm::vec4(0.2f, 0.4f, 0.6f, 0.5f);
+    world.SetPalette(palette);
+
+    CHECK(world.IsIdOpaque(BlockId{4}));
+    CHECK_FALSE(world.IsIdOpaque(BlockId{5}));
+}
+
+TEST_CASE("Air is never opaque")
+{
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsIdOpaque(BlockId{0}));
+}
+
+TEST_CASE("Block opacity follows the block at a position")
+{
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[5] = glm::vec4(0.2f, 0.4f, 0.6f, 0.5f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(9, 8, 8, BlockId{5});
+
+    CHECK(world.IsBlockOpaque(8, 8, 8));
+    CHECK_FALSE(world.IsBlockOpaque(9, 8, 8));
+    CHECK_FALSE(world.IsBlockOpaque(0, 0, 0)); // air
+}
+
+TEST_CASE("Positions outside the world are not opaque")
+{
+    // Matching GetBlock returning air and GetSkyLight returning open sky: the
+    // space around a map must not read as a wall.
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsBlockOpaque(-1, 0, 0));
+    CHECK_FALSE(world.IsBlockOpaque(0, world.GetHeight(), 0));
+}
+
+TEST_CASE("Replacing the palette updates opacity")
+{
+    // The opacity table is derived, so it must not go stale when a map installs
+    // its own palette.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{4});
+    REQUIRE(world.IsBlockOpaque(8, 8, 8));
+
+    Palette palette = DefaultPalette();
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 0.25f);
+    world.SetPalette(palette);
+
+    CHECK_FALSE(world.IsBlockOpaque(8, 8, 8));
+}
