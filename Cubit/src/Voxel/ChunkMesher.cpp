@@ -60,6 +60,7 @@ namespace
                                 x - Shell, y - Shell, z - Shell);
                             m_Light[index] = chunk.GetSkyLight(
                                 x - Shell, y - Shell, z - Shell);
+                            m_Opaque[index] = world.IsIdOpaque(m_Blocks[index]);
                             continue;
                         }
 
@@ -68,6 +69,7 @@ namespace
                             world.GetBlock(cell.x, cell.y, cell.z);
                         m_Light[index] =
                             world.GetSkyLight(cell.x, cell.y, cell.z);
+                        m_Opaque[index] = world.IsIdOpaque(m_Blocks[index]);
                     }
                 }
             }
@@ -90,6 +92,7 @@ namespace
 
         BlockId Block(int cell) const { return m_Blocks[cell]; }
         bool IsSolid(int cell) const { return ::IsSolid(m_Blocks[cell]); }
+        bool IsOpaque(int cell) const { return m_Opaque[cell]; }
         int Light(int cell) const { return m_Light[cell]; }
 
     private:
@@ -99,6 +102,7 @@ namespace
         //stays inside the shell by construction.
         BlockId m_Blocks[Count];
         std::uint8_t m_Light[Count];
+        bool m_Opaque[Count];
     };
 
     //Reads straight from the world, for the callers that hand one over rather
@@ -110,6 +114,11 @@ namespace
         bool IsSolid(const glm::ivec3& cell) const
         {
             return Cells.IsBlockSolid(cell.x, cell.y, cell.z);
+        }
+
+        bool IsOpaque(const glm::ivec3& cell) const
+        {
+            return Cells.IsBlockOpaque(cell.x, cell.y, cell.z);
         }
 
         int Light(const glm::ivec3& cell) const
@@ -127,15 +136,15 @@ namespace
     int CornerAo(const Cells& cells, const Cell& airCell,
         const Side& sideA, const Side& sideB)
     {
-        const bool solidA = cells.IsSolid(airCell + sideA);
-        const bool solidB = cells.IsSolid(airCell + sideB);
+        const bool solidA = cells.IsOpaque(airCell + sideA);
+        const bool solidB = cells.IsOpaque(airCell + sideB);
 
         // Two walls meeting at a right angle seal the corner completely, so what
         // sits diagonally behind them cannot lighten it.
         if (solidA && solidB)
             return 0;
 
-        const bool solidCorner = cells.IsSolid(airCell + sideA + sideB);
+        const bool solidCorner = cells.IsOpaque(airCell + sideA + sideB);
 
         return 3
             - static_cast<int>(solidA)
@@ -161,7 +170,7 @@ namespace
 
         for (const Cell& cell : corners)
         {
-            if (cells.IsSolid(cell))
+            if (cells.IsOpaque(cell))
                 continue;
 
             total += cells.Light(cell);
@@ -351,11 +360,21 @@ namespace
         // Alpha is dropped here until the vertex format carries it.
         const glm::vec3 color = glm::vec3(palette[cells.Block(blockCell)]);
 
+        const BlockId self = cells.Block(blockCell);
+
         for (int f = 0; f < 6; ++f)
         {
-            if (!cells.IsSolid(blockCell + steps[f].Normal))
-                AddFace(mesh, cells, blockCell, blockOrigin,
-                    Faces[f], steps[f], color);
+            const int neighbourCell = blockCell + steps[f].Normal;
+
+            // A face is worth drawing when what is beyond it does not hide it,
+            // and is not more of the same block: two water cells meet at a face
+            // that would only blend against itself.
+            if (cells.IsOpaque(neighbourCell) ||
+                cells.Block(neighbourCell) == self)
+                continue;
+
+            AddFace(mesh, cells, blockCell, blockOrigin,
+                Faces[f], steps[f], color);
         }
     }
 }

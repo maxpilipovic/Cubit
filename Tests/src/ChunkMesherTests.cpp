@@ -322,3 +322,72 @@ TEST_CASE("Meshing a chunk costs little more than reading its blocks")
     // not to hold a stopwatch to the current one.
     CHECK(ms < 50.0);
 }
+
+namespace
+{
+    //A world whose palette makes id 2 transparent, for the opacity cases below.
+    World TransparentPaletteWorld(int cx, int cy, int cz)
+    {
+        World world(cx, cy, cz);
+        Palette palette = DefaultPalette();
+        palette[2] = glm::vec4(0.2f, 0.4f, 0.8f, 0.5f);
+        world.SetPalette(palette);
+        return world;
+    }
+
+    std::size_t FaceCount(const ChunkMeshData& mesh)
+    {
+        return mesh.Indices.size() / 6;
+    }
+}
+
+TEST_CASE("An opaque block facing a transparent one is meshed")
+{
+    // The riverbed case: stone under water must produce a face, where today the
+    // water hides it.
+    World world = TransparentPaletteWorld(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1}); // opaque
+    world.SetBlock(8, 9, 8, BlockId{2}); // transparent, directly above
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    // 6 faces for the opaque block (its top is now exposed) + 5 for the
+    // transparent one (its bottom faces the opaque block and is hidden).
+    CHECK(FaceCount(mesh) == 11);
+}
+
+TEST_CASE("Two touching transparent blocks share no face")
+{
+    // Internal faces inside a body of water would blend against each other and
+    // darken it in bands.
+    World world = TransparentPaletteWorld(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{2});
+    world.SetBlock(8, 9, 8, BlockId{2});
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    CHECK(FaceCount(mesh) == 10); // 12 minus the two touching faces
+}
+
+TEST_CASE("A transparent block against air is meshed")
+{
+    World world = TransparentPaletteWorld(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{2});
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    CHECK(FaceCount(mesh) == 6);
+}
+
+TEST_CASE("Two touching opaque blocks of different ids share no face")
+{
+    // The pre-existing rule, restated so the new id comparison cannot break it:
+    // different opaque blocks still hide each other.
+    World world = TransparentPaletteWorld(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(8, 9, 8, BlockId{3});
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    CHECK(FaceCount(mesh) == 10);
+}
