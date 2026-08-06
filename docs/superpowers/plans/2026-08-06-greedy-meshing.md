@@ -234,7 +234,7 @@ Counts that are hand-checkable and stay quad counts:
 
 - [ ] **Step 4: Relax the known-size test**
 
-`"The sandbox test terrain meshes to its known size"` hardcodes vertex and index totals that merging will change, and its correct new value cannot be worked out by hand. Replace its three assertions with the invariant, plus a bound proving merging happened — written commented out, because it cannot pass until Task 4 lands. Task 4 Step 8 is where it turns on:
+`"The sandbox test terrain meshes to its known size"` hardcodes vertex and index totals that merging will change, and its correct new value cannot be worked out by hand. Replace its three assertions with the invariant alone:
 
 ```cpp
 TEST_CASE("The sandbox test terrain meshes to its known size")
@@ -245,15 +245,12 @@ TEST_CASE("The sandbox test terrain meshes to its known size")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     // The surface this terrain exposes is fixed. How many quads cover it is the
-    // merge rule's business, so the count is asserted as a bound rather than a
-    // number: rolling terrain has large flat runs, so merging must beat one
-    // quad per face by a wide margin.
+    // merge rule's business, so it is not asserted here.
     CHECK(CoveredArea(mesh) == 1122);
-
-    // Task 4 turns this on. Until then there is one quad per face, so it is 1122.
-    // CHECK(QuadCount(mesh) < 900);
 }
 ```
+
+Task 4 adds the bound proving merging actually happened. It belongs with the merge work, not here, where it could only be written as a line that cannot yet pass.
 
 - [ ] **Step 5: Fix the remaining transparency-test helper**
 
@@ -817,11 +814,14 @@ Run the build+test command. Expected: `Status: SUCCESS!`, **170 cases**, 0 faile
 
 Every pre-existing test must still pass. In particular `Meshed faces match an independent count for varied terrain` and `Every chunk of a multi-chunk world matches the independent count` are the proof that merging conserved surface area rather than losing or duplicating faces.
 
-- [ ] **Step 8: Turn the terrain bound back on**
+- [ ] **Step 8: Assert that the terrain actually merged**
 
-In `Tests/src/ChunkMesherTests.cpp`, uncomment the line left in Task 2 Step 4:
+In `Tests/src/ChunkMesherTests.cpp`, add a second assertion to `"The sandbox test terrain meshes to its known size"`, below the existing `CoveredArea` check:
 
 ```cpp
+    // Rolling terrain has large flat runs, so merging must beat one quad per
+    // face by a wide margin. A bound rather than a number: the exact count is
+    // the merge rule's business and would have to be re-derived on any change.
     CHECK(QuadCount(mesh) < 900);
 ```
 
@@ -889,7 +889,11 @@ TEST_CASE("PROBE: greedy meshing on the battlefield map")
     MESSAGE("quads=", quads, " vertices=", vertices, " area=", area,
         " mesh_ms=", ms);
 
+    // Every quad covers at least the one face it came from, so this holds both
+    // before and after merging. The probe exists to print numbers rather than
+    // to gate anything, but a case that asserts nothing is not worth running.
     CHECK(area > 0);
+    CHECK(quads <= area);
 }
 ```
 
@@ -899,7 +903,9 @@ Add `#include "Cubit/Voxel/VoxLoader.h"` to the file's include block.
 
 - [ ] **Step 3: Record the numbers**
 
-Run the build+test command and read the `PROBE` line out of the build log.
+Run the build+test command and read the `PROBE` line out of the build log. That is the **after** measurement.
+
+Compare the two `area` figures once you have both: merging regroups faces but must not change how much surface they cover, so a difference means something is wrong and the timing numbers are measuring two different meshes.
 
 Then get the before-numbers by restoring the pre-merge mesher. Find the commit by message rather than counting back from `HEAD`, which is fragile if extra commits were made:
 
