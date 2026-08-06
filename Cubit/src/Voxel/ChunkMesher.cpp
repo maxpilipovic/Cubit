@@ -212,6 +212,18 @@ namespace
         int V;
     };
 
+    //The index of the one non-zero component of a unit axis vector: 0 is x,
+    //1 is y, 2 is z. Every Normal, U and V in the Faces table is a unit axis.
+    constexpr int AxisIndex(const glm::ivec3& axis)
+    {
+        return axis.x != 0 ? 0 : (axis.y != 0 ? 1 : 2);
+    }
+
+    //How many blocks a chunk spans along one axis.
+    constexpr int AxisExtent(int axis)
+    {
+        return axis == 0 ? Chunk::Width : (axis == 1 ? Chunk::Height : Chunk::Depth);
+    }
 
     void AddFace(
         MeshGeometry& mesh,
@@ -258,34 +270,59 @@ namespace
         AddFaceIndices(mesh, ao[0] + ao[2] > ao[1] + ao[3]);
     }
 
-    //Emits the faces of one block that are exposed to air. Neighbours are looked
-    //up in world coordinates so blocks in the next chunk are visible, while the
-    //vertices use chunk-local coordinates.
-    void AddExposedFaces(
-        MeshGeometry& mesh,
+    //Emits every face pointing one direction, plane by plane. Walking planes
+    //rather than blocks is what lets coplanar faces meet each other; a
+    //block-major walk never has two faces of the same plane in hand at once.
+    void MeshFacePlanes(
+        ChunkMeshData& mesh,
         const Neighbourhood& cells,
         const Palette& palette,
-        const FaceSteps (&steps)[6],
-        int blockCell,
-        const glm::vec3& blockOrigin)
+        const FaceGeometry& face,
+        const FaceSteps& steps)
     {
-        const glm::vec4 color = palette[cells.Block(blockCell)];
+        const int normalAxis = AxisIndex(face.Normal);
+        const int uAxis = AxisIndex(face.U);
+        const int vAxis = AxisIndex(face.V);
 
-        const BlockId self = cells.Block(blockCell);
+        const int sliceCount = AxisExtent(normalAxis);
+        const int uCount = AxisExtent(uAxis);
+        const int vCount = AxisExtent(vAxis);
 
-        for (int f = 0; f < 6; ++f)
+        for (int slice = 0; slice < sliceCount; ++slice)
         {
-            const int neighbourCell = blockCell + steps[f].Normal;
+            for (int v = 0; v < vCount; ++v)
+            {
+                for (int u = 0; u < uCount; ++u)
+                {
+                    glm::ivec3 local(0);
+                    local[normalAxis] = slice;
+                    local[uAxis] = u;
+                    local[vAxis] = v;
 
-            // A face is worth drawing when what is beyond it does not hide it,
-            // and is not more of the same block: two water cells meet at a face
-            // that would only blend against itself.
-            if (cells.IsOpaque(neighbourCell) ||
-                cells.Block(neighbourCell) == self)
-                continue;
+                    const int cell = Neighbourhood::At(local.x, local.y, local.z);
+                    if (!cells.IsSolid(cell))
+                        continue;
 
-            AddFace(mesh, cells, blockCell, blockOrigin,
-                Faces[f], steps[f], color);
+                    const BlockId self = cells.Block(cell);
+                    const int neighbourCell = cell + steps.Normal;
+
+                    // A face is worth drawing when what is beyond it does not
+                    // hide it, and is not more of the same block: two water
+                    // cells meet at a face that would only blend against itself.
+                    if (cells.IsOpaque(neighbourCell) ||
+                        cells.Block(neighbourCell) == self)
+                        continue;
+
+                    // A block's own opacity decides which pass draws it; the
+                    // faces of one block never span both.
+                    MeshGeometry& target = cells.IsOpaque(cell)
+                        ? mesh.Opaque
+                        : mesh.Transparent;
+
+                    AddFace(target, cells, cell, glm::vec3(local),
+                        face, steps, palette[self]);
+                }
+            }
         }
     }
 }
@@ -298,35 +335,15 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
     const Neighbourhood cells(world, origin);
     const Palette& palette = world.GetPalette();
 
-    FaceSteps steps[6];
     for (int f = 0; f < 6; ++f)
-        steps[f] = {
-            Neighbourhood::Step(Faces[f].Normal),
-            Neighbourhood::Step(Faces[f].U),
-            Neighbourhood::Step(Faces[f].V) };
-
-    for (int z = 0; z < Chunk::Depth; ++z)
     {
-        for (int y = 0; y < Chunk::Height; ++y)
-        {
-            for (int x = 0; x < Chunk::Width; ++x)
-            {
-                const int cell = Neighbourhood::At(x, y, z);
-                if (!cells.IsSolid(cell))
-                    continue;
+        const FaceGeometry& face = Faces[f];
+        const FaceSteps steps = {
+            Neighbourhood::Step(face.Normal),
+            Neighbourhood::Step(face.U),
+            Neighbourhood::Step(face.V) };
 
-                // A block's own opacity decides which pass draws it; the faces
-                // of one block never span both.
-                MeshGeometry& target = cells.IsOpaque(cell)
-                    ? mesh.Opaque
-                    : mesh.Transparent;
-
-                // Vertices are chunk-local, so the loop counters are already
-                // the block's origin.
-                AddExposedFaces(target, cells, palette, steps, cell,
-                    glm::vec3(x, y, z));
-            }
-        }
+        MeshFacePlanes(mesh, cells, palette, face, steps);
     }
 
     return mesh;
