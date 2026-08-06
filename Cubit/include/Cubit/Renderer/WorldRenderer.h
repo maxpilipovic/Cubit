@@ -40,10 +40,29 @@ public:
     //set. Call once per frame before Render. Needs a current GL context.
     void Update(World& world);
 
-    //Draws every non-empty chunk mesh that is inside the camera frustum, each
-    //translated to its chunk origin plus worldOffset. Records the drawn count.
+    //Draws every non-empty chunk mesh inside the camera frustum, each translated
+    //to its chunk origin plus worldOffset. Opaque geometry is drawn first, then
+    //transparent geometry back to front with depth writes off, so it blends
+    //against what is behind it. cameraPosition must be in the same space as the
+    //chunk transforms — that is, worldOffset already applied.
     void Render(const Shader& shader, const glm::mat4& viewProjection,
-        const glm::vec3& worldOffset);
+        const glm::vec3& worldOffset, const glm::vec3& cameraPosition);
+
+    //One draw's GPU buffers plus its face count.
+    struct GpuGeometry
+    {
+        std::unique_ptr<VertexArray> Array;
+        std::unique_ptr<VertexBuffer> Buffer;
+        std::unique_ptr<IndexBuffer> Indices;
+        std::uint32_t FaceCount = 0;
+    };
+
+    //A chunk's geometry, split by pass. Either half may be empty.
+    struct ChunkMesh
+    {
+        GpuGeometry Opaque;
+        GpuGeometry Transparent;
+    };
 
     //Chunks actually submitted in the last Render (after frustum culling).
     std::size_t DrawnChunkCount() const { return m_LastDrawnChunks; }
@@ -58,16 +77,6 @@ public:
     std::size_t PendingCount() const { return m_Pending.size(); }
 
 private:
-    //A chunk's GPU buffers plus its face count. Move-only through its unique_ptr
-    //members, so it can live in a map without copying GPU resources.
-    struct ChunkMesh
-    {
-        std::unique_ptr<VertexArray> Array;
-        std::unique_ptr<VertexBuffer> Buffer;
-        std::unique_ptr<IndexBuffer> Indices;
-        std::uint32_t FaceCount = 0;
-    };
-
     //How long one Update may spend rebuilding chunk meshes, so a burst of them
     //spreads over frames instead of stalling one.
     //

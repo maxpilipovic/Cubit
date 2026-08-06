@@ -10,7 +10,31 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <vector>
+
+namespace
+{
+    //Uploads one geometry set, or leaves it empty when there is nothing to draw.
+    void UploadGeometry(WorldRenderer::GpuGeometry& gpu, const MeshGeometry& source)
+    {
+        if (source.Indices.empty())
+            return;
+
+        gpu.Array = std::make_unique<VertexArray>();
+        gpu.Buffer = std::make_unique<VertexBuffer>(
+            source.Vertices.data(),
+            static_cast<std::uint32_t>(source.Vertices.size() * sizeof(VoxelVertex)));
+        gpu.Array->AddBuffer(
+            *gpu.Buffer,
+            BufferLayout{ ShaderDataType::Float3, ShaderDataType::Float4 });
+        gpu.Indices = std::make_unique<IndexBuffer>(
+            source.Indices.data(),
+            static_cast<std::uint32_t>(source.Indices.size()));
+        gpu.FaceCount = gpu.Indices->GetCount() / 6;
+    }
+}
 
 void WorldRenderer::Update(World& world)
 {
@@ -31,7 +55,7 @@ void WorldRenderer::Update(World& world)
         const ChunkMeshData mesh =
             ChunkMesher::Build(world, coord.x, coord.y, coord.z);
 
-        if (mesh.Opaque.Indices.empty())
+        if (mesh.Opaque.Indices.empty() && mesh.Transparent.Indices.empty())
         {
             //A chunk that meshes to nothing keeps no buffers; drop any it had.
             m_Meshes.erase(coord);
@@ -39,17 +63,8 @@ void WorldRenderer::Update(World& world)
         else
         {
             ChunkMesh gpu;
-            gpu.Array = std::make_unique<VertexArray>();
-            gpu.Buffer = std::make_unique<VertexBuffer>(
-                mesh.Opaque.Vertices.data(),
-                static_cast<std::uint32_t>(mesh.Opaque.Vertices.size() * sizeof(VoxelVertex)));
-            gpu.Array->AddBuffer(
-                *gpu.Buffer,
-                BufferLayout{ ShaderDataType::Float3, ShaderDataType::Float3 });
-            gpu.Indices = std::make_unique<IndexBuffer>(
-                mesh.Opaque.Indices.data(),
-                static_cast<std::uint32_t>(mesh.Opaque.Indices.size()));
-            gpu.FaceCount = gpu.Indices->GetCount() / 6;
+            UploadGeometry(gpu.Opaque, mesh.Opaque);
+            UploadGeometry(gpu.Transparent, mesh.Transparent);
 
             m_Meshes[coord] = std::move(gpu);
         }
@@ -65,10 +80,20 @@ void WorldRenderer::Update(World& world)
 }
 
 void WorldRenderer::Render(const Shader& shader, const glm::mat4& viewProjection,
-    const glm::vec3& worldOffset)
+    const glm::vec3& worldOffset, const glm::vec3& cameraPosition)
 {
     const Frustum frustum(viewProjection);
     m_LastDrawnChunks = 0;
+
+    //Transparent chunks are collected rather than drawn as they are found: they
+    //have to go out far to near, and the mesh map is ordered by coordinate.
+    struct TransparentDraw
+    {
+        float DistanceSquared;
+        const GpuGeometry* Geometry;
+        glm::vec3 Origin;
+    };
+    std::vector<TransparentDraw> transparent;
 
     for (const auto& entry : m_Meshes)
     {
@@ -78,23 +103,60 @@ void WorldRenderer::Render(const Shader& shader, const glm::mat4& viewProjection
         const glm::vec3 origin =
             glm::vec3(World::GetChunkOrigin(coord.x, coord.y, coord.z));
         const glm::vec3 min = worldOffset + origin;
-        const glm::vec3 max = min + glm::vec3(
-            Chunk::Width, Chunk::Height, Chunk::Depth);
+        const glm::vec3 extent(Chunk::Width, Chunk::Height, Chunk::Depth);
 
-        if (!frustum.IntersectsAABB(min, max))
+        if (!frustum.IntersectsAABB(min, min + extent))
             continue; // outside the view
 
-        const glm::mat4 transform = glm::translate(glm::mat4(1.0f), min);
-        Renderer::Submit(*mesh.Array, *mesh.Indices, shader, transform);
+        if (mesh.Opaque.Indices != nullptr)
+        {
+            const glm::mat4 transform = glm::translate(glm::mat4(1.0f), min);
+            Renderer::Submit(*mesh.Opaque.Array, *mesh.Opaque.Indices,
+                shader, transform);
+            ++m_LastDrawnChunks;
+        }
+
+        if (mesh.Transparent.Indices != nullptr)
+        {
+            const glm::vec3 centre = min + extent * 0.5f;
+            const glm::vec3 toCamera = centre - cameraPosition;
+
+            transparent.push_back({ glm::dot(toCamera, toCamera),
+                &mesh.Transparent, min });
+        }
+    }
+
+    if (transparent.empty())
+        return;
+
+    // Farthest first: a near surface has to blend over what is already behind
+    // it, so what is behind has to be on screen first.
+    std::sort(transparent.begin(), transparent.end(),
+        [](const TransparentDraw& a, const TransparentDraw& b)
+        {
+            return a.DistanceSquared > b.DistanceSquared;
+        });
+
+    // Depth testing stays on so terrain in front still hides water, but writing
+    // is off so two water surfaces do not reject each other.
+    Renderer::SetDepthWrite(false);
+
+    for (const TransparentDraw& draw : transparent)
+    {
+        const glm::mat4 transform = glm::translate(glm::mat4(1.0f), draw.Origin);
+        Renderer::Submit(*draw.Geometry->Array, *draw.Geometry->Indices,
+            shader, transform);
         ++m_LastDrawnChunks;
     }
+
+    Renderer::SetDepthWrite(true);
 }
 
 std::uint32_t WorldRenderer::TotalFaceCount() const
 {
     std::uint32_t total = 0;
     for (const auto& entry : m_Meshes)
-        total += entry.second.FaceCount;
+        total += entry.second.Opaque.FaceCount + entry.second.Transparent.FaceCount;
 
     return total;
 }

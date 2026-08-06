@@ -11,7 +11,7 @@ class World;
 struct VoxelVertex
 {
     glm::vec3 Position{ 0.0f };
-    glm::vec3 Color{ 1.0f };
+    glm::vec4 Color{ 1.0f };
 };
 
 //One draw's worth of geometry: vertices and the indices that reference them.

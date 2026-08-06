@@ -36,6 +36,11 @@ void Renderer::SetDepthTest(bool enabled)
         glDisable(GL_DEPTH_TEST);
 }
 
+void Renderer::SetDepthWrite(bool enabled)
+{
+    glDepthMask(enabled ? GL_TRUE : GL_FALSE);
+}
+
 void Renderer::SetViewport(
     std::int32_t x,
     std::int32_t y,

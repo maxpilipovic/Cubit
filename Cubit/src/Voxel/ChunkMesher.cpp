@@ -312,7 +312,7 @@ namespace
         const glm::vec3& blockOrigin,
         const FaceGeometry& face,
         const FaceSteps& steps,
-        const glm::vec3& blockColor)
+        const glm::vec4& blockColor)
     {
         const int airCell = blockCell + steps.Normal;
 
@@ -334,11 +334,15 @@ namespace
             // The floor applies to the finished shading, not to light alone:
             // the three factors multiply, so flooring only the light term still
             // lets an occluded ceiling underside reach near-black.
-            const glm::vec3 color = blockColor
+            //
+            // Shading scales the colour channels only. Alpha is the block's
+            // opacity and has nothing to do with how lit the face is.
+            const glm::vec3 shaded = glm::vec3(blockColor)
                 * (ChunkMesher::LightFloor
                     + (1.0f - ChunkMesher::LightFloor) * lit);
 
-            mesh.Vertices.push_back({ blockOrigin + face.Corner[i], color });
+            mesh.Vertices.push_back(
+                { blockOrigin + face.Corner[i], glm::vec4(shaded, blockColor.a) });
         }
 
         // Splitting a quad along its darker diagonal keeps the shading gradient
@@ -357,8 +361,7 @@ namespace
         int blockCell,
         const glm::vec3& blockOrigin)
     {
-        // Alpha is dropped here until the vertex format carries it.
-        const glm::vec3 color = glm::vec3(palette[cells.Block(blockCell)]);
+        const glm::vec4 color = palette[cells.Block(blockCell)];
 
         const BlockId self = cells.Block(blockCell);
 

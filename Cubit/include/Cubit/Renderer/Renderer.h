@@ -23,6 +23,11 @@ public:
     //so they are not hidden by scene geometry.
     static void SetDepthTest(bool enabled);
 
+    //Enables or disables writing to the depth buffer. Transparent geometry is
+    //drawn with this off so surfaces behind it are not rejected before they
+    //blend.
+    static void SetDepthWrite(bool enabled);
+
     //Sets the pixel region that receives rendered output.
     static void SetViewport(
         std::int32_t x,
