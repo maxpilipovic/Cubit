@@ -111,9 +111,9 @@ namespace
     {
         std::vector<VoxelVertex> found;
 
-        for (std::size_t quad = 0; quad * 4 < mesh.Vertices.size(); ++quad)
+        for (std::size_t quad = 0; quad * 4 < mesh.Opaque.Vertices.size(); ++quad)
         {
-            const VoxelVertex* corners = &mesh.Vertices[quad * 4];
+            const VoxelVertex* corners = &mesh.Opaque.Vertices[quad * 4];
 
             bool flat = true;
             for (int i = 0; i < 4; ++i)
@@ -205,11 +205,11 @@ TEST_CASE("Ambient occlusion changes no geometry counts")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    REQUIRE(mesh.Vertices.size() % 4 == 0);
-    CHECK(mesh.Indices.size() == (mesh.Vertices.size() / 4) * 6);
+    REQUIRE(mesh.Opaque.Vertices.size() % 4 == 0);
+    CHECK(mesh.Opaque.Indices.size() == (mesh.Opaque.Vertices.size() / 4) * 6);
 
-    for (const std::uint32_t index : mesh.Indices)
-        CHECK(index < mesh.Vertices.size());
+    for (const std::uint32_t index : mesh.Opaque.Indices)
+        CHECK(index < mesh.Opaque.Vertices.size());
 }
 
 TEST_CASE("A flipped quad still references each of its four vertices")
@@ -222,16 +222,16 @@ TEST_CASE("A flipped quad still references each of its four vertices")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    for (std::size_t quad = 0; quad < mesh.Vertices.size() / 4; ++quad)
+    for (std::size_t quad = 0; quad < mesh.Opaque.Vertices.size() / 4; ++quad)
     {
         const std::uint32_t first = static_cast<std::uint32_t>(quad) * 4;
         bool used[4] = { false, false, false, false };
 
         for (std::size_t i = quad * 6; i < quad * 6 + 6; ++i)
         {
-            REQUIRE(mesh.Indices[i] >= first);
-            REQUIRE(mesh.Indices[i] < first + 4);
-            used[mesh.Indices[i] - first] = true;
+            REQUIRE(mesh.Opaque.Indices[i] >= first);
+            REQUIRE(mesh.Opaque.Indices[i] < first + 4);
+            used[mesh.Opaque.Indices[i] - first] = true;
         }
 
         CHECK(used[0]);
@@ -402,13 +402,13 @@ namespace
     std::size_t FindQuadByCorners(
         const ChunkMeshData& mesh, const glm::vec3 (&corners)[4])
     {
-        for (std::size_t quad = 0; quad * 4 < mesh.Vertices.size(); ++quad)
+        for (std::size_t quad = 0; quad * 4 < mesh.Opaque.Vertices.size(); ++quad)
         {
             bool matched[4] = { false, false, false, false };
 
             for (int i = 0; i < 4; ++i)
                 for (int e = 0; e < 4; ++e)
-                    if (mesh.Vertices[quad * 4 + i].Position == corners[e])
+                    if (mesh.Opaque.Vertices[quad * 4 + i].Position == corners[e])
                         matched[e] = true;
 
             if (matched[0] && matched[1] && matched[2] && matched[3])
@@ -442,7 +442,7 @@ TEST_CASE("Ambient occlusion darkens exactly the occluded corner, not its neighb
     const std::size_t quad = FindQuadByCorners(mesh, corners);
     REQUIRE(quad != static_cast<std::size_t>(-1));
 
-    const VoxelVertex* top = &mesh.Vertices[quad * 4];
+    const VoxelVertex* top = &mesh.Opaque.Vertices[quad * 4];
 
     int darkIndex = -1;
     for (int i = 0; i < 4; ++i)
@@ -485,12 +485,12 @@ TEST_CASE("A quad flips to split along its darker diagonal, at the right vertex"
     const std::uint32_t first = static_cast<std::uint32_t>(quad) * 4;
     const std::size_t indexBase = quad * 6;
 
-    CHECK(mesh.Indices[indexBase + 0] == first + 1);
-    CHECK(mesh.Indices[indexBase + 1] == first + 2);
-    CHECK(mesh.Indices[indexBase + 2] == first + 3);
-    CHECK(mesh.Indices[indexBase + 3] == first + 3);
-    CHECK(mesh.Indices[indexBase + 4] == first + 0);
-    CHECK(mesh.Indices[indexBase + 5] == first + 1);
+    CHECK(mesh.Opaque.Indices[indexBase + 0] == first + 1);
+    CHECK(mesh.Opaque.Indices[indexBase + 1] == first + 2);
+    CHECK(mesh.Opaque.Indices[indexBase + 2] == first + 3);
+    CHECK(mesh.Opaque.Indices[indexBase + 3] == first + 3);
+    CHECK(mesh.Opaque.Indices[indexBase + 4] == first + 0);
+    CHECK(mesh.Opaque.Indices[indexBase + 5] == first + 1);
 }
 
 namespace

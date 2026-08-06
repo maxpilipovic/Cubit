@@ -188,7 +188,7 @@ namespace
 
     //Adds two triangles referencing the four vertices most recently appended.
     //A quad can be split along either diagonal; flipping picks the other one.
-    void AddFaceIndices(ChunkMeshData& mesh, bool flip)
+    void AddFaceIndices(MeshGeometry& mesh, bool flip)
     {
         CB_CORE_ASSERT(
             mesh.Vertices.size() >= 4,
@@ -306,7 +306,7 @@ namespace
 
 
     void AddFace(
-        ChunkMeshData& mesh,
+        MeshGeometry& mesh,
         const Neighbourhood& cells,
         int blockCell,
         const glm::vec3& blockOrigin,
@@ -350,7 +350,7 @@ namespace
     //up in world coordinates so blocks in the next chunk are visible, while the
     //vertices use chunk-local coordinates.
     void AddExposedFaces(
-        ChunkMeshData& mesh,
+        MeshGeometry& mesh,
         const Neighbourhood& cells,
         const Palette& palette,
         const FaceSteps (&steps)[6],
@@ -404,9 +404,15 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
                 if (!cells.IsSolid(cell))
                     continue;
 
+                // A block's own opacity decides which pass draws it; the faces
+                // of one block never span both.
+                MeshGeometry& target = cells.IsOpaque(cell)
+                    ? mesh.Opaque
+                    : mesh.Transparent;
+
                 // Vertices are chunk-local, so the loop counters are already
                 // the block's origin.
-                AddExposedFaces(mesh, cells, palette, steps, cell,
+                AddExposedFaces(target, cells, palette, steps, cell,
                     glm::vec3(x, y, z));
             }
         }

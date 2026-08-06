@@ -56,18 +56,18 @@ namespace
     //Returns the mesher's face count, derived from its four-vertex quads.
     std::size_t MeshedFaceCount(const ChunkMeshData& mesh)
     {
-        return mesh.Vertices.size() / 4;
+        return mesh.Opaque.Vertices.size() / 4;
     }
 
     //Fails when a mesh is not made of well-formed indexed quads.
     void RequireWellFormed(const ChunkMeshData& mesh)
     {
-        REQUIRE(mesh.Vertices.size() % 4 == 0);
-        REQUIRE(mesh.Indices.size() % 6 == 0);
-        REQUIRE(mesh.Indices.size() == MeshedFaceCount(mesh) * 6);
+        REQUIRE(mesh.Opaque.Vertices.size() % 4 == 0);
+        REQUIRE(mesh.Opaque.Indices.size() % 6 == 0);
+        REQUIRE(mesh.Opaque.Indices.size() == MeshedFaceCount(mesh) * 6);
 
-        for (const std::uint32_t index : mesh.Indices)
-            REQUIRE(index < mesh.Vertices.size());
+        for (const std::uint32_t index : mesh.Opaque.Indices)
+            REQUIRE(index < mesh.Opaque.Vertices.size());
     }
 
     //Fills every block of one chunk in the world.
@@ -106,8 +106,8 @@ TEST_CASE("An empty chunk produces no geometry")
     const World world(1, 1, 1);
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    CHECK(mesh.Vertices.empty());
-    CHECK(mesh.Indices.empty());
+    CHECK(mesh.Opaque.Vertices.empty());
+    CHECK(mesh.Opaque.Indices.empty());
 }
 
 TEST_CASE("A lone block is meshed as six quads")
@@ -119,8 +119,8 @@ TEST_CASE("A lone block is meshed as six quads")
 
     RequireWellFormed(mesh);
     CHECK(MeshedFaceCount(mesh) == 6);
-    CHECK(mesh.Vertices.size() == 24);
-    CHECK(mesh.Indices.size() == 36);
+    CHECK(mesh.Opaque.Vertices.size() == 24);
+    CHECK(mesh.Opaque.Indices.size() == 36);
 }
 
 TEST_CASE("Touching blocks do not mesh the faces between them")
@@ -261,8 +261,8 @@ TEST_CASE("The sandbox test terrain meshes to its known size")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     CHECK(MeshedFaceCount(mesh) == 1122);
-    CHECK(mesh.Vertices.size() == 4488);
-    CHECK(mesh.Indices.size() == 6732);
+    CHECK(mesh.Opaque.Vertices.size() == 4488);
+    CHECK(mesh.Opaque.Indices.size() == 6732);
 }
 
 TEST_CASE("A buried block contributes no geometry")
@@ -337,8 +337,9 @@ namespace
 
     std::size_t FaceCount(const ChunkMeshData& mesh)
     {
-        return mesh.Indices.size() / 6;
+        return mesh.Opaque.Indices.size() / 6;
     }
+
 }
 
 TEST_CASE("An opaque block facing a transparent one is meshed")
@@ -353,7 +354,8 @@ TEST_CASE("An opaque block facing a transparent one is meshed")
 
     // 6 faces for the opaque block (its top is now exposed) + 5 for the
     // transparent one (its bottom faces the opaque block and is hidden).
-    CHECK(FaceCount(mesh) == 11);
+    CHECK(mesh.Opaque.Indices.size() / 6 == 6);       // the stone block
+    CHECK(mesh.Transparent.Indices.size() / 6 == 5);  // the water block
 }
 
 TEST_CASE("Two touching transparent blocks share no face")
@@ -366,7 +368,8 @@ TEST_CASE("Two touching transparent blocks share no face")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    CHECK(FaceCount(mesh) == 10); // 12 minus the two touching faces
+    CHECK(mesh.Opaque.Indices.empty());
+    CHECK(mesh.Transparent.Indices.size() / 6 == 10); // 12 minus the two touching faces
 }
 
 TEST_CASE("A transparent block against air is meshed")
@@ -376,7 +379,8 @@ TEST_CASE("A transparent block against air is meshed")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    CHECK(FaceCount(mesh) == 6);
+    CHECK(mesh.Opaque.Indices.empty());
+    CHECK(mesh.Transparent.Indices.size() / 6 == 6);
 }
 
 TEST_CASE("Two touching opaque blocks of different ids share no face")
@@ -390,4 +394,22 @@ TEST_CASE("Two touching opaque blocks of different ids share no face")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     CHECK(FaceCount(mesh) == 10);
+}
+
+TEST_CASE("Faces are split by the opacity of the block they belong to")
+{
+    World world = TransparentPaletteWorld(1, 1, 1);
+    world.SetBlock(2, 2, 2, BlockId{1}); // opaque, isolated
+    world.SetBlock(8, 8, 8, BlockId{2}); // transparent, isolated
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    CHECK(mesh.Opaque.Indices.size() / 6 == 6);
+    CHECK(mesh.Transparent.Indices.size() / 6 == 6);
+
+    // Each set's indices must address its own vertices, not the other's.
+    for (const std::uint32_t index : mesh.Opaque.Indices)
+        REQUIRE(index < mesh.Opaque.Vertices.size());
+    for (const std::uint32_t index : mesh.Transparent.Indices)
+        REQUIRE(index < mesh.Transparent.Vertices.size());
 }

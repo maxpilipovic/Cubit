@@ -14,10 +14,20 @@ struct VoxelVertex
     glm::vec3 Color{ 1.0f };
 };
 
-struct ChunkMeshData
+//One draw's worth of geometry: vertices and the indices that reference them.
+struct MeshGeometry
 {
     std::vector<VoxelVertex> Vertices;
     std::vector<std::uint32_t> Indices;
+};
+
+//A chunk's mesh, split by how its faces have to be drawn. Transparent faces are
+//drawn in a second pass, back to front, so they blend against what is behind
+//them — which means they cannot share a draw with the opaque ones.
+struct ChunkMeshData
+{
+    MeshGeometry Opaque;
+    MeshGeometry Transparent;
 };
 
 class CB_API ChunkMesher

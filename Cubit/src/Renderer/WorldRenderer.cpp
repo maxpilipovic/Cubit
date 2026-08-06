@@ -31,7 +31,7 @@ void WorldRenderer::Update(World& world)
         const ChunkMeshData mesh =
             ChunkMesher::Build(world, coord.x, coord.y, coord.z);
 
-        if (mesh.Indices.empty())
+        if (mesh.Opaque.Indices.empty())
         {
             //A chunk that meshes to nothing keeps no buffers; drop any it had.
             m_Meshes.erase(coord);
@@ -41,14 +41,14 @@ void WorldRenderer::Update(World& world)
             ChunkMesh gpu;
             gpu.Array = std::make_unique<VertexArray>();
             gpu.Buffer = std::make_unique<VertexBuffer>(
-                mesh.Vertices.data(),
-                static_cast<std::uint32_t>(mesh.Vertices.size() * sizeof(VoxelVertex)));
+                mesh.Opaque.Vertices.data(),
+                static_cast<std::uint32_t>(mesh.Opaque.Vertices.size() * sizeof(VoxelVertex)));
             gpu.Array->AddBuffer(
                 *gpu.Buffer,
                 BufferLayout{ ShaderDataType::Float3, ShaderDataType::Float3 });
             gpu.Indices = std::make_unique<IndexBuffer>(
-                mesh.Indices.data(),
-                static_cast<std::uint32_t>(mesh.Indices.size()));
+                mesh.Opaque.Indices.data(),
+                static_cast<std::uint32_t>(mesh.Opaque.Indices.size()));
             gpu.FaceCount = gpu.Indices->GetCount() / 6;
 
             m_Meshes[coord] = std::move(gpu);
