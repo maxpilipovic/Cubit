@@ -96,10 +96,10 @@ TEST_CASE("ToVoxModel carries the world's palette")
 {
     World world(1, 1, 1);
     Palette palette = DefaultPalette();
-    palette[4] = glm::vec3(0.2f, 0.4f, 0.6f);
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f);
     world.SetPalette(palette);
 
-    CHECK(ToVoxModel(world).Colors[4] == glm::vec3(0.2f, 0.4f, 0.6f));
+    CHECK(ToVoxModel(world).Colors[4] == glm::vec4(0.2f, 0.4f, 0.6f, 1.0f));
 }
 
 TEST_CASE("A world survives a round trip through BuildWorld")
@@ -108,7 +108,7 @@ TEST_CASE("A world survives a round trip through BuildWorld")
     // either half of the conversion drifts.
     World world(2, 1, 2);
     Palette palette = DefaultPalette();
-    palette[6] = glm::vec3(0.1f, 0.2f, 0.3f);
+    palette[6] = glm::vec4(0.1f, 0.2f, 0.3f, 1.0f);
     world.SetPalette(palette);
 
     world.SetBlock(0, 0, 0, BlockId{1});

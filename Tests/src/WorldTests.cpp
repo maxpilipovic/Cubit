@@ -140,8 +140,8 @@ TEST_CASE("A new world colours blocks with the default palette")
 {
     const World world(1, 1, 1);
 
-    CHECK(world.GetBlockColor(BlockId{5}) == glm::vec3(0.35f, 0.75f, 0.35f));
-    CHECK(world.GetBlockColor(BlockId{2}) == glm::vec3(0.85f, 0.25f, 0.25f));
+    CHECK(world.GetBlockColor(BlockId{5}) == glm::vec4(0.35f, 0.75f, 0.35f, 1.0f));
+    CHECK(world.GetBlockColor(BlockId{2}) == glm::vec4(0.85f, 0.25f, 0.25f, 1.0f));
 }
 
 TEST_CASE("Setting a palette changes reported block colours")
@@ -149,10 +149,10 @@ TEST_CASE("Setting a palette changes reported block colours")
     World world(1, 1, 1);
 
     Palette palette{};
-    palette[3] = glm::vec3(0.1f, 0.2f, 0.3f);
+    palette[3] = glm::vec4(0.1f, 0.2f, 0.3f, 1.0f);
     world.SetPalette(palette);
 
-    CHECK(world.GetBlockColor(BlockId{3}) == glm::vec3(0.1f, 0.2f, 0.3f));
+    CHECK(world.GetBlockColor(BlockId{3}) == glm::vec4(0.1f, 0.2f, 0.3f, 1.0f));
 }
 
 TEST_CASE("World sky light round-trips through the chunk grid")

@@ -348,7 +348,8 @@ namespace
         int blockCell,
         const glm::vec3& blockOrigin)
     {
-        const glm::vec3 color = palette[cells.Block(blockCell)];
+        // Alpha is dropped here until the vertex format carries it.
+        const glm::vec3 color = glm::vec3(palette[cells.Block(blockCell)]);
 
         for (int f = 0; f < 6; ++f)
         {

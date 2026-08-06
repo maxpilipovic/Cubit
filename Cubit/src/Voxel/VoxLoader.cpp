@@ -112,10 +112,11 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
             for (int j = 0; j < 255; ++j)
             {
                 const std::size_t p = contentStart + static_cast<std::size_t>(j) * 4;
-                palette[static_cast<std::size_t>(j) + 1] = glm::vec3(
+                palette[static_cast<std::size_t>(j) + 1] = glm::vec4(
                     bytes[p + 0] / 255.0f,
                     bytes[p + 1] / 255.0f,
-                    bytes[p + 2] / 255.0f);
+                    bytes[p + 2] / 255.0f,
+                    bytes[p + 3] / 255.0f);
             }
         }
 

@@ -45,8 +45,8 @@ TEST_CASE("VoxWriter round-trips size and voxels through the loader")
 TEST_CASE("VoxWriter round-trips custom palette colours (byte precision)")
 {
     VoxModel m = MakeModel(1, 1, 1);
-    m.Colors[7] = glm::vec3(60 / 255.0f, 120 / 255.0f, 200 / 255.0f);
-    m.Colors[12] = glm::vec3(190 / 255.0f, 45 / 255.0f, 45 / 255.0f);
+    m.Colors[7] = glm::vec4(60 / 255.0f, 120 / 255.0f, 200 / 255.0f, 1.0f);
+    m.Colors[12] = glm::vec4(190 / 255.0f, 45 / 255.0f, 45 / 255.0f, 1.0f);
     SetId(m, 0, 0, 0, 7);
 
     const VoxModel r = VoxLoader::Parse(VoxWriter::Write(m));
@@ -54,6 +54,30 @@ TEST_CASE("VoxWriter round-trips custom palette colours (byte precision)")
     CHECK(r.Colors[7].x == doctest::Approx(m.Colors[7].x).epsilon(1.0 / 255));
     CHECK(r.Colors[7].y == doctest::Approx(m.Colors[7].y).epsilon(1.0 / 255));
     CHECK(r.Colors[12].z == doctest::Approx(m.Colors[12].z).epsilon(1.0 / 255));
+}
+
+TEST_CASE("VoxWriter round-trips palette alpha")
+{
+    // Alpha is how a block declares itself transparent, so it has to survive a
+    // save and load like any other channel.
+    VoxModel m = MakeModel(1, 1, 1);
+    m.Colors[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
+    SetId(m, 0, 0, 0, 7);
+
+    const VoxModel r = VoxLoader::Parse(VoxWriter::Write(m));
+
+    CHECK(r.Colors[7].a == doctest::Approx(0.55f).epsilon(1.0 / 255));
+}
+
+TEST_CASE("An unwritten palette entry loads back fully opaque")
+{
+    VoxModel m = MakeModel(1, 1, 1);
+    m.Colors[3] = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+    SetId(m, 0, 0, 0, 3);
+
+    const VoxModel r = VoxLoader::Parse(VoxWriter::Write(m));
+
+    CHECK(r.Colors[3].a == doctest::Approx(1.0f).epsilon(1.0 / 255));
 }
 
 TEST_CASE("VoxWriter emits an all-air model with no voxels")

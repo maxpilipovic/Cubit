@@ -97,7 +97,7 @@ namespace
 {
     //The colour a fully open, fully lit top face has: the palette colour at full
     //top shade, no occlusion, and full sky light.
-    glm::vec3 OpenTopColor(const World& world)
+    glm::vec4 OpenTopColor(const World& world)
     {
         return world.GetBlockColor(BlockId{1}) * ChunkMesher::AoShade[3];
     }

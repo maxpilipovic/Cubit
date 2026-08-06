@@ -261,19 +261,19 @@ namespace
 Palette TerrainGen::MapPalette()
 {
     Palette p = DefaultPalette();
-    p[Grass]       = glm::vec3(70, 145, 55) / 255.0f;
-    p[GrassDark]   = glm::vec3(55, 115, 45) / 255.0f;
-    p[Dirt]        = glm::vec3(120, 85, 50) / 255.0f;
-    p[Stone]       = glm::vec3(130, 130, 135) / 255.0f;
-    p[StoneDark]   = glm::vec3(80, 80, 85) / 255.0f;
-    p[Sand]        = glm::vec3(210, 195, 140) / 255.0f;
-    p[Water]       = glm::vec3(55, 110, 200) / 255.0f;
-    p[Wood]        = glm::vec3(95, 65, 40) / 255.0f;
-    p[Leaves]      = glm::vec3(45, 110, 45) / 255.0f;
-    p[LeavesLight] = glm::vec3(70, 140, 60) / 255.0f;
-    p[Snow]        = glm::vec3(235, 240, 245) / 255.0f;
-    p[RedBase]     = glm::vec3(190, 45, 45) / 255.0f;
-    p[BlueBase]    = glm::vec3(55, 80, 200) / 255.0f;
+    p[Grass]       = glm::vec4(glm::vec3(70, 145, 55) / 255.0f, 1.0f);
+    p[GrassDark]   = glm::vec4(glm::vec3(55, 115, 45) / 255.0f, 1.0f);
+    p[Dirt]        = glm::vec4(glm::vec3(120, 85, 50) / 255.0f, 1.0f);
+    p[Stone]       = glm::vec4(glm::vec3(130, 130, 135) / 255.0f, 1.0f);
+    p[StoneDark]   = glm::vec4(glm::vec3(80, 80, 85) / 255.0f, 1.0f);
+    p[Sand]        = glm::vec4(glm::vec3(210, 195, 140) / 255.0f, 1.0f);
+    p[Water]       = glm::vec4(glm::vec3(55, 110, 200) / 255.0f, 1.0f);
+    p[Wood]        = glm::vec4(glm::vec3(95, 65, 40) / 255.0f, 1.0f);
+    p[Leaves]      = glm::vec4(glm::vec3(45, 110, 45) / 255.0f, 1.0f);
+    p[LeavesLight] = glm::vec4(glm::vec3(70, 140, 60) / 255.0f, 1.0f);
+    p[Snow]        = glm::vec4(glm::vec3(235, 240, 245) / 255.0f, 1.0f);
+    p[RedBase]     = glm::vec4(glm::vec3(190, 45, 45) / 255.0f, 1.0f);
+    p[BlueBase]    = glm::vec4(glm::vec3(55, 80, 200) / 255.0f, 1.0f);
     return p;
 }
 

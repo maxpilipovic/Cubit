@@ -50,9 +50,9 @@ TEST_CASE("BuildWorld places solid voxels and leaves the rest air")
 TEST_CASE("BuildWorld installs the model's palette")
 {
     VoxModel model = MakeModel(1, 1, 1);
-    model.Colors[4] = glm::vec3(0.2f, 0.4f, 0.6f);
+    model.Colors[4] = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f);
     Set(model, 0, 0, 0, 4);
     const World world = BuildWorld(model);
 
-    CHECK(world.GetBlockColor(BlockId{4}) == glm::vec3(0.2f, 0.4f, 0.6f));
+    CHECK(world.GetBlockColor(BlockId{4}) == glm::vec4(0.2f, 0.4f, 0.6f, 1.0f));
 }

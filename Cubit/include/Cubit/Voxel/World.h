@@ -43,7 +43,8 @@ public:
     void SetBlock(int x, int y, int z, BlockId block);
 
     //Returns the colour of a block by looking its id up in this world's palette.
-    glm::vec3 GetBlockColor(BlockId block) const { return m_Palette[block]; }
+    //The alpha channel carries the block's opacity.
+    glm::vec4 GetBlockColor(BlockId block) const { return m_Palette[block]; }
 
     //The colours this world's block ids index into.
     const Palette& GetPalette() const { return m_Palette; }

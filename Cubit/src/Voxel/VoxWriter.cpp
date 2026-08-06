@@ -96,11 +96,11 @@ std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)
     {
         if (j < 255)
         {
-            const glm::vec3& c = model.Colors[static_cast<std::size_t>(j) + 1];
+            const glm::vec4& c = model.Colors[static_cast<std::size_t>(j) + 1];
             rgba.push_back(ToByte(c.r));
             rgba.push_back(ToByte(c.g));
             rgba.push_back(ToByte(c.b));
-            rgba.push_back(255);
+            rgba.push_back(ToByte(c.a));
         }
         else
         {
