@@ -96,7 +96,7 @@ namespace
 
                 if (!world.IsInBounds(next.x, next.y, next.z))
                     continue;
-                if (world.IsBlockSolid(next.x, next.y, next.z))
+                if (world.IsBlockOpaque(next.x, next.y, next.z))
                     continue;
 
                 // Full-strength sky light falls without dimming, which is what
@@ -144,7 +144,7 @@ namespace
 
                 if (!world.IsInBounds(next.x, next.y, next.z))
                     continue;
-                if (world.IsBlockSolid(next.x, next.y, next.z))
+                if (world.IsBlockOpaque(next.x, next.y, next.z))
                     continue;
 
                 const int nextLevel = world.GetSkyLight(next.x, next.y, next.z);
@@ -191,7 +191,7 @@ void SkyLight::PropagateAll(World& world)
     {
         for (int x = 0; x < world.GetWidth(); ++x)
         {
-            if (world.IsBlockSolid(x, top, z))
+            if (world.IsBlockOpaque(x, top, z))
                 continue;
 
             world.SetSkyLight(x, top, z, Max);

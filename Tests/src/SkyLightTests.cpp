@@ -440,3 +440,40 @@ TEST_CASE("Repropagation after a no-op edit marks nothing dirty")
 
     CHECK(world.DirtyChunks().empty());
 }
+
+TEST_CASE("Light passes through a non-opaque block")
+{
+    // A roof of transparent blocks should light the space under it just as an
+    // open sky would, which is what makes a riverbed visible through water.
+    World world(1, 4, 1);
+    Palette palette = DefaultPalette();
+    palette[2] = glm::vec4(0.2f, 0.4f, 0.8f, 0.5f); // transparent
+    world.SetPalette(palette);
+
+    const int roof = 20;
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int x = 0; x < world.GetWidth(); ++x)
+            world.SetBlock(x, roof, z, BlockId{2});
+
+    SkyLight::PropagateAll(world);
+
+    CHECK(world.GetSkyLight(8, roof, 8) == SkyLight::Max);
+    CHECK(world.GetSkyLight(8, roof - 1, 8) == SkyLight::Max);
+    CHECK(world.GetSkyLight(8, 0, 8) == SkyLight::Max);
+}
+
+TEST_CASE("An opaque roof still blocks light after the opacity change")
+{
+    // The companion to the case above: switching the predicate must not make
+    // ordinary solid blocks stop casting shadow.
+    World world(1, 4, 1);
+    const int roof = 20;
+
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int x = 0; x < world.GetWidth(); ++x)
+            world.SetBlock(x, roof, z, BlockId{1});
+
+    SkyLight::PropagateAll(world);
+
+    CHECK(world.GetSkyLight(8, roof - 1, 8) == 0);
+}
