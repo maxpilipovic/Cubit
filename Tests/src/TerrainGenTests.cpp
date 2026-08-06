@@ -210,3 +210,15 @@ TEST_CASE("The committed battlefield map loads at the expected size")
     const VoxModel m = VoxLoader::LoadFile(path.string());
     CHECK(m.Size == glm::ivec3(256, 64, 256));
 }
+
+TEST_CASE("Water is the only transparent entry in the map palette")
+{
+    const Palette palette = TerrainGen::MapPalette();
+
+    CHECK(palette[MapBlocks::Water].a < 1.0f);
+
+    // Everything else must stay opaque, or terrain would blend against itself.
+    for (std::size_t i = 1; i < palette.size(); ++i)
+        if (i != MapBlocks::Water)
+            REQUIRE(palette[i].a >= 1.0f);
+}

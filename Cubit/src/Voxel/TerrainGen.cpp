@@ -267,7 +267,8 @@ Palette TerrainGen::MapPalette()
     p[Stone]       = glm::vec4(glm::vec3(130, 130, 135) / 255.0f, 1.0f);
     p[StoneDark]   = glm::vec4(glm::vec3(80, 80, 85) / 255.0f, 1.0f);
     p[Sand]        = glm::vec4(glm::vec3(210, 195, 140) / 255.0f, 1.0f);
-    p[Water]       = glm::vec4(glm::vec3(55, 110, 200) / 255.0f, 1.0f);
+    //Transparent, so the riverbed shows through. Everything else stays opaque.
+    p[Water]       = glm::vec4(glm::vec3(55, 110, 200) / 255.0f, 0.55f);
     p[Wood]        = glm::vec4(glm::vec3(95, 65, 40) / 255.0f, 1.0f);
     p[Leaves]      = glm::vec4(glm::vec3(45, 110, 45) / 255.0f, 1.0f);
     p[LeavesLight] = glm::vec4(glm::vec3(70, 140, 60) / 255.0f, 1.0f);
