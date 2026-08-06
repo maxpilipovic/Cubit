@@ -53,21 +53,71 @@ namespace
         return faces;
     }
 
-    //Returns the mesher's face count, derived from its four-vertex quads.
-    std::size_t MeshedFaceCount(const ChunkMeshData& mesh)
+    //Quads actually emitted. Changes with the merge rule, so it is only asserted
+    //where the expected value is hand-checkable.
+    std::size_t QuadCount(const ChunkMeshData& mesh)
     {
-        return mesh.Opaque.Vertices.size() / 4;
+        return (mesh.Opaque.Vertices.size() + mesh.Transparent.Vertices.size()) / 4;
     }
 
-    //Fails when a mesh is not made of well-formed indexed quads.
+    //The number of block faces a mesh covers: per quad, the product of its two
+    //non-zero extents. Merging changes how faces are grouped into quads but not
+    //how much surface they cover, so this holds under any merge rule — which is
+    //what makes it the oracle CountExposedFaces can be compared against.
+    std::size_t CoveredArea(const MeshGeometry& geometry)
+    {
+        std::size_t area = 0;
+
+        for (std::size_t quad = 0; quad * 4 < geometry.Vertices.size(); ++quad)
+        {
+            const VoxelVertex* corners = &geometry.Vertices[quad * 4];
+
+            glm::vec3 low = corners[0].Position;
+            glm::vec3 high = corners[0].Position;
+            for (int i = 1; i < 4; ++i)
+            {
+                low = glm::min(low, corners[i].Position);
+                high = glm::max(high, corners[i].Position);
+            }
+
+            const glm::vec3 extent = high - low;
+
+            // A quad is flat along its normal, so that axis contributes nothing
+            // and the other two multiply out to the face count it covers.
+            std::size_t cells = 1;
+            for (int axis = 0; axis < 3; ++axis)
+                if (extent[axis] > 0.0f)
+                    cells *= static_cast<std::size_t>(std::lround(extent[axis]));
+
+            area += cells;
+        }
+
+        return area;
+    }
+
+    std::size_t CoveredArea(const ChunkMeshData& mesh)
+    {
+        return CoveredArea(mesh.Opaque) + CoveredArea(mesh.Transparent);
+    }
+
+    //Fails when a mesh is not made of well-formed indexed quads. Says nothing
+    //about how many quads there should be — that is the merge rule's business.
     void RequireWellFormed(const ChunkMeshData& mesh)
     {
         REQUIRE(mesh.Opaque.Vertices.size() % 4 == 0);
         REQUIRE(mesh.Opaque.Indices.size() % 6 == 0);
-        REQUIRE(mesh.Opaque.Indices.size() == MeshedFaceCount(mesh) * 6);
+        REQUIRE(mesh.Opaque.Indices.size() == (mesh.Opaque.Vertices.size() / 4) * 6);
 
         for (const std::uint32_t index : mesh.Opaque.Indices)
             REQUIRE(index < mesh.Opaque.Vertices.size());
+
+        REQUIRE(mesh.Transparent.Vertices.size() % 4 == 0);
+        REQUIRE(mesh.Transparent.Indices.size() % 6 == 0);
+        REQUIRE(mesh.Transparent.Indices.size() ==
+            (mesh.Transparent.Vertices.size() / 4) * 6);
+
+        for (const std::uint32_t index : mesh.Transparent.Indices)
+            REQUIRE(index < mesh.Transparent.Vertices.size());
     }
 
     //Fills every block of one chunk in the world.
@@ -118,7 +168,7 @@ TEST_CASE("A lone block is meshed as six quads")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     RequireWellFormed(mesh);
-    CHECK(MeshedFaceCount(mesh) == 6);
+    CHECK(QuadCount(mesh) == 6);
     CHECK(mesh.Opaque.Vertices.size() == 24);
     CHECK(mesh.Opaque.Indices.size() == 36);
 }
@@ -132,7 +182,7 @@ TEST_CASE("Touching blocks do not mesh the faces between them")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     RequireWellFormed(mesh);
-    CHECK(MeshedFaceCount(mesh) == 10);
+    CHECK(CoveredArea(mesh) == 10);
 }
 
 TEST_CASE("A solid chunk at the world edge meshes its whole shell")
@@ -144,8 +194,8 @@ TEST_CASE("A solid chunk at the world edge meshes its whole shell")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     RequireWellFormed(mesh);
-    CHECK(MeshedFaceCount(mesh) == 6 * Chunk::Width * Chunk::Height);
-    CHECK(MeshedFaceCount(mesh) == 1536);
+    CHECK(CoveredArea(mesh) == 6 * Chunk::Width * Chunk::Height);
+    CHECK(CoveredArea(mesh) == 1536);
 }
 
 TEST_CASE("Chunks do not mesh the faces they share with a solid neighbour")
@@ -163,8 +213,8 @@ TEST_CASE("Chunks do not mesh the faces they share with a solid neighbour")
     RequireWellFormed(right);
 
     constexpr std::size_t faceOfAChunk = Chunk::Width * Chunk::Height;
-    CHECK(MeshedFaceCount(left) == 5 * faceOfAChunk);
-    CHECK(MeshedFaceCount(right) == 5 * faceOfAChunk);
+    CHECK(CoveredArea(left) == 5 * faceOfAChunk);
+    CHECK(CoveredArea(right) == 5 * faceOfAChunk);
 }
 
 TEST_CASE("A block is hidden by a solid block in the next chunk")
@@ -175,19 +225,19 @@ TEST_CASE("A block is hidden by a solid block in the next chunk")
     world.SetBlock(Chunk::Width - 1, 8, 8, BlockId{1});
 
     const ChunkMeshData alone = ChunkMesher::Build(world, 0, 0, 0);
-    CHECK(MeshedFaceCount(alone) == 6);
+    CHECK(CoveredArea(alone) == 6);
 
     // Its neighbour is the first column of chunk 1, so the two hide one face
     // from each other across the seam.
     world.SetBlock(Chunk::Width, 8, 8, BlockId{1});
 
-    CHECK(MeshedFaceCount(ChunkMesher::Build(world, 0, 0, 0)) == 5);
+    CHECK(CoveredArea(ChunkMesher::Build(world, 0, 0, 0)) == 5);
 
     // Building the far chunk matters on its own. A mesher that looked neighbours
     // up in chunk-local coordinates would hide the opposite face here and still
     // report five, so the count alone does not prove much unless the world is
     // asymmetric about the seam. It is: nothing else in either chunk is solid.
-    CHECK(MeshedFaceCount(ChunkMesher::Build(world, 1, 0, 0)) == 5);
+    CHECK(CoveredArea(ChunkMesher::Build(world, 1, 0, 0)) == 5);
 }
 
 TEST_CASE("Meshed faces match an independent count for varied terrain")
@@ -228,7 +278,7 @@ TEST_CASE("Meshed faces match an independent count for varied terrain")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     RequireWellFormed(mesh);
-    CHECK(MeshedFaceCount(mesh) == CountExposedFaces(world, 0, 0, 0));
+    CHECK(CoveredArea(mesh) == CountExposedFaces(world, 0, 0, 0));
 }
 
 TEST_CASE("Every chunk of a multi-chunk world matches the independent count")
@@ -246,7 +296,7 @@ TEST_CASE("Every chunk of a multi-chunk world matches the independent count")
                     ChunkMesher::Build(world, chunkX, chunkY, chunkZ);
 
                 RequireWellFormed(mesh);
-                REQUIRE(MeshedFaceCount(mesh) ==
+                REQUIRE(CoveredArea(mesh) ==
                     CountExposedFaces(world, chunkX, chunkY, chunkZ));
             }
         }
@@ -260,9 +310,9 @@ TEST_CASE("The sandbox test terrain meshes to its known size")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    CHECK(MeshedFaceCount(mesh) == 1122);
-    CHECK(mesh.Opaque.Vertices.size() == 4488);
-    CHECK(mesh.Opaque.Indices.size() == 6732);
+    // The surface this terrain exposes is fixed. How many quads cover it is the
+    // merge rule's business, so it is not asserted here.
+    CHECK(CoveredArea(mesh) == 1122);
 }
 
 TEST_CASE("A buried block contributes no geometry")
@@ -270,7 +320,7 @@ TEST_CASE("A buried block contributes no geometry")
     World world(1, 1, 1);
     world.SetBlock(8, 8, 8, BlockId{1});
 
-    const std::size_t before = MeshedFaceCount(ChunkMesher::Build(world, 0, 0, 0));
+    const std::size_t before = CoveredArea(ChunkMesher::Build(world, 0, 0, 0));
 
     // Encasing the block removes its six faces and adds the shell's own faces.
     world.SetBlock(7, 8, 8, BlockId{1});
@@ -284,8 +334,8 @@ TEST_CASE("A buried block contributes no geometry")
 
     REQUIRE(before == 6);
     RequireWellFormed(mesh);
-    CHECK(MeshedFaceCount(mesh) == CountExposedFaces(world, 0, 0, 0));
-    CHECK(MeshedFaceCount(mesh) == 30);
+    CHECK(CoveredArea(mesh) == CountExposedFaces(world, 0, 0, 0));
+    CHECK(CoveredArea(mesh) == 30);
 }
 
 TEST_CASE("Meshing a chunk costs little more than reading its blocks")
@@ -304,7 +354,7 @@ TEST_CASE("Meshing a chunk costs little more than reading its blocks")
     std::size_t faces = 0;
     for (int chunkZ = 0; chunkZ < world.GetChunksZ(); ++chunkZ)
         for (int chunkX = 0; chunkX < world.GetChunksX(); ++chunkX)
-            faces += MeshedFaceCount(ChunkMesher::Build(world, chunkX, 0, chunkZ));
+            faces += CoveredArea(ChunkMesher::Build(world, chunkX, 0, chunkZ));
 
     const auto elapsed = std::chrono::steady_clock::now() - start;
     const double ms =
@@ -334,12 +384,6 @@ namespace
         world.SetPalette(palette);
         return world;
     }
-
-    std::size_t FaceCount(const ChunkMeshData& mesh)
-    {
-        return mesh.Opaque.Indices.size() / 6;
-    }
-
 }
 
 TEST_CASE("An opaque block facing a transparent one is meshed")
@@ -393,7 +437,7 @@ TEST_CASE("Two touching opaque blocks of different ids share no face")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    CHECK(FaceCount(mesh) == 10);
+    CHECK(CoveredArea(mesh) == 10);
 }
 
 TEST_CASE("Faces are split by the opacity of the block they belong to")
