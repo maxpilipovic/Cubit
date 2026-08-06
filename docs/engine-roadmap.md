@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-07-31_
+_Last updated: 2026-08-06_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
@@ -48,8 +48,10 @@ Ranked by leverage. Performance items are detailed in
 4. ~~**Lighting / ambient occlusion**~~ **DONE 2026-07-26** — per-vertex corner AO
    plus sky light propagated through the world (`SkyLight::PropagateAll`/
    `Repropagate`) replace the old fixed per-face shading constants.
-5. **Transparency / alpha blending** — none today; needed for real water and glass
-   (water currently renders as an opaque solid).
+5. ~~**Transparency / alpha blending**~~ **DONE 2026-08-06** — palette alpha marks
+   a block non-opaque; the mesher splits chunk geometry and the renderer draws the
+   transparent set back to front with depth writes off. Water is see-through and
+   its bed is lit. Water is still *solid* — collision and raycast are Phase 2.
 
 ### Format / smaller gaps
 6. **Multi-model stitching** — load maps larger than 256³ (true Ace-of-Spades
@@ -73,8 +75,10 @@ A bounded sequence — genuinely finishable, not endless:
 1. ~~**Amortized meshing + frustum culling**~~ **DONE 2026-07-25** — the map now
    ships at 256×64×256 and loads without a stall. Threading still deferred.
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
-3. **Transparency** (real water). World save landed 2026-07-31. ← next.
-4. **Multi-model stitching** (full AoS-scale maps).
+3. ~~**Transparency**~~ **DONE 2026-08-06** (opacity; solidity is Phase 2).
+4. **Greedy meshing** — the last perf item, and the last thing touching
+   `ChunkMesher`. ← next.
+5. **Multi-model stitching** (full AoS-scale maps).
 
 After these, the engine is "done" for our purposes, and the remaining work is all
 gameplay.

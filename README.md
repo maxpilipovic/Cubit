@@ -40,6 +40,8 @@ sky light and ambient occlusion. The current map is a 256x64x256 battlefield.
   dirty, meshed against a 4 ms per-frame time slice so a burst of remeshing spreads over
   frames instead of stalling one, and drawn only when the chunk's box is inside the
   frustum
+- Two-pass drawing: opaque geometry first, then transparent geometry sorted back
+  to front with depth writes off, so water blends over the riverbed beneath it
 
 **Voxel world**
 
@@ -160,7 +162,6 @@ at load: the initial sky-light flood over the whole world.
 Finishing the engine first, in this order — see
 [`docs/engine-roadmap.md`](docs/engine-roadmap.md):
 
-- **Transparency** so water and glass are not opaque solids
 - **Greedy meshing** — the mesher still emits one quad per exposed face, so flat ground
   costs far more geometry than it needs. Ambient occlusion landed first deliberately, so
   the merge criterion can be written to require matching AO and light from the start
