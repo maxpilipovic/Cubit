@@ -288,18 +288,29 @@ namespace
         const int uCount = AxisExtent(uAxis);
         const int vCount = AxisExtent(vAxis);
 
+        // The flat index is linear in (slice, u, v), so it is carried forward
+        // by addition instead of rebuilt from local coordinates on every cell.
+        // steps.Normal is negative for the -X/-Y/-Z faces, but slice always
+        // counts up from 0 along the axis, so the step that advances it has
+        // to be the magnitude.
+        const int planeOrigin = Neighbourhood::At(0, 0, 0);
+        const int normalStep = steps.Normal < 0 ? -steps.Normal : steps.Normal;
+
         for (int slice = 0; slice < sliceCount; ++slice)
         {
+            const int sliceBase = planeOrigin + slice * normalStep;
+
             for (int v = 0; v < vCount; ++v)
             {
-                for (int u = 0; u < uCount; ++u)
+                int cell = sliceBase + v * steps.V;
+
+                for (int u = 0; u < uCount; ++u, cell += steps.U)
                 {
                     glm::ivec3 local(0);
                     local[normalAxis] = slice;
                     local[uAxis] = u;
                     local[vAxis] = v;
 
-                    const int cell = Neighbourhood::At(local.x, local.y, local.z);
                     if (!cells.IsSolid(cell))
                         continue;
 
