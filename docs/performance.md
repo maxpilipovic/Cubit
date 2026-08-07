@@ -82,18 +82,53 @@ outside it. Verified in-sandbox on the 256 map (`DRAWN 232/602`).
 block face. Coplanar, same-colour faces are never merged, so a flat 128×128 grass
 plane emits thousands of individual quads instead of a handful of large ones.
 
-**Impact:** inflates vertex/index counts and GPU memory (the battlefield's ~120k
-faces are mostly mergeable flat terrain). More geometry to build, upload, and draw.
+**Impact:** inflates vertex/index counts and GPU memory. Note the premise below
+turned out to be wrong: the battlefield's faces are *not* mostly mergeable.
 
-**Fix:** greedy meshing — merge adjacent coplanar faces of the same block/colour into
-larger quads per chunk face-plane. Significant vertex-count reduction, and it makes
-P1/P2 cheaper too. Larger change to the mesher; do after P1/P2. Now that faces carry
-per-vertex AO and sky light, the merge criterion has to widen: two coplanar faces can
-only merge when their AO *and* light values match, not just their block/colour, or the
-merged quad's corner-interpolated shading would misrepresent one of the faces it
-absorbed.
+**Fix tried and rejected, 2026-08-06.** Greedy meshing was built, measured, and
+reverted. `ChunkMesher::Build` walked face planes instead of blocks, filling a
+16×16 mask per plane and consuming it into maximal rectangles. A face joined the
+mask only when its four corners carried one shade, so merging never flattened an
+ambient-occlusion gradient.
 
-**Priority:** medium-high. **Status:** open.
+Measured over `battlefield.vox`, meshing every chunk:
+
+| | quads | vertices | Release | Debug |
+|---|---|---|---|---|
+| per-face | 480262 | 1921048 | 118.0 ms | 1398 ms |
+| greedy | 380802 | 1523208 | 236.8 ms | 2734 ms |
+
+Covered area was 480262 in every run, so the merge was correct — it regrouped
+faces without gaining or losing one.
+
+**Why the win was small.** Only faces whose four corners share a shade can merge,
+and per-vertex AO plus sky light leave most outdoor faces with a gradient. The
+textbook 10× greedy-meshing figure assumes flat-shaded faces; this engine does not
+have those. 20.7% is what the conservative rule is worth here.
+
+**Why the cost was large.** Sweeping face planes visits every cell once per
+direction — six times per chunk — where the block walk visited each cell once and
+checked all six neighbours from that single visit. That 6× iteration is inherent
+to the direction-major structure, not tunable overhead. Release made it worse
+(2.0×) than Debug (1.9×), so it is structural rather than an artefact of an
+unoptimised build.
+
+**Why the geometry saved did not pay for it.** Draw calls are one per chunk either
+way. The saving is ~400k vertices of GPU memory and vertex processing, which is
+nowhere near the frame-time bottleneck, while the meshing cost lands on load and
+on every block edit.
+
+A block-major variant — walk blocks once, deposit each exposed face into its
+direction's plane mask, merge all 96 planes afterwards — would avoid the 6×
+iteration, at the cost of keeping every mask resident (~24576 cells per chunk).
+Not attempted. It would have to beat parity *and* the reduction would still be
+capped near 20%, so the payoff does not obviously justify it.
+
+Design and plan kept for the record:
+`docs/superpowers/specs/2026-08-06-greedy-meshing-design.md`,
+`docs/superpowers/plans/2026-08-06-greedy-meshing.md`.
+
+**Priority:** medium-high. **Status:** closed — measured, rejected.
 
 ---
 

@@ -40,9 +40,11 @@ Ranked by leverage. Performance items are detailed in
    True threading remains deferred.
 2. ~~**Frustum culling**~~ **DONE 2026-07-25** — `WorldRenderer::Render` tests each
    chunk's world-space AABB against the camera frustum before submitting.
-3. **Greedy meshing** — the mesher emits one quad per exposed face; coplanar faces
-   are never merged, so flat areas produce far more geometry than needed. **← next
-   perf item** (see the AO ordering note below).
+3. ~~**Greedy meshing**~~ **TRIED AND REJECTED 2026-08-06** — built, measured, and
+   reverted. It cut geometry 20.7% but doubled meshing time in both Debug and
+   Release, and draw calls are one per chunk either way, so the geometry saved
+   never reached the frame time that would have to pay for it. Full numbers and
+   reasoning in [performance.md](performance.md) P3.
 
 ### Visual quality
 4. ~~**Lighting / ambient occlusion**~~ **DONE 2026-07-26** — per-vertex corner AO
@@ -76,14 +78,19 @@ A bounded sequence — genuinely finishable, not endless:
    ships at 256×64×256 and loads without a stall. Threading still deferred.
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
 3. ~~**Transparency**~~ **DONE 2026-08-06** (opacity; solidity is Phase 2).
-4. **Greedy meshing** — the last perf item, and the last thing touching
-   `ChunkMesher`. ← next.
-5. **Multi-model stitching** (full AoS-scale maps).
+4. ~~**Greedy meshing**~~ **TRIED AND REJECTED 2026-08-06** — see P3.
+5. **Multi-model stitching** (full AoS-scale maps). ← next
 
 After these, the engine is "done" for our purposes, and the remaining work is all
 gameplay.
 
-**Ordering note — AO before greedy meshing.** Both touch `ChunkMesher`, and they
-interact: per-vertex AO means two coplanar faces can only be merged if their AO
-values match. Doing AO first lets the greedy pass be written AO-aware from the
-start, instead of retrofitting the merge criterion afterwards.
+**What the greedy-meshing attempt taught us.** The ordering note above said AO
+should land before greedy meshing, so the merge criterion could be written
+AO-aware from the start. That was right as far as it went, but it understated the
+consequence: requiring matching AO *and* light does not merely complicate the
+merge criterion, it removes most of the opportunity. Per-vertex shading and greedy
+meshing are close to mutually exclusive on lit outdoor terrain — the faces worth
+merging are the ones a shading gradient disqualifies.
+
+Worth remembering before adopting another technique whose headline figure comes
+from engines with flat-shaded faces.

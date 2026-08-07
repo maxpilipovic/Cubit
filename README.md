@@ -152,6 +152,12 @@ problem, where it lives, and what it cost; the block-edit investigation under
 `docs/superpowers/investigations/` records how the causes were found, including three
 optimisations that measured slower and were reverted.
 
+Greedy meshing is the fourth. It was built in full, measured, and reverted: it cut
+geometry 20.7% but doubled meshing time in both Debug and Release, and draw calls are
+one per chunk either way. P3 in the performance notes has the numbers and the reason —
+per-vertex ambient occlusion and greedy merging turn out to be close to mutually
+exclusive on lit outdoor terrain.
+
 Where an edit stands today, on the 256x64x256 map in a debug build: relighting a broken
 surface block takes 0.03 ms, down from 173 ms, and remeshing the four chunks it touches
 about 7 ms, down from 26 ms and now spread across frames by the mesh budget. Still open
@@ -162,9 +168,6 @@ at load: the initial sky-light flood over the whole world.
 Finishing the engine first, in this order — see
 [`docs/engine-roadmap.md`](docs/engine-roadmap.md):
 
-- **Greedy meshing** — the mesher still emits one quad per exposed face, so flat ground
-  costs far more geometry than it needs. Ambient occlusion landed first deliberately, so
-  the merge criterion can be written to require matching AO and light from the start
 - **Multi-model stitching**, for maps beyond the 256-per-axis limit of a single `.vox`
 - **Threaded meshing** — the per-frame budget hides load cost but does not remove it
 
