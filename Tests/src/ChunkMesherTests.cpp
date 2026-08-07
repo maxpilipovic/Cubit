@@ -310,9 +310,14 @@ TEST_CASE("The sandbox test terrain meshes to its known size")
 
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
-    // The surface this terrain exposes is fixed. How many quads cover it is the
-    // merge rule's business, so it is not asserted here.
+    // The surface this terrain exposes is fixed. The exact quad count is the
+    // merge rule's business and is bounded, not pinned, below.
     CHECK(CoveredArea(mesh) == 1122);
+
+    // Rolling terrain has large flat runs, so merging must beat one quad per
+    // face by a wide margin. A bound rather than a number: the exact count is
+    // the merge rule's business and would have to be re-derived on any change.
+    CHECK(QuadCount(mesh) < 900);
 }
 
 TEST_CASE("A buried block contributes no geometry")
@@ -413,7 +418,11 @@ TEST_CASE("Two touching transparent blocks share no face")
     const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
 
     CHECK(mesh.Opaque.Indices.empty());
-    CHECK(mesh.Transparent.Indices.size() / 6 == 10); // 12 minus the two touching faces
+
+    // 12 minus the two touching faces. A raw quad count would not survive
+    // merging: the four remaining side-face pairs are coplanar, same block,
+    // same colour, so they merge into 1x2 quads. Covered area still holds.
+    CHECK(CoveredArea(mesh.Transparent) == 10);
 }
 
 TEST_CASE("A transparent block against air is meshed")
@@ -456,4 +465,105 @@ TEST_CASE("Faces are split by the opacity of the block they belong to")
         REQUIRE(index < mesh.Opaque.Vertices.size());
     for (const std::uint32_t index : mesh.Transparent.Indices)
         REQUIRE(index < mesh.Transparent.Vertices.size());
+}
+
+TEST_CASE("Coplanar faces of the same block merge into one quad")
+{
+    // Two blocks side by side share four coplanar face pairs — top, bottom,
+    // front and back — and each pair is one quad after merging. The two end
+    // faces have no partner, so eleven faces come out as six quads.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(9, 8, 8, BlockId{1});
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    RequireWellFormed(mesh);
+    CHECK(CoveredArea(mesh) == 10);
+    CHECK(QuadCount(mesh) == 6);
+}
+
+TEST_CASE("Each side of a filled chunk merges to a single quad")
+{
+    World world(1, 1, 1);
+    FillChunk(world, 0, 0, 0);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    RequireWellFormed(mesh);
+    CHECK(CoveredArea(mesh) == 1536);
+    CHECK(QuadCount(mesh) == 6);
+}
+
+TEST_CASE("A lit floor slab merges its whole top plane")
+{
+    // Full daylight and no occluders means every top face carries the same
+    // shade, which is exactly the condition merging needs.
+    World world(1, 1, 1);
+    for (int z = 0; z < Chunk::Depth; ++z)
+        for (int x = 0; x < Chunk::Width; ++x)
+            world.SetBlock(x, 0, z, BlockId{1});
+
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int y = 0; y < world.GetHeight(); ++y)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetSkyLight(x, y, z, SkyLight::Max);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    // The top plane is one quad; the four sides and the bottom are one each.
+    CHECK(QuadCount(mesh) == 6);
+    CHECK(CoveredArea(mesh) == CountExposedFaces(world, 0, 0, 0));
+}
+
+TEST_CASE("A shading gradient stops faces merging")
+{
+    // A wall standing on a lit floor darkens the floor faces beside it by
+    // ambient occlusion. Those faces have corners that disagree, so they must
+    // stay 1x1 rather than being flattened into the open floor's quad.
+    World world(1, 1, 1);
+    for (int z = 0; z < Chunk::Depth; ++z)
+        for (int x = 0; x < Chunk::Width; ++x)
+            world.SetBlock(x, 0, z, BlockId{1});
+
+    for (int z = 0; z < Chunk::Depth; ++z)
+        world.SetBlock(8, 1, z, BlockId{1});
+
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int y = 0; y < world.GetHeight(); ++y)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetSkyLight(x, y, z, SkyLight::Max);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    RequireWellFormed(mesh);
+    CHECK(CoveredArea(mesh) == CountExposedFaces(world, 0, 0, 0));
+
+    // The occluded strips either side of the wall are 16 faces each and cannot
+    // merge, so the mesh cannot have collapsed to a handful of quads.
+    CHECK(QuadCount(mesh) > 32);
+}
+
+TEST_CASE("A merged quad never spans the opaque and transparent passes")
+{
+    // Opacity follows the block id and merging requires equal ids, so this
+    // cannot happen by construction — asserted because the passes silently
+    // blending into each other would be very hard to see in a screenshot.
+    World world = TransparentPaletteWorld(1, 1, 1);
+    for (int x = 0; x < 4; ++x)
+        world.SetBlock(x, 8, 8, BlockId{1}); // opaque run
+    for (int x = 4; x < 8; ++x)
+        world.SetBlock(x, 8, 8, BlockId{2}); // transparent run, touching it
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    RequireWellFormed(mesh);
+
+    // The opaque run buries 3 internal pairs: 4*6 - 6 = 18. It keeps the face
+    // toward the water, because water neither hides it nor matches its id.
+    CHECK(CoveredArea(mesh.Opaque) == 18);
+
+    // The transparent run buries the same 3 pairs and loses one more face to
+    // the opaque block beside it, which does hide what is behind it: 24 - 7.
+    CHECK(CoveredArea(mesh.Transparent) == 17);
 }
