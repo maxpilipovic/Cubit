@@ -184,7 +184,7 @@ private:
         DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), TextMargin, y);
 
         y -= lineHeight;
-        DrawText("FACES " + std::to_string(m_State->MeshFaceCount), TextMargin, y);
+        DrawText("QUADS " + std::to_string(m_State->MeshFaceCount), TextMargin, y);
 
         y -= lineHeight;
         DrawText("DRAWN " + std::to_string(m_State->DrawnChunks) +

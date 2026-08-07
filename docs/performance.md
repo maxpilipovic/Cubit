@@ -1,6 +1,6 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-08-06_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
@@ -93,7 +93,19 @@ only merge when their AO *and* light values match, not just their block/colour, 
 merged quad's corner-interpolated shading would misrepresent one of the faces it
 absorbed.
 
-**Priority:** medium-high. **Status:** open.
+**Fix applied 2026-08-06:** `ChunkMesher::Build` walks face planes rather than
+blocks, filling a 16×16 mask per plane and consuming it into maximal rectangles.
+A face joins the mask only when its four corners share one shade, so merging
+never flattens an ambient-occlusion gradient; those faces still go out 1×1.
+
+Measured in Debug over `battlefield.vox`: quads 480262 → 380802, vertices
+1921048 → 1523208, whole-map mesh time 1398.58 ms → 2631.02 ms. Quads and
+vertices both fell by 20.7%, but meshing got slower in this Debug build — about
+88% slower — because the mask-and-rectangle bookkeeping adds work per plane that
+a straight one-quad-per-face walk never paid, and Debug does not optimise that
+overhead away.
+
+**Priority:** medium-high. **Status:** done.
 
 ---
 
@@ -227,7 +239,7 @@ worth making:
 |----|-------|-------|----------|--------|
 | P1 | Whole world meshes in one frame | `WorldRenderer::Update` | Highest | **Done 2026-07-25**, budget revised to a time slice **2026-07-28** |
 | P2 | No frustum culling | `WorldRenderer::Render` | High | **Done 2026-07-25** |
-| P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | Open |
+| P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | **Done 2026-08-06** |
 | P4 | GPU buffers reallocated per remesh | `WorldRenderer::Update` | Low | Open |
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
