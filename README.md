@@ -42,8 +42,6 @@ sky light and ambient occlusion. The current map is a 256x64x256 battlefield.
   frustum
 - Two-pass drawing: opaque geometry first, then transparent geometry sorted back
   to front with depth writes off, so water blends over the riverbed beneath it
-- Greedy meshing: coplanar faces sharing a block and a colour merge into maximal
-  rectangles, so flat terrain costs a handful of quads instead of thousands
 
 **Voxel world**
 
@@ -164,6 +162,9 @@ at load: the initial sky-light flood over the whole world.
 Finishing the engine first, in this order — see
 [`docs/engine-roadmap.md`](docs/engine-roadmap.md):
 
+- **Greedy meshing** — the mesher still emits one quad per exposed face, so flat ground
+  costs far more geometry than it needs. Ambient occlusion landed first deliberately, so
+  the merge criterion can be written to require matching AO and light from the start
 - **Multi-model stitching**, for maps beyond the 256-per-axis limit of a single `.vox`
 - **Threaded meshing** — the per-frame budget hides load cost but does not remove it
 

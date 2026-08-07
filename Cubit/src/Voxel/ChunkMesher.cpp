@@ -212,272 +212,80 @@ namespace
         int V;
     };
 
-    //The index of the one non-zero component of a unit axis vector: 0 is x,
-    //1 is y, 2 is z. Every Normal, U and V in the Faces table is a unit axis.
-    constexpr int AxisIndex(const glm::ivec3& axis)
-    {
-        return axis.x != 0 ? 0 : (axis.y != 0 ? 1 : 2);
-    }
 
-    //How many blocks a chunk spans along one axis.
-    constexpr int AxisExtent(int axis)
-    {
-        return axis == 0 ? Chunk::Width : (axis == 1 ? Chunk::Height : Chunk::Depth);
-    }
-
-    //The four corner shades of one face, before they are turned into colours.
-    struct FaceCorners
-    {
-        int Ao[4];
-        float Light[4];
-    };
-
-    //Samples occlusion and light at a face's four corners.
-    FaceCorners CornerShades(
+    void AddFace(
+        MeshGeometry& mesh,
         const Neighbourhood& cells,
-        int airCell,
+        int blockCell,
+        const glm::vec3& blockOrigin,
         const FaceGeometry& face,
-        const FaceSteps& steps)
+        const FaceSteps& steps,
+        const glm::vec4& blockColor)
     {
-        FaceCorners corners{};
+        const int airCell = blockCell + steps.Normal;
 
+        int ao[4];
+        float light[4];
         for (int i = 0; i < 4; ++i)
         {
             const int sideA = steps.U * face.CornerU[i];
             const int sideB = steps.V * face.CornerV[i];
 
-            corners.Ao[i] = CornerAo(cells, airCell, sideA, sideB);
-            corners.Light[i] = CornerLight(cells, airCell, sideA, sideB);
+            ao[i] = CornerAo(cells, airCell, sideA, sideB);
+            light[i] = CornerLight(cells, airCell, sideA, sideB);
         }
 
-        return corners;
-    }
-
-    //The colour one corner ends up wearing.
-    glm::vec4 ShadeCorner(
-        const glm::vec4& blockColor, float faceShade, int ao, float light)
-    {
-        const float lit = faceShade * ChunkMesher::AoShade[ao] * light;
-
-        // The floor applies to the finished shading, not to light alone: the
-        // three factors multiply, so flooring only the light term still lets an
-        // occluded ceiling underside reach near-black.
-        //
-        // Shading scales the colour channels only. Alpha is the block's opacity
-        // and has nothing to do with how lit the face is.
-        const glm::vec3 shaded = glm::vec3(blockColor)
-            * (ChunkMesher::LightFloor
-                + (1.0f - ChunkMesher::LightFloor) * lit);
-
-        return glm::vec4(shaded, blockColor.a);
-    }
-
-    //Emits one quad spanning w cells along the face's U axis and h along V.
-    //A 1x1 quad is the w = h = 1 case, so merged and unmerged faces share one
-    //emission path rather than drifting apart as two.
-    void AddQuad(
-        MeshGeometry& mesh,
-        const FaceGeometry& face,
-        const glm::vec3& origin,
-        int w,
-        int h,
-        const glm::vec4 (&cornerColors)[4],
-        bool flip)
-    {
         for (int i = 0; i < 4; ++i)
         {
-            // Corner already carries the unit step, so only the corners on the
-            // far side of each tangent axis move, and only by the extra extent.
-            const glm::vec3 stretched =
-                glm::vec3(face.U) * static_cast<float>(face.CornerU[i] > 0 ? w - 1 : 0) +
-                glm::vec3(face.V) * static_cast<float>(face.CornerV[i] > 0 ? h - 1 : 0);
+            const float lit = face.Shade * ChunkMesher::AoShade[ao[i]] * light[i];
+
+            // The floor applies to the finished shading, not to light alone:
+            // the three factors multiply, so flooring only the light term still
+            // lets an occluded ceiling underside reach near-black.
+            //
+            // Shading scales the colour channels only. Alpha is the block's
+            // opacity and has nothing to do with how lit the face is.
+            const glm::vec3 shaded = glm::vec3(blockColor)
+                * (ChunkMesher::LightFloor
+                    + (1.0f - ChunkMesher::LightFloor) * lit);
 
             mesh.Vertices.push_back(
-                { origin + face.Corner[i] + stretched, cornerColors[i] });
+                { blockOrigin + face.Corner[i], glm::vec4(shaded, blockColor.a) });
         }
 
-        AddFaceIndices(mesh, flip);
+        // Splitting a quad along its darker diagonal keeps the shading gradient
+        // smooth; splitting the other way leaves a visible seam across it.
+        AddFaceIndices(mesh, ao[0] + ao[2] > ao[1] + ao[3]);
     }
 
-    //One cell of a face plane while it is being merged. Cells that hold no
-    //face, and faces too varied to merge, are simply absent: those are emitted
-    //as they are found rather than being carried through the merge pass.
-    struct MaskCell
-    {
-        bool Present = false;
-        bool Opaque = false;
-        BlockId Block = 0;
-        glm::vec4 Color{ 0.0f };
-    };
-
-    //Two cells merge only when they are the same block wearing the same colour.
-    //Equal colour is what makes the merged quad's flat shading truthful; equal
-    //block id costs one compare and keeps the rule readable.
-    bool Mergeable(const MaskCell& cell, const MaskCell& key)
-    {
-        return cell.Present && cell.Block == key.Block && cell.Color == key.Color;
-    }
-
-    //Every chunk face plane is the same size, so one mask array serves all six
-    //directions.
-    static_assert(
-        Chunk::Width == Chunk::Height && Chunk::Height == Chunk::Depth,
-        "The face-plane mask assumes cubic chunks");
-
-    constexpr int PlaneCells = Chunk::Width * Chunk::Width;
-
-    //Emits every face pointing one direction, plane by plane. Walking planes
-    //rather than blocks is what lets coplanar faces meet each other; a
-    //block-major walk never has two faces of the same plane in hand at once.
-    void MeshFacePlanes(
-        ChunkMeshData& mesh,
+    //Emits the faces of one block that are exposed to air. Neighbours are looked
+    //up in world coordinates so blocks in the next chunk are visible, while the
+    //vertices use chunk-local coordinates.
+    void AddExposedFaces(
+        MeshGeometry& mesh,
         const Neighbourhood& cells,
         const Palette& palette,
-        const FaceGeometry& face,
-        const FaceSteps& steps)
+        const FaceSteps (&steps)[6],
+        int blockCell,
+        const glm::vec3& blockOrigin)
     {
-        const int normalAxis = AxisIndex(face.Normal);
-        const int uAxis = AxisIndex(face.U);
-        const int vAxis = AxisIndex(face.V);
+        const glm::vec4 color = palette[cells.Block(blockCell)];
 
-        const int sliceCount = AxisExtent(normalAxis);
-        const int uCount = AxisExtent(uAxis);
-        const int vCount = AxisExtent(vAxis);
+        const BlockId self = cells.Block(blockCell);
 
-        // The flat index is linear in (slice, u, v), so it is carried forward
-        // by addition instead of rebuilt from local coordinates on every cell.
-        // steps.Normal is negative for the -X/-Y/-Z faces, but slice always
-        // counts up from 0 along the axis, so the step that advances it has
-        // to be the magnitude.
-        const int planeOrigin = Neighbourhood::At(0, 0, 0);
-        const int normalStep = steps.Normal < 0 ? -steps.Normal : steps.Normal;
-
-        MaskCell mask[PlaneCells];
-
-        for (int slice = 0; slice < sliceCount; ++slice)
+        for (int f = 0; f < 6; ++f)
         {
-            const int sliceBase = planeOrigin + slice * normalStep;
+            const int neighbourCell = blockCell + steps[f].Normal;
 
-            for (int v = 0; v < vCount; ++v)
-            {
-                int cell = sliceBase + v * steps.V;
+            // A face is worth drawing when what is beyond it does not hide it,
+            // and is not more of the same block: two water cells meet at a face
+            // that would only blend against itself.
+            if (cells.IsOpaque(neighbourCell) ||
+                cells.Block(neighbourCell) == self)
+                continue;
 
-                for (int u = 0; u < uCount; ++u, cell += steps.U)
-                {
-                    MaskCell& entry = mask[v * uCount + u];
-                    entry = MaskCell{};
-
-                    glm::ivec3 local(0);
-                    local[normalAxis] = slice;
-                    local[uAxis] = u;
-                    local[vAxis] = v;
-
-                    if (!cells.IsSolid(cell))
-                        continue;
-
-                    const BlockId self = cells.Block(cell);
-                    const int neighbourCell = cell + steps.Normal;
-
-                    // A face is worth drawing when what is beyond it does not
-                    // hide it, and is not more of the same block: two water
-                    // cells meet at a face that would only blend against itself.
-                    if (cells.IsOpaque(neighbourCell) ||
-                        cells.Block(neighbourCell) == self)
-                        continue;
-
-                    // A block's own opacity decides which pass draws it; the
-                    // faces of one block never span both.
-                    const bool opaque = cells.IsOpaque(cell);
-                    MeshGeometry& target = opaque
-                        ? mesh.Opaque
-                        : mesh.Transparent;
-
-                    const glm::vec4 blockColor = palette[self];
-                    const FaceCorners corners =
-                        CornerShades(cells, neighbourCell, face, steps);
-
-                    const bool uniform =
-                        corners.Ao[0] == corners.Ao[1] &&
-                        corners.Ao[1] == corners.Ao[2] &&
-                        corners.Ao[2] == corners.Ao[3] &&
-                        corners.Light[0] == corners.Light[1] &&
-                        corners.Light[1] == corners.Light[2] &&
-                        corners.Light[2] == corners.Light[3];
-
-                    if (!uniform)
-                    {
-                        // Corners that disagree cannot survive being stretched
-                        // across a merged quad, because the shading in between
-                        // is interpolated linearly from them. Emit it alone.
-                        glm::vec4 colors[4];
-                        for (int i = 0; i < 4; ++i)
-                            colors[i] = ShadeCorner(blockColor, face.Shade,
-                                corners.Ao[i], corners.Light[i]);
-
-                        const bool flip = corners.Ao[0] + corners.Ao[2]
-                            > corners.Ao[1] + corners.Ao[3];
-
-                        AddQuad(target, face, glm::vec3(local), 1, 1,
-                            colors, flip);
-                        continue;
-                    }
-
-                    entry.Present = true;
-                    entry.Opaque = opaque;
-                    entry.Block = self;
-                    entry.Color = ShadeCorner(blockColor, face.Shade,
-                        corners.Ao[0], corners.Light[0]);
-                }
-            }
-
-            for (int v = 0; v < vCount; ++v)
-            {
-                for (int u = 0; u < uCount; ++u)
-                {
-                    const MaskCell key = mask[v * uCount + u];
-                    if (!key.Present)
-                        continue;
-
-                    // Widen along U first, then grow along V by whole rows of
-                    // that width. Taking the widest row first is what makes the
-                    // result a maximal rectangle rather than a ragged strip.
-                    int w = 1;
-                    while (u + w < uCount &&
-                        Mergeable(mask[v * uCount + u + w], key))
-                        ++w;
-
-                    int h = 1;
-                    while (v + h < vCount)
-                    {
-                        bool wholeRow = true;
-                        for (int i = 0; i < w && wholeRow; ++i)
-                            wholeRow =
-                                Mergeable(mask[(v + h) * uCount + u + i], key);
-
-                        if (!wholeRow)
-                            break;
-
-                        ++h;
-                    }
-
-                    for (int dv = 0; dv < h; ++dv)
-                        for (int du = 0; du < w; ++du)
-                            mask[(v + dv) * uCount + u + du].Present = false;
-
-                    glm::ivec3 local(0);
-                    local[normalAxis] = slice;
-                    local[uAxis] = u;
-                    local[vAxis] = v;
-
-                    // A uniform quad's corners are equal, so neither diagonal
-                    // is the darker one and the split never shows.
-                    const glm::vec4 colors[4] =
-                        { key.Color, key.Color, key.Color, key.Color };
-
-                    AddQuad(key.Opaque ? mesh.Opaque : mesh.Transparent,
-                        face, glm::vec3(local), w, h, colors, false);
-                }
-            }
+            AddFace(mesh, cells, blockCell, blockOrigin,
+                Faces[f], steps[f], color);
         }
     }
 }
@@ -490,15 +298,35 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
     const Neighbourhood cells(world, origin);
     const Palette& palette = world.GetPalette();
 
+    FaceSteps steps[6];
     for (int f = 0; f < 6; ++f)
-    {
-        const FaceGeometry& face = Faces[f];
-        const FaceSteps steps = {
-            Neighbourhood::Step(face.Normal),
-            Neighbourhood::Step(face.U),
-            Neighbourhood::Step(face.V) };
+        steps[f] = {
+            Neighbourhood::Step(Faces[f].Normal),
+            Neighbourhood::Step(Faces[f].U),
+            Neighbourhood::Step(Faces[f].V) };
 
-        MeshFacePlanes(mesh, cells, palette, face, steps);
+    for (int z = 0; z < Chunk::Depth; ++z)
+    {
+        for (int y = 0; y < Chunk::Height; ++y)
+        {
+            for (int x = 0; x < Chunk::Width; ++x)
+            {
+                const int cell = Neighbourhood::At(x, y, z);
+                if (!cells.IsSolid(cell))
+                    continue;
+
+                // A block's own opacity decides which pass draws it; the faces
+                // of one block never span both.
+                MeshGeometry& target = cells.IsOpaque(cell)
+                    ? mesh.Opaque
+                    : mesh.Transparent;
+
+                // Vertices are chunk-local, so the loop counters are already
+                // the block's origin.
+                AddExposedFaces(target, cells, palette, steps, cell,
+                    glm::vec3(x, y, z));
+            }
+        }
     }
 
     return mesh;
