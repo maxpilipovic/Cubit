@@ -40,9 +40,10 @@ Ranked by leverage. Performance items are detailed in
    True threading remains deferred.
 2. ~~**Frustum culling**~~ **DONE 2026-07-25** — `WorldRenderer::Render` tests each
    chunk's world-space AABB against the camera frustum before submitting.
-3. **Greedy meshing** — the mesher emits one quad per exposed face; coplanar faces
-   are never merged, so flat areas produce far more geometry than needed. **← next
-   perf item** (see the AO ordering note below).
+3. ~~**Greedy meshing**~~ **DONE 2026-08-06** — `ChunkMesher::Build` walks face
+   planes and merges coplanar faces that share a block and a colour into maximal
+   rectangles. Faces carrying an AO or light gradient stay 1×1, so the image is
+   unchanged.
 
 ### Visual quality
 4. ~~**Lighting / ambient occlusion**~~ **DONE 2026-07-26** — per-vertex corner AO
@@ -76,9 +77,8 @@ A bounded sequence — genuinely finishable, not endless:
    ships at 256×64×256 and loads without a stall. Threading still deferred.
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
 3. ~~**Transparency**~~ **DONE 2026-08-06** (opacity; solidity is Phase 2).
-4. **Greedy meshing** — the last perf item, and the last thing touching
-   `ChunkMesher`. ← next.
-5. **Multi-model stitching** (full AoS-scale maps).
+4. ~~**Greedy meshing**~~ **DONE 2026-08-06**.
+5. **Multi-model stitching** (full AoS-scale maps). ← next
 
 After these, the engine is "done" for our purposes, and the remaining work is all
 gameplay.
