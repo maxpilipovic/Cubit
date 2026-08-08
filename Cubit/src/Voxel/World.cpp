@@ -155,6 +155,11 @@ bool World::IsBlockOpaque(int x, int y, int z) const
     return IsIdOpaque(GetBlock(x, y, z));
 }
 
+bool World::IsBlockSolid(int x, int y, int z) const
+{
+    return IsIdSolid(GetBlock(x, y, z));
+}
+
 bool World::IsInBounds(int x, int y, int z) const
 {
     //Checked before dividing, so the conversion to chunk coordinates never sees

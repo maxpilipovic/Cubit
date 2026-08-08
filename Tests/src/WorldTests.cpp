@@ -255,3 +255,64 @@ TEST_CASE("Replacing the palette updates opacity")
 
     CHECK_FALSE(world.IsBlockOpaque(8, 8, 8));
 }
+
+TEST_CASE("A block is solid when its palette alpha is full")
+{
+    // Solidity is derived from alpha exactly as opacity is, so a transparent
+    // block is something you can walk through as well as see through.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f);
+    palette[5] = glm::vec4(0.2f, 0.4f, 0.6f, 0.5f);
+    world.SetPalette(palette);
+
+    CHECK(world.IsIdSolid(BlockId{4}));
+    CHECK_FALSE(world.IsIdSolid(BlockId{5}));
+}
+
+TEST_CASE("Air is never solid")
+{
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsIdSolid(BlockId{0}));
+}
+
+TEST_CASE("A transparent block is present but not solid")
+{
+    // The whole point of the phase: presence and solidity are different
+    // questions, and water is the block that answers them differently.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[5] = glm::vec4(0.2f, 0.4f, 0.6f, 0.5f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{5});
+
+    CHECK(world.IsBlockPresent(8, 8, 8));
+    CHECK_FALSE(world.IsBlockSolid(8, 8, 8));
+}
+
+TEST_CASE("Positions outside the world are not solid")
+{
+    // Matching GetBlock returning air: the space around a map must not read as
+    // a wall the player can stand on.
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsBlockSolid(-1, 0, 0));
+    CHECK_FALSE(world.IsBlockSolid(0, world.GetHeight(), 0));
+}
+
+TEST_CASE("Replacing the palette updates solidity")
+{
+    // The table is derived, so it must not go stale when a map installs its own
+    // palette — a world loaded from a map has to know its water is walkable.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{4});
+    REQUIRE(world.IsBlockSolid(8, 8, 8));
+
+    Palette palette = DefaultPalette();
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 0.25f);
+    world.SetPalette(palette);
+
+    CHECK_FALSE(world.IsBlockSolid(8, 8, 8));
+}

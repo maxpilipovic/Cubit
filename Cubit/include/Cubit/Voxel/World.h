@@ -67,6 +67,20 @@ public:
     //air and GetSkyLight reading as open sky.
     bool IsBlockOpaque(int x, int y, int z) const;
 
+    //Reports whether a block id occupies space and stops a moving box.
+    //
+    //Backed by the same table as IsIdOpaque: both properties are derived from
+    //palette alpha, so a separate array would hold identical values on all 256
+    //entries and could only drift. The names stay apart because call sites
+    //should say which question they are asking — and because giving solidity
+    //its own source later (glass: see-through but solid) then changes only how
+    //the table is filled, not a single caller.
+    bool IsIdSolid(BlockId block) const { return m_Opaque[block]; }
+
+    //Reports whether the block at this position stops a moving box. Positions
+    //outside the world are not solid, matching GetBlock reading as air.
+    bool IsBlockSolid(int x, int y, int z) const;
+
     //Reports whether a block occupies this position at all.
     bool IsBlockPresent(int x, int y, int z) const;
 
