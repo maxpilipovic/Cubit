@@ -477,3 +477,41 @@ TEST_CASE("An opaque roof still blocks light after the opacity change")
 
     CHECK(world.GetSkyLight(8, roof - 1, 8) == 0);
 }
+
+TEST_CASE("Placing a transparent block does not darken the column below it")
+{
+    // Repropagate has to ask the same question the flood asks. A transparent
+    // block does not stop light, so placing one must not take back the light
+    // beneath it — and because full-strength light falls for free, getting this
+    // wrong darkens the whole column rather than a single cell.
+    World world(1, 4, 1);
+    Palette palette = DefaultPalette();
+    palette[2] = glm::vec4(0.2f, 0.4f, 0.8f, 0.5f); // transparent
+    world.SetPalette(palette);
+
+    SkyLight::PropagateAll(world);
+
+    const int placed = 20;
+    REQUIRE(world.GetSkyLight(8, placed - 1, 8) == SkyLight::Max);
+
+    world.SetBlock(8, placed, 8, BlockId{2});
+    SkyLight::Repropagate(world, 8, placed, 8);
+
+    CHECK(world.GetSkyLight(8, placed, 8) == SkyLight::Max);
+    CHECK(world.GetSkyLight(8, placed - 1, 8) == SkyLight::Max);
+    CHECK(world.GetSkyLight(8, 0, 8) == SkyLight::Max);
+}
+
+TEST_CASE("Placing an opaque block still darkens the column below it")
+{
+    // The companion case: the fix must not stop ordinary blocks casting shadow.
+    World world(1, 4, 1);
+
+    SkyLight::PropagateAll(world);
+
+    const int placed = 20;
+    world.SetBlock(8, placed, 8, BlockId{1});
+    SkyLight::Repropagate(world, 8, placed, 8);
+
+    CHECK(world.GetSkyLight(8, placed - 1, 8) < SkyLight::Max);
+}

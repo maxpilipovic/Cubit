@@ -209,16 +209,18 @@ void SkyLight::Repropagate(World& world, int x, int y, int z)
     LightRecorder recorder(world);
     std::deque<glm::ivec3> queue;
 
-    if (world.IsBlockPresent(x, y, z))
+    if (world.IsBlockOpaque(x, y, z))
     {
-        // The edit filled this cell in. Take back the light it used to give,
-        // keeping whatever still-lit cells border the darkened region.
+        // The edit put something light-stopping here. Take back the light it
+        // used to give, keeping whatever still-lit cells border the darkened
+        // region.
         Unflood(world, recorder, edit, queue);
     }
     else
     {
-        // The edit opened this cell up. A cell at the very top is open sky and
-        // lights itself; anywhere else, the surrounding cells fill it in.
+        // The edit left this cell passable to light — either it opened it up,
+        // or what it placed is transparent. A cell at the very top is open sky
+        // and lights itself; anywhere else, the surrounding cells fill it in.
         if (y == world.GetHeight() - 1)
         {
             recorder.Set(edit, Max);
