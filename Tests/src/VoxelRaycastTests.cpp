@@ -259,3 +259,27 @@ TEST_CASE("Rays never report a block they did not enter")
         REQUIRE_FALSE(world.IsBlockPresent(placement.x, placement.y, placement.z));
     }
 }
+
+TEST_CASE("A ray stops at water rather than passing through it")
+{
+    // Deliberately different from collision, which passes through. Water is
+    // placeable with key 7, so a ray that skipped it would hand the player a
+    // block they can create and never break.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f); // water
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});  // water
+    world.SetBlock(8, 8, 12, BlockId{1}); // opaque, further along the ray
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world,
+        glm::vec3(8.5f, 8.5f, 4.5f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+        16.0f);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 8));
+    CHECK_FALSE(world.IsBlockSolid(hit.Block.x, hit.Block.y, hit.Block.z));
+}

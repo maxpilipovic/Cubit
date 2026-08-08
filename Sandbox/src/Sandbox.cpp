@@ -310,6 +310,9 @@ private:
     //player who starts embedded stays embedded with no escape but falling out of
     //the world. Keeping x and z preserves the part of the map being worked on,
     //which is the point of reloading quickly.
+    //
+    //Only solid blocks count, so reloading while standing in the river leaves
+    //the player in the water rather than lifting them onto its surface.
     void LiftPlayerClearOfTerrain()
     {
         const float top = static_cast<float>(m_World.GetHeight());
