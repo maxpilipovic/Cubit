@@ -510,7 +510,13 @@ TEST_CASE("Placing an opaque block still darkens the column below it")
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 
-Expected: "Placing a transparent block does not darken the column below it" FAILS — the cells below the placed block read below `SkyLight::Max` because `Repropagate` took the unflood path. "Placing an opaque block still darkens the column below it" PASSES already; it is a regression guard.
+Expected: both cases PASS immediately.
+
+**Corrected 2026-08-08 during execution — this plan originally predicted the transparent case would fail here. It does not, and the reason matters.** At a mid-column depth the buggy `IsBlockPresent` branch calls `Unflood`, which clears the origin and the column below it — but the cell *above* the origin survives into the `readd` queue at `Max`, and `Flood` pushes straight back down through the transparent block at full strength (`SkyLight.cpp:105-107`, full-strength light falls without dimming). Every value is restored, so the buggy and fixed paths converge and no assertion can tell them apart.
+
+The two branches diverge only on the **top layer**, `y == world.GetHeight() - 1`, where the origin has no cell above it to refill from and only lateral neighbours reach it, paying a level: **14 instead of 15**. That is exactly why the correct `else` branch carries its `y == world.GetHeight() - 1` special case (`SkyLight.cpp:224-228`).
+
+Both cases above are therefore characterisation tests. They are kept because they would catch a future change that made transparent blocks attenuate light, but **Step 3a is the case that actually pins this fix.**
 
 - [ ] **Step 3: Ask opacity instead of presence**
 
@@ -536,10 +542,39 @@ and update the comment just below it so it says what the branch now tests:
         // and lights itself; anywhere else, the surrounding cells fill it in.
 ```
 
+- [ ] **Step 3a: Add the case that pins the fix**
+
+Added 2026-08-08 during execution, for the reason recorded under Step 2. Append to `Tests/src/SkyLightTests.cpp`:
+
+```cpp
+TEST_CASE("Placing a transparent block on the top layer keeps it at full strength")
+{
+    // The case that separates the two branches. Anywhere lower, an unflood is
+    // undone by light falling back down the column for free, so the bug hides.
+    // At the top there is nothing above to refill from, and only lateral
+    // neighbours reach the cell — and they pay a level to get there.
+    World world(1, 4, 1);
+    Palette palette = DefaultPalette();
+    palette[2] = glm::vec4(0.2f, 0.4f, 0.8f, 0.5f); // transparent
+    world.SetPalette(palette);
+
+    SkyLight::PropagateAll(world);
+
+    const int top = world.GetHeight() - 1;
+    world.SetBlock(8, top, 8, BlockId{2});
+    SkyLight::Repropagate(world, 8, top, 8);
+
+    CHECK(world.GetSkyLight(8, top, 8) == SkyLight::Max);
+    CHECK(world.GetSkyLight(8, top - 1, 8) == SkyLight::Max);
+}
+```
+
+Verify it pins the fix: temporarily restore `world.IsBlockPresent(x, y, z)` at `SkyLight.cpp:212`, build, and confirm this case FAILS reporting **14** where it wants 15. Restore `IsBlockOpaque` and confirm it passes. Do not commit the temporary revert.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="Placing a transparent block does not darken the column below it,Placing an opaque block still darkens the column below it"`
-Expected: both PASS.
+Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="Placing a transparent block does not darken the column below it,Placing an opaque block still darkens the column below it,Placing a transparent block on the top layer keeps it at full strength"`
+Expected: all three PASS.
 
 Then the whole suite: `./bin/Debug-windows-x86_64/Tests/Tests.exe`
 Expected: all pass. The existing `SkyLight` cases all edit opaque blocks, where opacity and presence agree.
