@@ -19,11 +19,6 @@ namespace
     {
         const World& Cells;
 
-        bool IsSolid(const glm::ivec3& cell) const
-        {
-            return Cells.IsBlockSolid(cell.x, cell.y, cell.z);
-        }
-
         bool IsOpaque(const glm::ivec3& cell) const
         {
             return Cells.IsBlockOpaque(cell.x, cell.y, cell.z);
@@ -36,7 +31,7 @@ namespace
     };
 
     //How exposed one corner is. Written against anything that can answer
-    //IsSolid and Light, so the chunk cache and a bare world share one rule
+    //IsOpaque and Light, so the chunk cache and a bare world share one rule
     //rather than drifting apart as two copies. A cell is whatever that source
     //addresses cells by — a flat index for the cache, a position for the world
     //— and a side is a step in the same terms.
@@ -312,7 +307,7 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
             for (int x = 0; x < Chunk::Width; ++x)
             {
                 const int cell = Neighbourhood::At(x, y, z);
-                if (!cells.IsSolid(cell))
+                if (!cells.IsPresent(cell))
                     continue;
 
                 // A block's own opacity decides which pass draws it; the faces

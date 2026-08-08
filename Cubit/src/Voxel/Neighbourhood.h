@@ -86,7 +86,7 @@ public:
     }
 
     BlockId Block(int cell) const { return m_Blocks[cell]; }
-    bool IsSolid(int cell) const { return ::IsSolid(m_Blocks[cell]); }
+    bool IsPresent(int cell) const { return ::IsPresent(m_Blocks[cell]); }
     bool IsOpaque(int cell) const { return m_Opaque[cell]; }
     int Light(int cell) const { return m_Light[cell]; }
 

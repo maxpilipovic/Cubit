@@ -20,8 +20,11 @@ constexpr bool IsOpaqueColor(const glm::vec4& color)
     return color.a >= 1.0f;
 }
 
-//Reports whether a block occupies space and should generate visible faces.
-constexpr bool IsSolid(BlockId block)
+//Reports whether a block occupies a cell at all, as opposed to being air.
+//Palette-blind on purpose: whether that block stops light or stops movement
+//are questions only the world can answer, because only the world holds the
+//palette those answers come from.
+constexpr bool IsPresent(BlockId block)
 {
     return block != 0;
 }

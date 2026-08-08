@@ -209,7 +209,7 @@ void SkyLight::Repropagate(World& world, int x, int y, int z)
     LightRecorder recorder(world);
     std::deque<glm::ivec3> queue;
 
-    if (world.IsBlockSolid(x, y, z))
+    if (world.IsBlockPresent(x, y, z))
     {
         // The edit filled this cell in. Take back the light it used to give,
         // keeping whatever still-lit cells border the darkened region.

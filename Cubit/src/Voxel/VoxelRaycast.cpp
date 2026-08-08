@@ -93,7 +93,7 @@ VoxelRayHit VoxelRaycast::Cast(
 
     while (travelled <= maxDistance)
     {
-        if (world.IsBlockSolid(voxel.x, voxel.y, voxel.z))
+        if (world.IsBlockPresent(voxel.x, voxel.y, voxel.z))
         {
             result.Hit = true;
             result.Block = voxel;

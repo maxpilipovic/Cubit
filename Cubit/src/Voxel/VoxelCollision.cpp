@@ -30,7 +30,7 @@ namespace
         for (int z = minZ; z <= maxZ; ++z)
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
-                    if (world.IsBlockSolid(x, y, z))
+                    if (world.IsBlockPresent(x, y, z))
                         return true;
 
         return false;

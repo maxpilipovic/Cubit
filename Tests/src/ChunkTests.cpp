@@ -32,7 +32,7 @@ TEST_CASE("Every position stores and returns its own block")
             for (int x = 0; x < Chunk::Width; ++x)
             {
                 const bool expected = (x + 2 * y + 3 * z) % 2 == 0;
-                REQUIRE(chunk.IsBlockSolid(x, y, z) == expected);
+                REQUIRE(chunk.IsBlockPresent(x, y, z) == expected);
             }
         }
     }
@@ -43,10 +43,10 @@ TEST_CASE("Writing one block leaves its neighbours untouched")
     Chunk chunk;
     chunk.SetBlock(4, 5, 6, BlockId{1});
 
-    CHECK(chunk.IsBlockSolid(4, 5, 6));
-    CHECK_FALSE(chunk.IsBlockSolid(5, 5, 6));
-    CHECK_FALSE(chunk.IsBlockSolid(4, 6, 6));
-    CHECK_FALSE(chunk.IsBlockSolid(4, 5, 7));
+    CHECK(chunk.IsBlockPresent(4, 5, 6));
+    CHECK_FALSE(chunk.IsBlockPresent(5, 5, 6));
+    CHECK_FALSE(chunk.IsBlockPresent(4, 6, 6));
+    CHECK_FALSE(chunk.IsBlockPresent(4, 5, 7));
 }
 
 TEST_CASE("Positions outside the chunk read as air")

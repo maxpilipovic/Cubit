@@ -104,7 +104,7 @@ TEST_CASE("The block next to the hit face is always empty")
     const glm::ivec3 placement = hit.Block + hit.Normal;
 
     CHECK(placement == glm::ivec3(8, 8, 7));
-    CHECK_FALSE(world.IsBlockSolid(placement.x, placement.y, placement.z));
+    CHECK_FALSE(world.IsBlockPresent(placement.x, placement.y, placement.z));
 }
 
 TEST_CASE("A ray does not reach past its maximum distance")
@@ -253,9 +253,9 @@ TEST_CASE("Rays never report a block they did not enter")
         if (!hit.Hit)
             continue;
 
-        REQUIRE(world.IsBlockSolid(hit.Block.x, hit.Block.y, hit.Block.z));
+        REQUIRE(world.IsBlockPresent(hit.Block.x, hit.Block.y, hit.Block.z));
 
         const glm::ivec3 placement = hit.Block + hit.Normal;
-        REQUIRE_FALSE(world.IsBlockSolid(placement.x, placement.y, placement.z));
+        REQUIRE_FALSE(world.IsBlockPresent(placement.x, placement.y, placement.z));
     }
 }

@@ -28,9 +28,9 @@ void Chunk::SetBlock(int x, int y, int z, BlockId block)
     m_Blocks[GetIndex(x, y, z)] = block;
 }
 
-bool Chunk::IsBlockSolid(int x, int y, int z) const
+bool Chunk::IsBlockPresent(int x, int y, int z) const
 {
-    return IsSolid(GetBlock(x, y, z));
+    return IsPresent(GetBlock(x, y, z));
 }
 
 std::uint8_t Chunk::GetSkyLight(int x, int y, int z) const

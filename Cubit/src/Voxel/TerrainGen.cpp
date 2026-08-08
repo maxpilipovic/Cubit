@@ -152,7 +152,7 @@ namespace
                 {
                     // Bank: turn the existing surface block to sand.
                     const int top = SurfaceHeight(c, x, z) - 1;
-                    if (IsSolid(Get(m, x, top, z)))
+                    if (IsPresent(Get(m, x, top, z)))
                         Set(m, x, top, z, MapBlocks::Sand);
                 }
             }

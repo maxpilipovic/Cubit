@@ -67,8 +67,8 @@ public:
     //air and GetSkyLight reading as open sky.
     bool IsBlockOpaque(int x, int y, int z) const;
 
-    //Reports whether the block at this position occupies space.
-    bool IsBlockSolid(int x, int y, int z) const;
+    //Reports whether a block occupies this position at all.
+    bool IsBlockPresent(int x, int y, int z) const;
 
     //Returns a cell's sky light, treating positions outside the world as open
     //sky so the map's edges and the space above it are lit.

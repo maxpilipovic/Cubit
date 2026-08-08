@@ -53,7 +53,7 @@ TEST_CASE("Every world position stores its own block")
     for (int z = 0; z < world.GetDepth(); ++z)
         for (int y = 0; y < world.GetHeight(); ++y)
             for (int x = 0; x < world.GetWidth(); ++x)
-                REQUIRE(world.IsBlockSolid(x, y, z) == expected(x, y, z));
+                REQUIRE(world.IsBlockPresent(x, y, z) == expected(x, y, z));
 }
 
 TEST_CASE("Writing a block does not disturb the neighbouring chunk")

@@ -29,8 +29,10 @@ public:
     //Changes a block; throws when the position is outside this chunk.
     void SetBlock(int x, int y, int z, BlockId block);
 
-    //Reports whether the block at this position occupies space.
-    bool IsBlockSolid(int x, int y, int z) const;
+    //Reports whether a block occupies this position at all. A chunk holds no
+    //palette, so presence is the only one of the three block properties it can
+    //answer; solidity and opacity live on World.
+    bool IsBlockPresent(int x, int y, int z) const;
 
     //Returns a cell's sky light, treating positions outside this chunk as open
     //sky. The mesher samples corners that straddle a chunk edge, so an

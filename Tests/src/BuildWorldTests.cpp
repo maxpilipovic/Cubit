@@ -44,7 +44,7 @@ TEST_CASE("BuildWorld places solid voxels and leaves the rest air")
 
     CHECK(world.GetBlock(1, 2, 3) == BlockId{6});
     CHECK(world.GetBlock(0, 0, 0) == BlockId{0});
-    CHECK_FALSE(world.IsBlockSolid(0, 0, 0));
+    CHECK_FALSE(world.IsBlockPresent(0, 0, 0));
 }
 
 TEST_CASE("BuildWorld installs the model's palette")

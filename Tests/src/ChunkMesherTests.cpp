@@ -35,11 +35,11 @@ namespace
                 for (int x = 0; x < Chunk::Width; ++x)
                 {
                     const glm::ivec3 position = origin + glm::ivec3(x, y, z);
-                    if (!world.IsBlockSolid(position.x, position.y, position.z))
+                    if (!world.IsBlockPresent(position.x, position.y, position.z))
                         continue;
 
                     for (const auto& offset : offsets)
-                        if (!world.IsBlockSolid(
+                        if (!world.IsBlockPresent(
                             position.x + offset[0],
                             position.y + offset[1],
                             position.z + offset[2]))

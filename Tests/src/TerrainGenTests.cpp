@@ -39,8 +39,8 @@ TEST_CASE("Terrain is geometrically mirror-symmetric across x")
     for (int z = 0; z < m.Size.z; ++z)
         for (int y = 0; y < m.Size.y; ++y)
             for (int x = 0; x < m.Size.x; ++x)
-                CHECK(IsSolid(m.At(x, y, z)) ==
-                      IsSolid(m.At(m.Size.x - 1 - x, y, z)));
+                CHECK(IsPresent(m.At(x, y, z)) ==
+                      IsPresent(m.At(m.Size.x - 1 - x, y, z)));
 }
 
 TEST_CASE("Every ground column has grass on its surface and solid below")
@@ -59,11 +59,11 @@ TEST_CASE("Every ground column has grass on its surface and solid below")
     // sit on top of it).
     int top = -1;
     for (int y = m.Size.y - 1; y >= 0; --y)
-        if (IsSolid(m.At(x, y, z)) && !isVeg(m.At(x, y, z))) { top = y; break; }
+        if (IsPresent(m.At(x, y, z)) && !isVeg(m.At(x, y, z))) { top = y; break; }
 
     REQUIRE(top >= 0);
     CHECK(IsGrass(m.At(x, top, z)));
-    CHECK(IsSolid(m.At(x, top - 1, z)));
+    CHECK(IsPresent(m.At(x, top - 1, z)));
     CHECK(m.At(x, 0, z) == MapBlocks::Stone);
 }
 
@@ -74,7 +74,7 @@ TEST_CASE("Flanks rise into mountains higher than the central lanes")
     auto topAt = [&](int x, int z)
     {
         for (int y = m.Size.y - 1; y >= 0; --y)
-            if (IsSolid(m.At(x, y, z))) return y;
+            if (IsPresent(m.At(x, y, z))) return y;
         return -1;
     };
 

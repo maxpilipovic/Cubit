@@ -134,9 +134,9 @@ void World::MarkChunkDirtyAt(int x, int y, int z)
     }
 }
 
-bool World::IsBlockSolid(int x, int y, int z) const
+bool World::IsBlockPresent(int x, int y, int z) const
 {
-    return IsSolid(GetBlock(x, y, z));
+    return IsPresent(GetBlock(x, y, z));
 }
 
 void World::SetPalette(const Palette& palette)
