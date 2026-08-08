@@ -268,3 +268,59 @@ TEST_CASE("A box lands on a floor block in the neighbouring chunk")
     CHECK(result.BlockedY);
     CHECK(result.Grounded);
 }
+
+TEST_CASE("A falling box passes through water and lands on the bed")
+{
+    // The riverbed is what holds the player up, not the surface above it. Two
+    // layers of water over a floor mirrors the shipped map's river depth.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f); // water
+    world.SetPalette(palette);
+
+    AddFloor(world);
+    for (int z = 0; z < Chunk::Depth; ++z)
+        for (int x = 0; x < Chunk::Width; ++x)
+        {
+            world.SetBlock(x, 1, z, BlockId{7});
+            world.SetBlock(x, 2, z, BlockId{7});
+        }
+
+    const VoxelMoveResult result = VoxelCollision::MoveBox(
+        world,
+        glm::vec3(8.0f, 6.0f, 8.0f),
+        PlayerHalfExtents,
+        glm::vec3(0.0f, -10.0f, 0.0f));
+
+    // The floor block spans y 0 to 1, so a box resting on it sits one half
+    // extent above y=1 — the same result as landing on bare floor.
+    CHECK(result.Position.y == doctest::Approx(1.0f + PlayerHalfExtents.y).epsilon(0.01));
+    CHECK(result.Grounded);
+}
+
+TEST_CASE("A box does not overlap water it is standing in")
+{
+    // LiftPlayerClearOfTerrain steps the player up while Overlaps is true, so a
+    // box submerged in water must read as clear or a reload would launch the
+    // player out of the river.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});
+
+    CHECK_FALSE(VoxelCollision::Overlaps(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
+
+TEST_CASE("An opaque block still stops a box after the solidity change")
+{
+    // The companion case: switching the predicate must not make ordinary
+    // terrain stop blocking movement.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+
+    CHECK(VoxelCollision::Overlaps(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}

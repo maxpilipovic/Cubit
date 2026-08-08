@@ -18,6 +18,8 @@ namespace
     constexpr float MaxStep = 0.25f;
 
     //Reports whether the box spanning these corners covers any solid block.
+    //Solidity rather than presence: water is a block you can see and break but
+    //walk straight through.
     bool OverlapsSolid(const World& world, const glm::vec3& min, const glm::vec3& max)
     {
         const int minX = static_cast<int>(std::floor(min.x + Skin));
@@ -30,7 +32,7 @@ namespace
         for (int z = minZ; z <= maxZ; ++z)
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
-                    if (world.IsBlockPresent(x, y, z))
+                    if (world.IsBlockSolid(x, y, z))
                         return true;
 
         return false;
