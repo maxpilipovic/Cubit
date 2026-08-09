@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-06_
+_Last updated: 2026-08-08_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
@@ -50,10 +50,15 @@ Ranked by leverage. Performance items are detailed in
 4. ~~**Lighting / ambient occlusion**~~ **DONE 2026-07-26** — per-vertex corner AO
    plus sky light propagated through the world (`SkyLight::PropagateAll`/
    `Repropagate`) replace the old fixed per-face shading constants.
-5. ~~**Transparency / alpha blending**~~ **DONE 2026-08-06** — palette alpha marks
-   a block non-opaque; the mesher splits chunk geometry and the renderer draws the
-   transparent set back to front with depth writes off. Water is see-through and
-   its bed is lit. Water is still *solid* — collision and raycast are Phase 2.
+5. ~~**Transparency / alpha blending**~~ **DONE 2026-08-08** — palette alpha marks
+   a block non-opaque *and* non-solid. The mesher splits chunk geometry and the
+   renderer draws the transparent set back to front; collision passes through
+   water while the editing raycast still stops at it, so the river is something
+   you wade into and can still dig out.
+   Solidity is derived from alpha, so a block that is see-through is also
+   walk-through. Glass — non-opaque but solid — is deliberately not expressible;
+   adding it means giving solidity its own table and source, which changes how
+   the table is filled and no call site.
 
 ### Format / smaller gaps
 6. **Multi-model stitching** — load maps larger than 256³ (true Ace-of-Spades
@@ -77,7 +82,7 @@ A bounded sequence — genuinely finishable, not endless:
 1. ~~**Amortized meshing + frustum culling**~~ **DONE 2026-07-25** — the map now
    ships at 256×64×256 and loads without a stall. Threading still deferred.
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
-3. ~~**Transparency**~~ **DONE 2026-08-06** (opacity; solidity is Phase 2).
+3. ~~**Transparency**~~ **DONE 2026-08-08** (opacity 2026-08-06, solidity 2026-08-08).
 4. ~~**Greedy meshing**~~ **TRIED AND REJECTED 2026-08-06** — see P3.
 5. **Multi-model stitching** (full AoS-scale maps). ← next
 
