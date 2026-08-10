@@ -6,6 +6,7 @@
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -41,6 +42,13 @@ namespace
     constexpr float WalkSpeed = 5.0f;
     constexpr float JumpSpeed = 9.0f;
     constexpr float Gravity = 24.0f;
+
+    //Water physics. Gravity is weakened rather than cancelled, so doing nothing
+    //settles the player onto the riverbed instead of leaving them hanging.
+    constexpr float WaterGravity = 6.0f;
+    constexpr float SinkSpeed = 1.5f;
+    constexpr float SwimUpSpeed = 3.5f;
+    constexpr float WaterDrag = 0.6f;
 
     //Below the map floor: a fallen player is returned to spawn.
     constexpr float FallResetHeight = -8.0f;
@@ -120,12 +128,31 @@ public:
     void OnUpdate(Timestep timestep) override
     {
         const float seconds = static_cast<float>(timestep.GetSeconds());
-        const glm::vec3 walk = ReadWalkInput() * WalkSpeed;
+        const bool inFluid = VoxelCollision::OverlapsFluid(
+            m_World, m_PlayerPosition, PlayerHalfExtents);
 
-        if (m_Grounded && Input::IsKeyPressed(KeyCode::Space))
-            m_VerticalVelocity = JumpSpeed;
+        glm::vec3 walk = ReadWalkInput() * WalkSpeed;
 
-        m_VerticalVelocity -= Gravity * seconds;
+        // Space has to be tested here rather than after the jump: standing on
+        // the riverbed is grounded and submerged at once, so a dry jump would
+        // otherwise fire instead of a swim stroke.
+        if (inFluid)
+        {
+            walk *= WaterDrag;
+
+            if (Input::IsKeyPressed(KeyCode::Space))
+                m_VerticalVelocity = SwimUpSpeed;
+
+            m_VerticalVelocity -= WaterGravity * seconds;
+            m_VerticalVelocity = glm::max(m_VerticalVelocity, -SinkSpeed);
+        }
+        else
+        {
+            if (m_Grounded && Input::IsKeyPressed(KeyCode::Space))
+                m_VerticalVelocity = JumpSpeed;
+
+            m_VerticalVelocity -= Gravity * seconds;
+        }
 
         //The player position is in world coordinates, so collision runs against
         //the whole world and the box can cross chunk boundaries.
@@ -139,6 +166,16 @@ public:
         m_Grounded = move.Grounded;
         m_HudState->PlayerPosition = m_PlayerPosition;
         m_HudState->Grounded = m_Grounded;
+        m_HudState->BodyInFluid = inFluid;
+
+        // The eye, not the box: the tint and the fog should come on when the
+        // camera goes under, which happens later than the feet getting wet.
+        const glm::vec3 eye =
+            m_PlayerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
+        m_HudState->EyeInFluid = m_World.IsBlockFluid(
+            static_cast<int>(std::floor(eye.x)),
+            static_cast<int>(std::floor(eye.y)),
+            static_cast<int>(std::floor(eye.z)));
 
         // Landing or hitting a ceiling ends vertical motion.
         if (move.BlockedY)

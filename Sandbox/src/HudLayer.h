@@ -18,6 +18,15 @@ struct HudState
 {
     glm::vec3 PlayerPosition{ 0.0f };
     bool Grounded = false;
+
+    //Whether the camera is inside a fluid block. Drives the underwater tint and
+    //the fog; separate from BodyInFluid because a wading player has their head
+    //in open air while their legs are in the river.
+    bool EyeInFluid = false;
+
+    //Whether the player's box overlaps any fluid block. Drives the swim rules.
+    bool BodyInFluid = false;
+
     std::uint32_t MeshFaceCount = 0;
     std::size_t DrawnChunks = 0;
     std::size_t TotalChunks = 0;
@@ -182,6 +191,14 @@ private:
 
         y -= lineHeight;
         DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText(
+            std::string("WET ") +
+            (m_State->EyeInFluid ? "E" : "-") +
+            (m_State->BodyInFluid ? "B" : "-"),
+            TextMargin,
+            y);
 
         y -= lineHeight;
         DrawText("FACES " + std::to_string(m_State->MeshFaceCount), TextMargin, y);
