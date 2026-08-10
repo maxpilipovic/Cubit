@@ -17,10 +17,12 @@ namespace
     //one block means a move can never skip over a block it should have hit.
     constexpr float MaxStep = 0.25f;
 
-    //Reports whether the box spanning these corners covers any solid block.
-    //Solidity rather than presence: water is a block you can see and break but
-    //walk straight through.
-    bool OverlapsSolid(const World& world, const glm::vec3& min, const glm::vec3& max)
+    //Reports whether the box spanning these corners covers any block the
+    //predicate accepts. Solid and fluid are the same sweep over the same cells;
+    //only the question differs, so they share one copy of the walk.
+    template <typename Accepts>
+    bool OverlapsAny(const World& world, const glm::vec3& min, const glm::vec3& max,
+        Accepts accepts)
     {
         const int minX = static_cast<int>(std::floor(min.x + Skin));
         const int minY = static_cast<int>(std::floor(min.y + Skin));
@@ -32,10 +34,18 @@ namespace
         for (int z = minZ; z <= maxZ; ++z)
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
-                    if (world.IsBlockSolid(x, y, z))
+                    if (accepts(world, x, y, z))
                         return true;
 
         return false;
+    }
+
+    //Reports whether the box covers any solid block. Solidity rather than
+    //presence: water is a block you can see but walk straight through.
+    bool OverlapsSolid(const World& world, const glm::vec3& min, const glm::vec3& max)
+    {
+        return OverlapsAny(world, min, max,
+            [](const World& w, int x, int y, int z) { return w.IsBlockSolid(x, y, z); });
     }
 
     //Records that the box was stopped while moving along one axis.
@@ -90,6 +100,15 @@ bool VoxelCollision::Overlaps(
     const glm::vec3& halfExtents)
 {
     return OverlapsSolid(world, position - halfExtents, position + halfExtents);
+}
+
+bool VoxelCollision::OverlapsFluid(
+    const World& world,
+    const glm::vec3& position,
+    const glm::vec3& halfExtents)
+{
+    return OverlapsAny(world, position - halfExtents, position + halfExtents,
+        [](const World& w, int x, int y, int z) { return w.IsBlockFluid(x, y, z); });
 }
 
 VoxelMoveResult VoxelCollision::MoveBox(

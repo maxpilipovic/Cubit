@@ -41,4 +41,15 @@ public:
         const World& world,
         const glm::vec3& position,
         const glm::vec3& halfExtents);
+
+    //Reports whether a box at this position overlaps any fluid block. The swim
+    //rules key off the body rather than the camera, so a player wading with
+    //their head clear is still walking.
+    //
+    //Any overlap counts, matching Overlaps: feet in the river means swimming.
+    //The shipped map has no shallows, so the simpler rule costs nothing there.
+    static bool OverlapsFluid(
+        const World& world,
+        const glm::vec3& position,
+        const glm::vec3& halfExtents);
 };

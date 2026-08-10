@@ -324,3 +324,66 @@ TEST_CASE("An opaque block still stops a box after the solidity change")
     CHECK(VoxelCollision::Overlaps(
         world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
 }
+
+TEST_CASE("A box inside water overlaps fluid")
+{
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f); // water
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});
+
+    CHECK(VoxelCollision::OverlapsFluid(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
+
+TEST_CASE("A box in open air overlaps no fluid")
+{
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(VoxelCollision::OverlapsFluid(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
+
+TEST_CASE("A box inside stone overlaps no fluid")
+{
+    // Solid is not fluid. Without this the predicate could be reading presence
+    // and every test above would still pass.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+
+    CHECK_FALSE(VoxelCollision::OverlapsFluid(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
+
+TEST_CASE("A box straddling water and air overlaps fluid")
+{
+    // Any overlap counts, matching Overlaps. A player with only their feet in
+    // the river is swimming.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 7, 8, BlockId{7});
+
+    // Box centre 8.5 with half-height 0.9 spans y 7.6 to 9.4, so its lower part
+    // is in the water cell at y=7 and its upper part is in air.
+    CHECK(VoxelCollision::OverlapsFluid(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
+
+TEST_CASE("Water does not make a box overlap solid")
+{
+    // The companion to the cases above: the two queries must stay independent.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});
+
+    CHECK_FALSE(VoxelCollision::Overlaps(
+        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
+}
