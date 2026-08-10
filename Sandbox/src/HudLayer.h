@@ -216,10 +216,13 @@ private:
         DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), TextMargin, y);
 
         y -= lineHeight;
+        // The debug font only carries "0123456789-.: ACDEFGNOPS", so the flags
+        // are digits and the label avoids every letter it lacks — an unsupported
+        // character renders as a blank, which would silently hide a set flag.
         DrawText(
-            std::string("WET ") +
-            (m_State->EyeInFluid ? "E" : "-") +
-            (m_State->BodyInFluid ? "B" : "-"),
+            std::string("OCEAN ") +
+            (m_State->EyeInFluid ? "1" : "0") +
+            (m_State->BodyInFluid ? "1" : "0"),
             TextMargin,
             y);
 
