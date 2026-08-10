@@ -16,8 +16,9 @@ Full scope and feature spec lives in `Documentation/Cubit.pdf`.
 ## What works
 
 You load a map, walk around it under gravity, and dig into it or build on it, lit by
-sky light and ambient occlusion. Water is see-through and you wade into it rather
-than walking on it. The current map is a 256x64x256 battlefield.
+sky light and ambient occlusion. Water is see-through and you swim through it rather
+than walking on it, with the screen washing blue and hazing out while you are under.
+The current map is a 256x64x256 battlefield.
 
 **Platform and core loop**
 
@@ -63,9 +64,9 @@ than walking on it. The current map is a 256x64x256 battlefield.
   chunks whose light actually changed
 - `VoxelRaycast` (grid traversal, reporting the entry face) and `VoxelCollision` (a
   stepped, per-axis box move that reports which axes were blocked and whether the box
-  is grounded). They ask different questions of a block on purpose: collision tests
-  whether it is *solid*, so the player falls through water, while the raycast tests
-  whether it is *present*, so water can still be clicked and dug out
+  is grounded, plus solid and fluid overlap queries). A block is *present* if it is
+  there at all, *solid* if it stops you, and *fluid* if it is present but does not —
+  so water is swum through, aimed through, and cannot be dug or placed
 
 **Content pipeline**
 
