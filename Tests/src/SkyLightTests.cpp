@@ -518,10 +518,10 @@ TEST_CASE("Placing an opaque block still darkens the column below it")
 
 TEST_CASE("Placing a transparent block on the top layer keeps it at full strength")
 {
-    //The case that separates the two branches. Anywhere lower, an unflood is
-    //undone by light falling back down the column for free, so the bug hides.
-    //At the top there is nothing above to refill from, and only lateral
-    //neighbours reach the cell — and they pay a level to get there.
+    // The case that separates the two branches. Anywhere lower, an unflood is
+    // undone by light falling back down the column for free, so the bug hides.
+    // At the top there is nothing above to refill from, and only lateral
+    // neighbours reach the cell — and they pay a level to get there.
     World world(1, 4, 1);
     Palette palette = DefaultPalette();
     palette[2] = glm::vec4(0.2f, 0.4f, 0.8f, 0.5f); // transparent
