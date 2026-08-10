@@ -36,36 +36,36 @@ namespace
     //addresses cells by — a flat index for the cache, a position for the world
     //— and a side is a step in the same terms.
     template <typename Cells, typename Cell, typename Side>
-    int CornerAo(const Cells& cells, const Cell& airCell,
+    int CornerAo(const Cells& cells, const Cell& openCell,
         const Side& sideA, const Side& sideB)
     {
-        const bool solidA = cells.IsOpaque(airCell + sideA);
-        const bool solidB = cells.IsOpaque(airCell + sideB);
+        const bool opaqueA = cells.IsOpaque(openCell + sideA);
+        const bool opaqueB = cells.IsOpaque(openCell + sideB);
 
         // Two walls meeting at a right angle seal the corner completely, so what
         // sits diagonally behind them cannot lighten it.
-        if (solidA && solidB)
+        if (opaqueA && opaqueB)
             return 0;
 
-        const bool solidCorner = cells.IsOpaque(airCell + sideA + sideB);
+        const bool opaqueCorner = cells.IsOpaque(openCell + sideA + sideB);
 
         return 3
-            - static_cast<int>(solidA)
-            - static_cast<int>(solidB)
-            - static_cast<int>(solidCorner);
+            - static_cast<int>(opaqueA)
+            - static_cast<int>(opaqueB)
+            - static_cast<int>(opaqueCorner);
     }
 
     //The light sitting at one corner: the mean of the open cells touching it.
     template <typename Cells, typename Cell, typename Side>
-    float CornerLight(const Cells& cells, const Cell& airCell,
+    float CornerLight(const Cells& cells, const Cell& openCell,
         const Side& sideA, const Side& sideB)
     {
         const Cell corners[4] =
         {
-            airCell,
-            airCell + sideA,
-            airCell + sideB,
-            airCell + sideA + sideB,
+            openCell,
+            openCell + sideA,
+            openCell + sideB,
+            openCell + sideA + sideB,
         };
 
         int total = 0;
@@ -217,7 +217,7 @@ namespace
         const FaceSteps& steps,
         const glm::vec4& blockColor)
     {
-        const int airCell = blockCell + steps.Normal;
+        const int openCell = blockCell + steps.Normal;
 
         int ao[4];
         float light[4];
@@ -226,8 +226,8 @@ namespace
             const int sideA = steps.U * face.CornerU[i];
             const int sideB = steps.V * face.CornerV[i];
 
-            ao[i] = CornerAo(cells, airCell, sideA, sideB);
-            light[i] = CornerLight(cells, airCell, sideA, sideB);
+            ao[i] = CornerAo(cells, openCell, sideA, sideB);
+            light[i] = CornerLight(cells, openCell, sideA, sideB);
         }
 
         for (int i = 0; i < 4; ++i)
@@ -329,18 +329,18 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
 
 int ChunkMesher::CornerAoLevel(
     const World& world,
-    const glm::ivec3& airCell,
+    const glm::ivec3& openCell,
     const glm::ivec3& sideA,
     const glm::ivec3& sideB)
 {
-    return CornerAo(WorldCells{ world }, airCell, sideA, sideB);
+    return CornerAo(WorldCells{ world }, openCell, sideA, sideB);
 }
 
 float ChunkMesher::CornerLightShade(
     const World& world,
-    const glm::ivec3& airCell,
+    const glm::ivec3& openCell,
     const glm::ivec3& sideA,
     const glm::ivec3& sideB)
 {
-    return CornerLight(WorldCells{ world }, airCell, sideA, sideB);
+    return CornerLight(WorldCells{ world }, openCell, sideA, sideB);
 }

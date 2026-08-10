@@ -145,6 +145,8 @@ namespace
                         Set(m, x, y, z, 0);
                     for (int y = bed + 1; y <= c.WaterLevel; ++y)
                         Set(m, x, y, z, MapBlocks::Water);
+                    // VoxModel is palette-less, so a cell is either empty or not:
+                    // presence is the only question that can be asked here.
                     if (Get(m, x, bed, z) == 0)
                         Set(m, x, bed, z, MapBlocks::Stone); // guarantee a floor
                 }

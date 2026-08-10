@@ -46,24 +46,24 @@ public:
     static constexpr float AoShade[4] = { 0.55f, 0.70f, 0.85f, 1.00f };
 
     //How exposed one corner of a face is, from 0 (fully enclosed) to 3 (open).
-    //airCell is the cell in front of the face; sideA and sideB are the offsets
+    //openCell is the cell in front of the face; sideA and sideB are the offsets
     //from it toward the two edges meeting at the corner. Public so it can be
     //tested directly, and so a future greedy mesher can merge on equal values.
     static int CornerAoLevel(
         const World& world,
-        const glm::ivec3& airCell,
+        const glm::ivec3& openCell,
         const glm::ivec3& sideA,
         const glm::ivec3& sideB);
 
     //The raw fraction of sky light a face corner gets, between 0 and 1. This is
     //not a brightness — the floor is applied once, to the finished shading, in
-    //AddFace, not here. Averages the light of the air cells touching the
+    //AddFace, not here. Averages the light of the open cells touching the
     //corner, which is what makes lighting graduate smoothly across a surface
-    //instead of stepping from block to block. Solid cells hold no light and
+    //instead of stepping from block to block. Opaque cells hold no light and
     //are left out of the average.
     static float CornerLightShade(
         const World& world,
-        const glm::ivec3& airCell,
+        const glm::ivec3& openCell,
         const glm::ivec3& sideA,
         const glm::ivec3& sideB);
 
