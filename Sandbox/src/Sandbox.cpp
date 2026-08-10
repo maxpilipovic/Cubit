@@ -239,11 +239,15 @@ private:
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
         //Subtracting WorldOffset turns the camera's view-space position back into
         //world coordinates, the space the world and the ray share.
+        // Skip the voxel the camera is standing inside: since water became
+        // non-solid the player can be present-inside a block with no face
+        // to aim through, and that block should not be a free target.
         const VoxelRayHit hit = VoxelRaycast::Cast(
             m_World,
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
-            ReachDistance);
+            ReachDistance,
+            true);
 
         if (!hit.Hit)
             return false;

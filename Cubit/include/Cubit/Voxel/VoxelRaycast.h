@@ -33,5 +33,6 @@ public:
         const World& world,
         const glm::vec3& origin,
         const glm::vec3& direction,
-        float maxDistance);
+        float maxDistance,
+        bool skipStartVoxel = false);
 };

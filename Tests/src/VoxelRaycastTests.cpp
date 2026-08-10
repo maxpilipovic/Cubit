@@ -150,6 +150,37 @@ TEST_CASE("A ray starting inside a solid block reports that block")
     CHECK(hit.Normal == glm::ivec3(0, 0, 0));
 }
 
+TEST_CASE("skipStartVoxel does not report the block the ray starts inside")
+{
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});  // origin block
+    world.SetBlock(8, 8, 12, BlockId{1}); // next present block along the ray
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world, CentreOf(8, 8, 8), glm::vec3(0, 0, 1), 32.0f, true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 12));
+    CHECK(hit.Normal == glm::ivec3(0, 0, -1));
+}
+
+TEST_CASE("skipStartVoxel only skips the origin, not the block right after it")
+{
+    // Pins that skipStartVoxel skips exactly one block: the one the ray began
+    // in. A block immediately across the first crossed face is still a hit,
+    // with a real normal.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(8, 8, 9, BlockId{1});
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world, CentreOf(8, 8, 8), glm::vec3(0, 0, 1), 32.0f, true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 9));
+    CHECK(hit.Normal == glm::ivec3(0, 0, -1));
+}
+
 TEST_CASE("An unnormalized direction gives the same result")
 {
     World world(1, 1, 1);
