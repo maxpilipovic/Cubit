@@ -157,6 +157,9 @@ bool World::IsBlockOpaque(int x, int y, int z) const
 
 bool World::IsBlockSolid(int x, int y, int z) const
 {
+    if (!IsInBounds(x, y, z))
+        return false;
+
     return IsIdSolid(GetBlock(x, y, z));
 }
 
