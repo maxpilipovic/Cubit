@@ -97,6 +97,7 @@ public:
 
         m_Crosshair = CreateCrosshairTexture();
         m_Font = DebugFont::CreateTexture();
+        m_White = CreateWhiteTexture();
     }
 
     //Tracks a smoothed frame rate for the readout.
@@ -118,6 +119,9 @@ public:
     {
         Renderer::SetDepthTest(false);
         Renderer::BeginScene(m_Camera);
+
+        if (m_State->EyeInFluid)
+            DrawUnderwaterWash();
 
         DrawCrosshair();
         DrawReadout();
@@ -144,6 +148,10 @@ private:
     static constexpr std::uint32_t CrosshairTextureSize = 12;
     static constexpr float TextScale = 2.0f;
     static constexpr float TextMargin = 12.0f;
+
+    //Covers the whole screen while submerged. The fog cannot reach the sky, so
+    //without this, looking up from underwater shows an untouched clear colour.
+    static inline const glm::vec4 UnderwaterTint{ 0.15f, 0.40f, 0.70f, 0.45f };
 
     //Rebuilds the pixel-space projection after the framebuffer changes size.
     bool OnFramebufferResized(FramebufferResizeEvent& event)
@@ -173,6 +181,21 @@ private:
             size,
             glm::vec2(0.0f),
             glm::vec2(1.0f));
+    }
+
+    //Fills the screen with the underwater tint. Drawn before the crosshair and
+    //the readout so those stay legible through it.
+    void DrawUnderwaterWash() const
+    {
+        DrawQuad(
+            *m_White,
+            0.0f,
+            0.0f,
+            static_cast<float>(m_Width),
+            static_cast<float>(m_Height),
+            glm::vec2(0.0f),
+            glm::vec2(1.0f),
+            UnderwaterTint);
     }
 
     //Draws the debug lines down from the top-left corner.
@@ -257,10 +280,11 @@ private:
         float width,
         float height,
         const glm::vec2& uvOffset,
-        const glm::vec2& uvScale) const
+        const glm::vec2& uvScale,
+        const glm::vec4& tint = glm::vec4(1.0f)) const
     {
         m_Shader->SetInt("u_Texture", 0);
-        m_Shader->SetFloat4("u_Tint", glm::vec4(1.0f));
+        m_Shader->SetFloat4("u_Tint", tint);
         m_Shader->SetFloat2("u_UvOffset", uvOffset);
         m_Shader->SetFloat2("u_UvScale", uvScale);
         texture.Bind(0);
@@ -307,6 +331,14 @@ private:
         return std::make_unique<Texture2D>(size, size, pixels.data());
     }
 
+    //A single white pixel. The overlay shader always samples a texture, so a
+    //flat tinted fill needs something neutral to multiply against.
+    static std::unique_ptr<Texture2D> CreateWhiteTexture()
+    {
+        const std::uint8_t pixel[4] = { 255, 255, 255, 255 };
+        return std::make_unique<Texture2D>(1, 1, pixel);
+    }
+
     //Writes one opaque white pixel into an RGBA buffer.
     static void SetPixel(
         std::vector<std::uint8_t>& pixels,
@@ -331,6 +363,7 @@ private:
     std::unique_ptr<Shader> m_Shader;
     std::unique_ptr<Texture2D> m_Crosshair;
     std::unique_ptr<Texture2D> m_Font;
+    std::unique_ptr<Texture2D> m_White;
     OrthographicCamera m_Camera;
     std::uint32_t m_Width = 0;
     std::uint32_t m_Height = 0;
