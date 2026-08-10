@@ -32,17 +32,16 @@ public:
     //block like water still stops the ray. Positions outside the world are
     //treated as air, matching World::GetBlock.
     //
-    //skipStartVoxel, when true, does not report the voxel the ray starts
-    //inside (the one with no crossed face yet, i.e. a zero Normal) and keeps
-    //walking past it instead. A caller whose origin can sit inside a
-    //non-solid block — a player wading in water, say — has no entry face
-    //there to aim through or place against, so that voxel is never a useful
-    //hit for editing. Blocks the ray reaches after crossing a real face are
-    //reported as usual, including further non-solid ones.
+    //solidOnly, when true, ignores fluid blocks entirely, which is what an
+    //edit — or a future shot — wants: water is scenery you aim through, not a
+    //target. It also settles the case of a ray beginning inside water, which a
+    //player standing on the riverbed does every frame; that cell would
+    //otherwise be reported at zero distance with no entry face to place
+    //against, making it the answer to every click regardless of aim.
     static VoxelRayHit Cast(
         const World& world,
         const glm::vec3& origin,
         const glm::vec3& direction,
         float maxDistance,
-        bool skipStartVoxel = false);
+        bool solidOnly = false);
 };

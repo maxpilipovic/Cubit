@@ -62,7 +62,7 @@ VoxelRayHit VoxelRaycast::Cast(
     const glm::vec3& origin,
     const glm::vec3& direction,
     float maxDistance,
-    bool skipStartVoxel)
+    bool solidOnly)
 {
     VoxelRayHit result;
 
@@ -94,10 +94,11 @@ VoxelRayHit VoxelRaycast::Cast(
 
     while (travelled <= maxDistance)
     {
-        const bool isStartVoxel = normal == glm::ivec3(0);
+        const bool blocks = solidOnly
+            ? world.IsBlockSolid(voxel.x, voxel.y, voxel.z)
+            : world.IsBlockPresent(voxel.x, voxel.y, voxel.z);
 
-        if (world.IsBlockPresent(voxel.x, voxel.y, voxel.z) &&
-            !(skipStartVoxel && isStartVoxel))
+        if (blocks)
         {
             result.Hit = true;
             result.Block = voxel;

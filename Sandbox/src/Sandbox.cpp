@@ -45,8 +45,10 @@ namespace
     //Below the map floor: a fallen player is returned to spawn.
     constexpr float FallResetHeight = -8.0f;
 
-    //Palette indices selectable with the number keys 1-8, in order.
-    constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    //Palette indices selectable with the number keys, in order. Water (7) is
+    //deliberately absent: it cannot be broken, so being able to place it would
+    //hand the player a block they can create and never remove.
+    constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 8 };
 
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
@@ -239,9 +241,9 @@ private:
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
         //Subtracting WorldOffset turns the camera's view-space position back into
         //world coordinates, the space the world and the ray share.
-        // Skip the voxel the camera is standing inside: since water became
-        // non-solid the player can be present-inside a block with no face
-        // to aim through, and that block should not be a free target.
+        // Solid only: water is scenery, so an edit ray passes through the river
+        // to the bed rather than targeting the surface — or, when the player is
+        // standing in it, the cell their own head occupies.
         const VoxelRayHit hit = VoxelRaycast::Cast(
             m_World,
             camera.GetPosition() - WorldOffset,

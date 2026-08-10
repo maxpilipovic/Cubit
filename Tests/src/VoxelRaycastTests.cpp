@@ -150,37 +150,6 @@ TEST_CASE("A ray starting inside a solid block reports that block")
     CHECK(hit.Normal == glm::ivec3(0, 0, 0));
 }
 
-TEST_CASE("skipStartVoxel does not report the block the ray starts inside")
-{
-    World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockId{1});  // origin block
-    world.SetBlock(8, 8, 12, BlockId{1}); // next present block along the ray
-
-    const VoxelRayHit hit = VoxelRaycast::Cast(
-        world, CentreOf(8, 8, 8), glm::vec3(0, 0, 1), 32.0f, true);
-
-    REQUIRE(hit.Hit);
-    CHECK(hit.Block == glm::ivec3(8, 8, 12));
-    CHECK(hit.Normal == glm::ivec3(0, 0, -1));
-}
-
-TEST_CASE("skipStartVoxel only skips the origin, not the block right after it")
-{
-    // Pins that skipStartVoxel skips exactly one block: the one the ray began
-    // in. A block immediately across the first crossed face is still a hit,
-    // with a real normal.
-    World world(1, 1, 1);
-    world.SetBlock(8, 8, 8, BlockId{1});
-    world.SetBlock(8, 8, 9, BlockId{1});
-
-    const VoxelRayHit hit = VoxelRaycast::Cast(
-        world, CentreOf(8, 8, 8), glm::vec3(0, 0, 1), 32.0f, true);
-
-    REQUIRE(hit.Hit);
-    CHECK(hit.Block == glm::ivec3(8, 8, 9));
-    CHECK(hit.Normal == glm::ivec3(0, 0, -1));
-}
-
 TEST_CASE("An unnormalized direction gives the same result")
 {
     World world(1, 1, 1);
@@ -293,9 +262,9 @@ TEST_CASE("Rays never report a block they did not enter")
 
 TEST_CASE("A ray stops at water rather than passing through it")
 {
-    // Deliberately different from collision, which passes through. Water is
-    // placeable with key 7, so a ray that skipped it would hand the player a
-    // block they can create and never break.
+    // Pins the default: without solidOnly the ray reports any present block,
+    // water included. Callers that want to aim through water opt in; the engine
+    // does not decide that for them.
     World world(1, 1, 1);
     Palette palette = DefaultPalette();
     palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f); // water
@@ -313,4 +282,69 @@ TEST_CASE("A ray stops at water rather than passing through it")
     REQUIRE(hit.Hit);
     CHECK(hit.Block == glm::ivec3(8, 8, 8));
     CHECK_FALSE(world.IsBlockSolid(hit.Block.x, hit.Block.y, hit.Block.z));
+}
+
+TEST_CASE("solidOnly passes through water to the block behind it")
+{
+    // Water is scenery, not a material: an edit ray must reach the riverbed
+    // through it rather than stopping at the surface.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f); // water
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});  // water, nearer
+    world.SetBlock(8, 8, 12, BlockId{1}); // opaque, further
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world,
+        glm::vec3(8.5f, 8.5f, 4.5f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+        16.0f,
+        true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 12));
+    CHECK(hit.Normal == glm::ivec3(0, 0, -1));
+}
+
+TEST_CASE("solidOnly still reports an ordinary solid block")
+{
+    // The companion: ignoring fluid must not make the ray ignore terrain.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world,
+        glm::vec3(8.5f, 8.5f, 4.5f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+        16.0f,
+        true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 8));
+}
+
+TEST_CASE("solidOnly ignores water the ray starts inside")
+{
+    // The case that used to need its own flag. A player standing on the
+    // riverbed has their eye inside a water cell; that cell must not be what
+    // every click hits.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{7});  // the ray starts in here
+    world.SetBlock(8, 4, 8, BlockId{1});  // the bed below
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world,
+        glm::vec3(8.5f, 8.5f, 8.5f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        16.0f,
+        true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 4, 8));
 }
