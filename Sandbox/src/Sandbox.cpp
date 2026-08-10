@@ -50,6 +50,11 @@ namespace
     constexpr float SwimUpSpeed = 3.5f;
     constexpr float WaterDrag = 0.6f;
 
+    //Underwater haze. Roughly half strength at the 12-block reach distance and
+    //83% at 30, which reads as murk without hiding what you are aiming at.
+    const glm::vec3 FogColor{ 0.10f, 0.30f, 0.55f };
+    constexpr float FogDensity = 0.06f;
+
     //Below the map floor: a fallen player is returned to spawn.
     constexpr float FallResetHeight = -8.0f;
 
@@ -103,10 +108,12 @@ public:
             uniform mat4 u_ViewProjection;
             uniform mat4 u_Transform;
             out vec4 v_Color;
+            out vec3 v_WorldPos;
 
             void main()
             {
                 v_Color = a_Color;
+                v_WorldPos = (u_Transform * vec4(a_Position, 1.0)).xyz;
                 gl_Position = u_ViewProjection * u_Transform * vec4(a_Position, 1.0);
             }
         )";
@@ -114,10 +121,19 @@ public:
             #version 330 core
             layout(location = 0) out vec4 color;
             in vec4 v_Color;
+            in vec3 v_WorldPos;
+            uniform vec3 u_FogColor;
+            uniform float u_FogDensity;
+            uniform vec3 u_CameraPos;
 
             void main()
             {
-                color = v_Color;
+                // Exponential, so it needs no far-plane constant and never
+                // saturates abruptly. Density is zero when dry, which makes
+                // this a mix against nothing rather than a branch.
+                float d = length(v_WorldPos - u_CameraPos);
+                float f = 1.0 - exp(-u_FogDensity * d);
+                color = vec4(mix(v_Color.rgb, u_FogColor, f), v_Color.a);
             }
         )";
         m_Shader = std::make_unique<Shader>(vertexSource, fragmentSource);
@@ -197,6 +213,12 @@ public:
         m_WorldRenderer.Update(m_World);
 
         Renderer::BeginScene(m_CameraController.GetCamera());
+        // u_Transform already carries WorldOffset and the camera position is in
+        // that same space — the invariant the transparency sort already relies
+        // on — so the two can be subtracted directly.
+        m_Shader->SetFloat3("u_FogColor", FogColor);
+        m_Shader->SetFloat3("u_CameraPos", m_CameraController.GetCamera().GetPosition());
+        m_Shader->SetFloat("u_FogDensity", m_HudState->EyeInFluid ? FogDensity : 0.0f);
         m_WorldRenderer.Render(
             *m_Shader,
             m_CameraController.GetCamera().GetViewProjectionMatrix(),
