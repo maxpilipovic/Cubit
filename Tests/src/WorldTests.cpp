@@ -316,3 +316,57 @@ TEST_CASE("Replacing the palette updates solidity")
 
     CHECK_FALSE(world.IsBlockSolid(8, 8, 8));
 }
+
+TEST_CASE("A transparent block is fluid")
+{
+    // Fluid is the question every water behaviour asks: something is there, but
+    // it does not stop you. Nothing else in the engine answers yes.
+    World world(1, 1, 1);
+    Palette palette = DefaultPalette();
+    palette[5] = glm::vec4(0.2f, 0.4f, 0.6f, 0.5f);
+    world.SetPalette(palette);
+
+    world.SetBlock(8, 8, 8, BlockId{5});
+
+    CHECK(world.IsBlockFluid(8, 8, 8));
+}
+
+TEST_CASE("An opaque block is not fluid")
+{
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+
+    CHECK_FALSE(world.IsBlockFluid(8, 8, 8));
+}
+
+TEST_CASE("Air is not fluid")
+{
+    // Air is not present at all, so it falls out of the rule rather than
+    // needing a special case — the same shape as the opacity rule.
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsBlockFluid(8, 8, 8));
+}
+
+TEST_CASE("Positions outside the world are not fluid")
+{
+    const World world(1, 1, 1);
+
+    CHECK_FALSE(world.IsBlockFluid(-1, 0, 0));
+    CHECK_FALSE(world.IsBlockFluid(0, world.GetHeight(), 0));
+}
+
+TEST_CASE("Replacing the palette updates fluidity")
+{
+    // Derived from two tables that SetPalette rebuilds, so it must not go stale
+    // when a map installs its own palette.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{4});
+    REQUIRE_FALSE(world.IsBlockFluid(8, 8, 8));
+
+    Palette palette = DefaultPalette();
+    palette[4] = glm::vec4(0.2f, 0.4f, 0.6f, 0.25f);
+    world.SetPalette(palette);
+
+    CHECK(world.IsBlockFluid(8, 8, 8));
+}

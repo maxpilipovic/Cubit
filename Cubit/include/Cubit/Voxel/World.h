@@ -81,6 +81,14 @@ public:
     //outside the world are not solid, matching GetBlock reading as air.
     bool IsBlockSolid(int x, int y, int z) const;
 
+    //Reports whether a block occupies this cell without stopping movement —
+    //water, and anything else you can swim through. Air is not fluid: it is not
+    //present at all, so it falls out of the rule rather than needing a case.
+    //
+    //Derived from the two tables above rather than stored: it is one &&, and a
+    //third array would be a third thing to keep in step with a palette change.
+    bool IsBlockFluid(int x, int y, int z) const;
+
     //Reports whether a block occupies this position at all.
     bool IsBlockPresent(int x, int y, int z) const;
 
