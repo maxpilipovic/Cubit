@@ -18,7 +18,9 @@ Full scope and feature spec lives in `Documentation/Cubit.pdf`.
 You load a map, walk around it under gravity, and dig into it or build on it, lit by
 sky light and ambient occlusion. Water is see-through and you swim through it rather
 than walking on it, with the screen washing blue and hazing out while you are under.
-The current map is a 256x64x256 battlefield.
+Swimming alone will not get you up the banks, though — there is no step-up assist, so
+climbing out means digging or building a way up, same as anywhere else on the map. The
+current map is a 256x64x256 battlefield.
 
 **Platform and core loop**
 
