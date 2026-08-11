@@ -1,6 +1,6 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-08-10_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
@@ -262,7 +262,7 @@ worth making:
 |----|-------|-------|----------|--------|
 | P1 | Whole world meshes in one frame | `WorldRenderer::Update` | Highest | **Done 2026-07-25**, budget revised to a time slice **2026-07-28** |
 | P2 | No frustum culling | `WorldRenderer::Render` | High | **Done 2026-07-25** |
-| P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | Open |
+| P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | **Closed 2026-08-06** — greedy meshing built, measured, rejected |
 | P4 | GPU buffers reallocated per remesh | `WorldRenderer::Update` | Low | Open |
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
