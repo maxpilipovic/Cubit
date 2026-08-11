@@ -134,16 +134,34 @@ Append to `Tests/src/VoxLoaderTests.cpp`:
 ```cpp
 TEST_CASE("A file with two models sized to the larger of them")
 {
-    // Without a scene graph both models sit at the origin, so the world is
-    // just big enough for the larger one.
+    // The larger model comes FIRST, so the world cannot be taken from the last
+    // SIZE chunk. Order matters here: with the models the other way round, code
+    // that simply keeps the last SIZE would agree with the right answer by luck
+    // and this case could not fail.
     std::vector<std::uint8_t> children;
-    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
     PushModel(children, ModelSpec{ 4, 4, 4, { { 3, 3, 3, 2 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
     PushPalette(children);
 
     const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
 
     CHECK(model.Size == glm::ivec3(4, 4, 4));
+}
+
+TEST_CASE("A model is not clipped by a smaller model declared after it")
+{
+    // The first model's far corner lies outside the second model's bounds, so
+    // code that sizes the world from the last SIZE chunk drops that voxel
+    // entirely rather than reporting it.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 3, 3, 3, 2 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.At(3, 3, 3) == 2);
+    CHECK(model.At(0, 0, 0) == 1);
 }
 
 TEST_CASE("Both models' voxels survive the flatten")
@@ -175,7 +193,12 @@ TEST_CASE("A later model overwrites an earlier one in the same cell")
 - [ ] **Step 4: Run to verify it fails**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A file with two models sized to the larger of them"`
-Expected: FAIL — the current code keeps the *last* `SIZE` (4,4,4) but would report it correctly by luck here, while `Both models' voxels survive the flatten` fails because the two `XYZI` lists are concatenated against a single size. Run all three; at least two must fail. If all three pass, the tests are not exercising the bug — stop and fix them.
+Expected: FAIL — reports `(2,2,2)`, taken from the last `SIZE` chunk, instead of `(4,4,4)`.
+
+Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A model is not clipped by a smaller model declared after it"`
+Expected: FAIL — the voxel at `(3,3,3)` is outside the wrongly-sized world and is dropped by the loader's out-of-bounds guard.
+
+The other three cases (`Both models' voxels survive the flatten`, `A later model overwrites an earlier one in the same cell`, and the size case's sibling) **pass before the fix and that is expected** — they use models of equal size, where last-`SIZE`-wins coincides with the right answer. They are regression guards, not red tests. The two cases above are the ones that must be red; if either passes, stop and report BLOCKED, because the tests are then not exercising the bug.
 
 - [ ] **Step 5: Replace the accumulation with a model list**
 
