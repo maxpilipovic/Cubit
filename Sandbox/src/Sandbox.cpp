@@ -156,7 +156,11 @@ public:
         {
             walk *= WaterDrag;
 
-            if (Input::IsKeyPressed(KeyCode::Space))
+            // Only while the head is under. The box still counts as wet with
+            // the whole body clear of the surface, so stroking on that alone
+            // thrusts the player out of the river and buzzes them above it.
+            if (IsEyeInFluid(m_PlayerPosition) &&
+                Input::IsKeyPressed(KeyCode::Space))
                 m_VerticalVelocity = SwimUpSpeed;
 
             m_VerticalVelocity -= WaterGravity * seconds;
@@ -186,12 +190,8 @@ public:
 
         // The eye, not the box: the tint and the fog should come on when the
         // camera goes under, which happens later than the feet getting wet.
-        const glm::vec3 eye =
-            m_PlayerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
-        m_HudState->EyeInFluid = m_World.IsBlockFluid(
-            static_cast<int>(std::floor(eye.x)),
-            static_cast<int>(std::floor(eye.y)),
-            static_cast<int>(std::floor(eye.z)));
+        // Taken after the move so rendering is not a frame stale.
+        m_HudState->EyeInFluid = IsEyeInFluid(m_PlayerPosition);
 
         // Landing or hitting a ceiling ends vertical motion.
         if (move.BlockedY)
@@ -251,6 +251,20 @@ public:
     }
 
 private:
+    //Reports whether the camera sits in a fluid block for a given player
+    //position. Taken at the eye rather than the box because a body that still
+    //counts as wet can have its head well clear of the surface.
+    bool IsEyeInFluid(const glm::vec3& playerPosition) const
+    {
+        const glm::vec3 eye =
+            playerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
+
+        return m_World.IsBlockFluid(
+            static_cast<int>(std::floor(eye.x)),
+            static_cast<int>(std::floor(eye.y)),
+            static_cast<int>(std::floor(eye.z)));
+    }
+
     //Returns a unit direction for held movement keys, flattened so that looking
     //up or down does not change walking speed.
     glm::vec3 ReadWalkInput() const
