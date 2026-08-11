@@ -165,7 +165,11 @@ bool World::IsBlockSolid(int x, int y, int z) const
 
 bool World::IsBlockFluid(int x, int y, int z) const
 {
-    return IsBlockPresent(x, y, z) && !IsBlockSolid(x, y, z);
+    // One lookup, so the cell is read atomically and the header's "one &&"
+    // is actually what happens.
+    const BlockId block = GetBlock(x, y, z);
+
+    return IsPresent(block) && !IsIdSolid(block);
 }
 
 bool World::IsInBounds(int x, int y, int z) const
