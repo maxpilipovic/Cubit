@@ -60,7 +60,10 @@ namespace
 
     //Palette indices selectable with the number keys, in order. Water (7) is
     //deliberately absent: it cannot be broken, so being able to place it would
-    //hand the player a block they can create and never remove.
+    //hand the player a block they can create and never remove. The list is
+    //indexed off KeyCode::D1, not off the palette id, so removing water shifts
+    //everything after it back one key: 7 now selects Wood and 8 selects
+    //nothing. That is intentional, not an off-by-one to "fix".
     constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 8 };
 
     constexpr int PlaceableBlockCount =
