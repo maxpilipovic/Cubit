@@ -325,6 +325,28 @@ TEST_CASE("solidOnly still reports an ordinary solid block")
     CHECK(hit.Block == glm::ivec3(8, 8, 8));
 }
 
+TEST_CASE("solidOnly reports a solid block the ray starts inside")
+{
+    // Being embedded in terrain must stay diggable: that is the way out. The
+    // old skip-the-origin flag suppressed this, and dropping it restored it,
+    // so something has to hold the door open.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(8, 4, 8, BlockId{1});
+
+    const VoxelRayHit hit = VoxelRaycast::Cast(
+        world,
+        glm::vec3(8.5f, 8.5f, 8.5f),
+        glm::vec3(0.0f, -1.0f, 0.0f),
+        16.0f,
+        true);
+
+    REQUIRE(hit.Hit);
+    CHECK(hit.Block == glm::ivec3(8, 8, 8));
+    CHECK(hit.Normal == glm::ivec3(0));
+    CHECK(hit.Distance == doctest::Approx(0.0f));
+}
+
 TEST_CASE("solidOnly ignores water the ray starts inside")
 {
     // The case that used to need its own flag. A player standing on the
