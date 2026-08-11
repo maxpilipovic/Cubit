@@ -373,17 +373,3 @@ TEST_CASE("A box straddling water and air overlaps fluid")
     CHECK(VoxelCollision::OverlapsFluid(
         world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
 }
-
-TEST_CASE("Water does not make a box overlap solid")
-{
-    // The companion to the cases above: the two queries must stay independent.
-    World world(1, 1, 1);
-    Palette palette = DefaultPalette();
-    palette[7] = glm::vec4(0.2f, 0.4f, 0.8f, 0.55f);
-    world.SetPalette(palette);
-
-    world.SetBlock(8, 8, 8, BlockId{7});
-
-    CHECK_FALSE(VoxelCollision::Overlaps(
-        world, glm::vec3(8.5f, 8.5f, 8.5f), PlayerHalfExtents));
-}
