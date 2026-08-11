@@ -190,8 +190,11 @@ public:
 
         // The eye, not the box: the tint and the fog should come on when the
         // camera goes under, which happens later than the feet getting wet.
-        // Taken after the move so rendering is not a frame stale.
-        m_HudState->EyeInFluid = IsEyeInFluid(m_PlayerPosition);
+        // Taken after the move so rendering is not a frame stale. Kept on the
+        // layer rather than read back from HudState, so the render fog does
+        // not depend on the HUD struct.
+        m_EyeInFluid = IsEyeInFluid(m_PlayerPosition);
+        m_HudState->EyeInFluid = m_EyeInFluid;
 
         // Landing or hitting a ceiling ends vertical motion.
         if (move.BlockedY)
@@ -218,7 +221,7 @@ public:
         // on — so the two can be subtracted directly.
         m_Shader->SetFloat3("u_FogColor", FogColor);
         m_Shader->SetFloat3("u_CameraPos", m_CameraController.GetCamera().GetPosition());
-        m_Shader->SetFloat("u_FogDensity", m_HudState->EyeInFluid ? FogDensity : 0.0f);
+        m_Shader->SetFloat("u_FogDensity", m_EyeInFluid ? FogDensity : 0.0f);
         m_WorldRenderer.Render(
             *m_Shader,
             m_CameraController.GetCamera().GetViewProjectionMatrix(),
@@ -480,6 +483,7 @@ private:
     glm::vec3 m_PlayerPosition{ SpawnPosition };
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
+    bool m_EyeInFluid = false;
     PerspectiveCameraController m_CameraController;
 };
 
