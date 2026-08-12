@@ -343,7 +343,7 @@ Read `nTRN`, `nGRP` and `nSHP` into a node table. Nothing uses the table yet —
 - Consumes: `RawModel`, `PushModel`, `PushPalette`, `MakeVoxFile` from Task 1.
 - Produces: in `VoxLoader.cpp` — `ReadString`, `ReadDict`, `struct SceneNode { enum class Kind { Transform, Group, Shape } Type; glm::ivec3 Translation; std::vector<int> Children; std::vector<int> ModelIds; }`, and a `std::map<int, SceneNode> nodes` local in `Parse`. In the tests — `PushTestString`, `PushTestDict`, `PushTestChunk`, `struct GraphPlacement { glm::ivec3 Translation; std::string Rotation; }`, `PushSceneGraph`.
 
-- [ ] **Step 1: Add the byte readers**
+- [x] **Step 1: Add the byte readers**
 
 In `Cubit/src/Voxel/VoxLoader.cpp`, add to the anonymous namespace after `TagEquals` (line 32):
 
@@ -409,7 +409,7 @@ In `Cubit/src/Voxel/VoxLoader.cpp`, add to the anonymous namespace after `TagEqu
 
 Add `#include <map>`, `#include <sstream>` and `#include <string>` to the file's include block.
 
-- [ ] **Step 2: Declare the node table in `Parse`**
+- [x] **Step 2: Declare the node table in `Parse`**
 
 In `Parse`, next to the `std::vector<RawModel> models;` line added in Task 1, add:
 
@@ -417,7 +417,7 @@ In `Parse`, next to the `std::vector<RawModel> models;` line added in Task 1, ad
     std::map<int, SceneNode> nodes;
 ```
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 First add these helpers to the anonymous namespace of `Tests/src/VoxLoaderTests.cpp`, after `PushPalette`:
 
@@ -548,12 +548,12 @@ TEST_CASE("A scene graph parses without disturbing the chunk walk")
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes already, then make it meaningful**
+- [x] **Step 4: Run to verify it passes already, then make it meaningful**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A scene graph parses without disturbing the chunk walk"`
 Expected: **PASS** — the existing walk skips unknown chunks by their declared content size, so this case passes before the node parsing exists. That is fine and expected: it is a regression guard for Step 5, which is where the code starts reading inside those chunks and can start reading the wrong number of bytes.
 
-- [ ] **Step 5: Parse the three node chunks**
+- [x] **Step 5: Parse the three node chunks**
 
 In `Parse`'s chunk walk, add these branches after the `RGBA` branch (currently ending at line 121):
 
@@ -630,12 +630,12 @@ In `Parse`'s chunk walk, add these branches after the `RGBA` branch (currently e
 
 Add `(void)nodes;` immediately before the `if (models.empty())` line so the unused-variable warning does not fail the build. Task 3 removes it.
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS. The graph case still passing now means the node parsing consumed exactly the right bytes; if the palette assertion fails, a field is being read at the wrong offset.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxLoader.cpp Tests/src/VoxLoaderTests.cpp

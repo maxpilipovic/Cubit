@@ -6,7 +6,10 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -30,6 +33,64 @@ namespace
         return offset + 4 <= bytes.size() &&
             std::memcmp(bytes.data() + offset, tag, 4) == 0;
     }
+
+    //Reads a length-prefixed .vox STRING and advances the offset. The bytes are
+    //not null-terminated, so the length is the only thing that ends the string.
+    std::string ReadString(std::span<const std::uint8_t> bytes, std::size_t& offset)
+    {
+        const std::int32_t length = ReadInt(bytes, offset);
+        if (length < 0 || offset + static_cast<std::size_t>(length) > bytes.size())
+            throw std::runtime_error("vox: truncated string");
+
+        std::string value(reinterpret_cast<const char*>(bytes.data() + offset),
+            static_cast<std::size_t>(length));
+        offset += static_cast<std::size_t>(length);
+        return value;
+    }
+
+    //Reads a .vox DICT: a pair count followed by that many key/value strings.
+    //Every node chunk carries at least one, so this must consume it even when
+    //nothing in it interests us — the fields after it are positional.
+    std::map<std::string, std::string> ReadDict(
+        std::span<const std::uint8_t> bytes, std::size_t& offset)
+    {
+        const std::int32_t count = ReadInt(bytes, offset);
+        if (count < 0)
+            throw std::runtime_error("vox: negative dictionary size");
+
+        std::map<std::string, std::string> dict;
+        for (std::int32_t i = 0; i < count; ++i)
+        {
+            const std::string key = ReadString(bytes, offset);
+            const std::string value = ReadString(bytes, offset);
+            dict[key] = value;
+        }
+        return dict;
+    }
+
+    //Parses a "_t" attribute: three space-separated integers in vox axes.
+    glm::ivec3 ParseTranslation(const std::string& text)
+    {
+        std::istringstream stream(text);
+        glm::ivec3 t{ 0 };
+        stream >> t.x >> t.y >> t.z;
+        if (stream.fail())
+            throw std::runtime_error("vox: malformed translation attribute");
+        return t;
+    }
+
+    //A scene-graph node reduced to the fields placement needs. One struct for
+    //all three node kinds keeps the traversal a single switch rather than three
+    //parallel lookups.
+    struct SceneNode
+    {
+        enum class Kind { Transform, Group, Shape };
+
+        Kind Type = Kind::Group;
+        glm::ivec3 Translation{ 0 };  // vox axes; transform nodes only
+        std::vector<int> Children;    // child node ids; transform nodes have one
+        std::vector<int> ModelIds;    // shape nodes only
+    };
 }
 
 VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
@@ -61,6 +122,7 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
     };
 
     std::vector<RawModel> models;
+    std::map<int, SceneNode> nodes;
 
     Palette palette = DefaultPalette();
 
@@ -131,12 +193,82 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
                     bytes[p + 3] / 255.0f);
             }
         }
+        else if (std::strcmp(id, "nTRN") == 0)
+        {
+            std::size_t p = contentStart;
+            const std::int32_t nodeId = ReadInt(bytes, p);
+            ReadDict(bytes, p);                       // node attributes, unused
+            const std::int32_t childId = ReadInt(bytes, p);
+            ReadInt(bytes, p);                        // reserved, always -1
+            ReadInt(bytes, p);                        // layer id
+            const std::int32_t frameCount = ReadInt(bytes, p);
+            if (frameCount < 1)
+                throw std::runtime_error("vox: transform node has no frames");
+
+            SceneNode node;
+            node.Type = SceneNode::Kind::Transform;
+            node.Children.push_back(childId);
+
+            for (std::int32_t f = 0; f < frameCount; ++f)
+            {
+                const std::map<std::string, std::string> frame = ReadDict(bytes, p);
+
+                // Only the first frame is used: the rest describe the same model
+                // at later animation times, and Cubit has no animation. They are
+                // still read, because skipping them would leave the offset short.
+                if (f != 0)
+                    continue;
+
+                const auto t = frame.find("_t");
+                if (t != frame.end())
+                    node.Translation = ParseTranslation(t->second);
+            }
+
+            nodes[nodeId] = std::move(node);
+        }
+        else if (std::strcmp(id, "nGRP") == 0)
+        {
+            std::size_t p = contentStart;
+            const std::int32_t nodeId = ReadInt(bytes, p);
+            ReadDict(bytes, p);
+            const std::int32_t childCount = ReadInt(bytes, p);
+            if (childCount < 0)
+                throw std::runtime_error("vox: group node has a negative child count");
+
+            SceneNode node;
+            node.Type = SceneNode::Kind::Group;
+            for (std::int32_t i = 0; i < childCount; ++i)
+                node.Children.push_back(ReadInt(bytes, p));
+
+            nodes[nodeId] = std::move(node);
+        }
+        else if (std::strcmp(id, "nSHP") == 0)
+        {
+            std::size_t p = contentStart;
+            const std::int32_t nodeId = ReadInt(bytes, p);
+            ReadDict(bytes, p);
+            const std::int32_t modelCount = ReadInt(bytes, p);
+            if (modelCount < 0)
+                throw std::runtime_error("vox: shape node has a negative model count");
+
+            SceneNode node;
+            node.Type = SceneNode::Kind::Shape;
+            for (std::int32_t i = 0; i < modelCount; ++i)
+            {
+                node.ModelIds.push_back(ReadInt(bytes, p));
+                ReadDict(bytes, p);               // per-model attributes, unused
+            }
+
+            nodes[nodeId] = std::move(node);
+        }
 
         // Skip content and any children we do not read.
         offset = contentStart +
             static_cast<std::size_t>(contentSize) +
             static_cast<std::size_t>(childrenSize);
     }
+
+    (void)nodes;
 
     if (models.empty())
         throw std::runtime_error("vox: missing SIZE or XYZI chunk");

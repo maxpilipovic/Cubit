@@ -76,6 +76,109 @@ namespace
         }
     }
 
+    //Appends a length-prefixed .vox STRING.
+    void PushTestString(std::vector<std::uint8_t>& out, const std::string& text)
+    {
+        PushInt(out, static_cast<std::int32_t>(text.size()));
+        out.insert(out.end(), text.begin(), text.end());
+    }
+
+    //Appends a .vox DICT.
+    void PushTestDict(std::vector<std::uint8_t>& out,
+        const std::vector<std::pair<std::string, std::string>>& entries)
+    {
+        PushInt(out, static_cast<std::int32_t>(entries.size()));
+        for (const auto& entry : entries)
+        {
+            PushTestString(out, entry.first);
+            PushTestString(out, entry.second);
+        }
+    }
+
+    //Wraps content bytes in a chunk header. Node chunks carry no child chunks:
+    //the scene tree is expressed by node ids, not by chunk nesting.
+    void PushTestChunk(std::vector<std::uint8_t>& out, const char* tag,
+        const std::vector<std::uint8_t>& content)
+    {
+        PushTag(out, tag);
+        PushInt(out, static_cast<std::int32_t>(content.size()));
+        PushInt(out, 0);
+        out.insert(out.end(), content.begin(), content.end());
+    }
+
+    //Where one model sits. Rotation is the raw "_r" attribute; leave it empty to
+    //omit the attribute, which is how an unrotated model is normally written.
+    struct GraphPlacement
+    {
+        glm::ivec3 Translation{ 0 };
+        std::string Rotation;
+    };
+
+    //Appends a scene graph placing model i at placements[i]: a root transform, a
+    //group holding one transform per model, and a shape under each transform.
+    void PushSceneGraph(std::vector<std::uint8_t>& out,
+        const std::vector<GraphPlacement>& placements)
+    {
+        {
+            std::vector<std::uint8_t> content;
+            PushInt(content, 0);   // node id
+            PushTestDict(content, {});
+            PushInt(content, 1);   // child: the group
+            PushInt(content, -1);  // reserved
+            PushInt(content, -1);  // layer
+            PushInt(content, 1);   // frame count
+            PushTestDict(content, {});
+            PushTestChunk(out, "nTRN", content);
+        }
+
+        {
+            std::vector<std::uint8_t> content;
+            PushInt(content, 1);   // node id
+            PushTestDict(content, {});
+            PushInt(content, static_cast<std::int32_t>(placements.size()));
+            for (std::size_t i = 0; i < placements.size(); ++i)
+                PushInt(content, static_cast<std::int32_t>(2 + i * 2));
+            PushTestChunk(out, "nGRP", content);
+        }
+
+        for (std::size_t i = 0; i < placements.size(); ++i)
+        {
+            const std::int32_t transformId = static_cast<std::int32_t>(2 + i * 2);
+            const std::int32_t shapeId = transformId + 1;
+            const GraphPlacement& p = placements[i];
+
+            std::vector<std::pair<std::string, std::string>> frame;
+            frame.push_back({ "_t",
+                std::to_string(p.Translation.x) + " " +
+                std::to_string(p.Translation.y) + " " +
+                std::to_string(p.Translation.z) });
+            if (!p.Rotation.empty())
+                frame.push_back({ "_r", p.Rotation });
+
+            {
+                std::vector<std::uint8_t> content;
+                PushInt(content, transformId);
+                PushTestDict(content, {});
+                PushInt(content, shapeId);
+                PushInt(content, -1);
+                PushInt(content, -1);
+                PushInt(content, 1);
+                PushTestDict(content, frame);
+                PushTestChunk(out, "nTRN", content);
+            }
+
+            {
+                std::vector<std::uint8_t> content;
+                PushInt(content, shapeId);
+                PushTestDict(content, {});
+                PushInt(content, 1);                            // one model
+                PushInt(content, static_cast<std::int32_t>(i)); // model id
+                PushTestDict(content, {});
+                PushTestChunk(out, "nSHP", content);
+            }
+        }
+    }
+
     //Wraps MAIN around already-encoded child chunks.
     std::vector<std::uint8_t> MakeVoxFile(const std::vector<std::uint8_t>& children)
     {
@@ -244,4 +347,22 @@ TEST_CASE("A later model overwrites an earlier one in the same cell")
     const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
 
     CHECK(model.At(1, 1, 1) == 9);
+}
+
+TEST_CASE("A scene graph parses without disturbing the chunk walk")
+{
+    // Placement is not read yet: this only proves the node chunks are consumed
+    // to exactly their own length, so the chunks after them still parse.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 3 } } });
+    PushSceneGraph(children, { GraphPlacement{ glm::ivec3(0, 0, 0), "" } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(2, 2, 2));
+    CHECK(model.At(0, 0, 0) == 3);
+    // The palette came after the graph, so reading it back proves the graph's
+    // chunks were skipped by the right number of bytes.
+    CHECK(model.Colors[3].x == doctest::Approx(3.0f / 255.0f));
 }
