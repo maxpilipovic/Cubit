@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-08_
+_Last updated: 2026-08-11_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
@@ -61,8 +61,15 @@ Ranked by leverage. Performance items are detailed in
    the table is filled and no call site.
 
 ### Format / smaller gaps
-6. **Multi-model stitching** — load maps larger than 256³ (true Ace-of-Spades
-   512×512 scale needs several stitched `.vox` models).
+6. ~~**Multi-model stitching**~~ **DONE 2026-08-11** — `VoxLoader::Parse` collects
+   every `SIZE`/`XYZI` pair, resolves each model's origin by walking the
+   `nTRN`/`nGRP`/`nSHP` scene graph, and flattens the union into one dense
+   `VoxModel`; `VoxWriter::Write` does the inverse, cutting a model larger than
+   256 into a uniform 256 grid of tiles placed by a generated graph. A model that
+   still fits in one `.vox` takes the old path and produces byte-identical
+   output. `MaxDimension = 256` now bounds a single model, never the world.
+   `Sandbox/assets/maps/battlefield512.vox` is 512×64×512 across four models and
+   is what the Sandbox loads.
 7. ~~**World persistence**~~ **DONE 2026-07-31** — `ToVoxModel` plus
    `VoxWriter::WriteFile` write an edited world back to `.vox`; the Sandbox binds
    it to `F5`.
@@ -84,10 +91,14 @@ A bounded sequence — genuinely finishable, not endless:
 2. ~~**Ambient-occlusion lighting**~~ **DONE 2026-07-26** (the visual leap).
 3. ~~**Transparency**~~ **DONE 2026-08-08** (opacity 2026-08-06, solidity 2026-08-08).
 4. ~~**Greedy meshing**~~ **TRIED AND REJECTED 2026-08-06** — see P3.
-5. **Multi-model stitching** (full AoS-scale maps). ← next
+5. ~~**Multi-model stitching**~~ **DONE 2026-08-11** (full AoS-scale maps).
 
-After these, the engine is "done" for our purposes, and the remaining work is all
-gameplay.
+**The arc is complete.** The engine is "done" for our purposes: the one remaining
+engine gap is the **camera aim API** (item 8) — `PerspectiveCameraController` has
+no yaw/pitch setter, so a spawn cannot choose its facing. That gap was felt
+immediately on the 512 map: picking a spawn meant searching for a spot whose view
+along the camera's fixed `-z` facing happened to be worth looking at. Everything
+else ahead of us is gameplay.
 
 **What the greedy-meshing attempt taught us.** The ordering note above said AO
 should land before greedy meshing, so the merge criterion could be written
@@ -99,3 +110,19 @@ merging are the ones a shading gradient disqualifies.
 
 Worth remembering before adopting another technique whose headline figure comes
 from engines with flat-shaded faces.
+
+## Follow-ups the engine work deliberately left alone
+
+**The forts do not scale with the map.** `TerrainGen` places them at
+`FortEdgeOffset = 8` from the x edges with `FortRadius = 5`, in absolute blocks.
+On a 512-wide map that is two 10-block specks 496 apart, tucked into opposite
+edges — the same footprint that read as a battlefield at 256 reads as nothing at
+all at 512. Stitching deliberately did not touch it: how big a fort should be,
+and how far apart, is a question about how the game plays, not about how a map is
+stored. The same goes for the rest of `TerrainGen`'s absolute-sized features.
+
+**Nothing about spawning is map-aware.** `SpawnPosition` in `Sandbox.cpp` is a
+hard-coded point that has to be re-picked by hand whenever the map changes,
+because a wrong one puts the camera inside terrain and renders a black screen
+that looks like a rendering bug. A spawn that finds open ground for itself
+belongs with the camera aim API.

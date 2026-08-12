@@ -1,6 +1,6 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-08-10_
+_Last updated: 2026-08-11_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
@@ -249,6 +249,28 @@ A break on open ground, 256×64×256 battlefield, debug build:
 Optimised build: 0.93 ms of work per click. Still open at load: `SkyLight::PropagateAll`
 floods the whole world once and takes ~5.2 s in a debug build (254 ms optimised).
 
+**Load cost at 512×64×512, measured 2026-08-11** (debug build, RTX 3060 Ti). This
+replaces the earlier extrapolation from the 256 map:
+
+| | observed |
+|---|---|
+| first frame (HUD up, terrain partly meshed) | within ~5 s |
+| meshing still running | at 12 s — 207 of 2408 chunk meshes built |
+| meshing complete, chunk count stable | by 40 s — 2408 meshes, `PENDING 0` |
+| steady-state frame rate once meshed | 140–145 FPS, 933 of 2408 chunks drawn |
+
+The map is 4096 chunks, of which **2408 hold geometry**; the rest are pure air and
+never get a mesh, which is why the HUD's total reads 2408 rather than 4096.
+
+Sampling mid-load is noisy — separate launches showed 222 meshes at 5 s and 181 at
+25 s — so treat the 12 s and 40 s rows as a bracket, not a curve. The bracket is
+the point: **a 512 map takes tens of seconds of wall clock before it is fully
+meshed in a debug build**, against a couple of seconds at 256. Play is possible
+throughout, since the budgeted mesher keeps the frame rate up and meshes fill in
+around you, but the world visibly builds itself for the first half minute. This is
+P1's remaining half — the budget stopped the stall, it did not make the work
+smaller — and the fix is threading it.
+
 Full write-up — how each cause was found, the numbers, the three optimisations that
 turned out slower, and the debug-vs-release multiplier that shapes which fixes are
 worth making:
@@ -267,3 +289,4 @@ worth making:
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
+| P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Open — cost scales with map area, and 512 maps made it visible; fix is threading |

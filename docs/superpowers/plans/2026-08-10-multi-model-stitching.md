@@ -1804,7 +1804,7 @@ Four stitched models. The Sandbox loads it in place of the 256 map."
 - Modify: `docs/engine-roadmap.md:64-65` and `:87`
 - Modify: `docs/performance.md` (summary table and the load-time note at line ~250)
 
-- [ ] **Step 1: Mark the roadmap item done**
+- [x] **Step 1: Mark the roadmap item done**
 
 In `docs/engine-roadmap.md`, change item 6 under "Format / smaller gaps" from:
 
@@ -1817,15 +1817,15 @@ to a `~~struck-through~~` **DONE 2026-08-10** entry in the style of the items ar
 
 Then add a line stating that the finish-the-engine arc is complete and the remaining engine gap is the **camera aim API** (item 8), since that becomes the next item.
 
-- [ ] **Step 2: Record the measured load cost**
+- [x] **Step 2: Record the measured load cost**
 
 In `docs/performance.md`, replace the extrapolated sentence at the end of "Where an edit stands now" with the **measured** figures from Task 8 Step 5 for the 512 map, and add a line to the summary table for the load-time problem: `SkyLight::PropagateAll` plus whole-world meshing at load, priority now high, status open, fix is threading. Update `_Last updated:_`.
 
-- [ ] **Step 3: Note the fort-scale follow-up**
+- [x] **Step 3: Note the fort-scale follow-up**
 
 Add to `docs/engine-roadmap.md`, under a gameplay or follow-up heading: on a 512 map the forts stay `FortEdgeOffset = 8` from the edge at `FortRadius = 5`, so they are two small specks 496 apart. Tuning them is gameplay work, deliberately not done with stitching.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/engine-roadmap.md docs/performance.md
