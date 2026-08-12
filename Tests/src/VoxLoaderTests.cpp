@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -26,57 +28,77 @@ namespace
 
     struct Vox { std::uint8_t x, y, z, colorIndex; };
 
-    //Builds a minimal single-model .vox byte buffer with the given voxels and a
-    //palette whose entry for colour index i is (i, i, i) scaled to bytes.
-    std::vector<std::uint8_t> MakeVoxBytes(
-        std::int32_t sx, std::int32_t sy, std::int32_t sz,
-        const std::vector<Vox>& voxels)
+    //One model's SIZE/XYZI pair, in vox axes.
+    struct ModelSpec
     {
-        std::vector<std::uint8_t> size;
-        PushTag(size, "SIZE");
-        PushInt(size, 12);
-        PushInt(size, 0);
-        PushInt(size, sx);
-        PushInt(size, sy);
-        PushInt(size, sz);
+        std::int32_t sx, sy, sz;
+        std::vector<Vox> Voxels;
+    };
 
-        std::vector<std::uint8_t> xyzi;
-        PushTag(xyzi, "XYZI");
-        PushInt(xyzi, 4 + 4 * static_cast<std::int32_t>(voxels.size()));
-        PushInt(xyzi, 0);
-        PushInt(xyzi, static_cast<std::int32_t>(voxels.size()));
-        for (const Vox& v : voxels)
+    //Appends a SIZE/XYZI pair. A file's Nth pair is model id N, which is what
+    //the scene graph's shape nodes refer to.
+    void PushModel(std::vector<std::uint8_t>& out, const ModelSpec& m)
+    {
+        PushTag(out, "SIZE");
+        PushInt(out, 12);
+        PushInt(out, 0);
+        PushInt(out, m.sx);
+        PushInt(out, m.sy);
+        PushInt(out, m.sz);
+
+        PushTag(out, "XYZI");
+        PushInt(out, 4 + 4 * static_cast<std::int32_t>(m.Voxels.size()));
+        PushInt(out, 0);
+        PushInt(out, static_cast<std::int32_t>(m.Voxels.size()));
+        for (const Vox& v : m.Voxels)
         {
-            xyzi.push_back(v.x);
-            xyzi.push_back(v.y);
-            xyzi.push_back(v.z);
-            xyzi.push_back(v.colorIndex);
+            out.push_back(v.x);
+            out.push_back(v.y);
+            out.push_back(v.z);
+            out.push_back(v.colorIndex);
         }
+    }
 
-        std::vector<std::uint8_t> rgba;
-        PushTag(rgba, "RGBA");
-        PushInt(rgba, 256 * 4);
-        PushInt(rgba, 0);
+    //Appends the palette these tests assert against: RGBA entry j is colour
+    //index j + 1, coloured (j+1, j+1, j+1).
+    void PushPalette(std::vector<std::uint8_t>& out)
+    {
+        PushTag(out, "RGBA");
+        PushInt(out, 256 * 4);
+        PushInt(out, 0);
         for (int j = 0; j < 256; ++j)
         {
-            // RGBA entry j is colour index j + 1.
             const std::uint8_t c = static_cast<std::uint8_t>(j + 1);
-            rgba.push_back(c);   // r
-            rgba.push_back(c);   // g
-            rgba.push_back(c);   // b
-            rgba.push_back(255); // a
+            out.push_back(c);   // r
+            out.push_back(c);   // g
+            out.push_back(c);   // b
+            out.push_back(255); // a
         }
+    }
 
+    //Wraps MAIN around already-encoded child chunks.
+    std::vector<std::uint8_t> MakeVoxFile(const std::vector<std::uint8_t>& children)
+    {
         std::vector<std::uint8_t> bytes;
         PushTag(bytes, "VOX ");
         PushInt(bytes, 150);
         PushTag(bytes, "MAIN");
         PushInt(bytes, 0);
-        PushInt(bytes, static_cast<std::int32_t>(size.size() + xyzi.size() + rgba.size()));
-        bytes.insert(bytes.end(), size.begin(), size.end());
-        bytes.insert(bytes.end(), xyzi.begin(), xyzi.end());
-        bytes.insert(bytes.end(), rgba.begin(), rgba.end());
+        PushInt(bytes, static_cast<std::int32_t>(children.size()));
+        bytes.insert(bytes.end(), children.begin(), children.end());
         return bytes;
+    }
+
+    //Builds a minimal single-model .vox byte buffer. Kept for the cases written
+    //before files could hold more than one model; the bytes are unchanged.
+    std::vector<std::uint8_t> MakeVoxBytes(
+        std::int32_t sx, std::int32_t sy, std::int32_t sz,
+        const std::vector<Vox>& voxels)
+    {
+        std::vector<std::uint8_t> children;
+        PushModel(children, ModelSpec{ sx, sy, sz, voxels });
+        PushPalette(children);
+        return MakeVoxFile(children);
     }
 }
 
@@ -165,4 +187,61 @@ TEST_CASE("The starter map parses into a single chunk")
     const VoxModel model = VoxLoader::LoadFile(path.string());
     CHECK(model.Size == glm::ivec3(16, 6, 16));
     CHECK(model.At(0, 0, 0) == 1); // floor corner is the green index
+}
+
+TEST_CASE("A file with two models sized to the larger of them")
+{
+    // The larger model comes FIRST, so the world cannot be taken from the last
+    // SIZE chunk. Order matters here: with the models the other way round, code
+    // that simply keeps the last SIZE would agree with the right answer by luck
+    // and this case could not fail.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 3, 3, 3, 2 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(4, 4, 4));
+}
+
+TEST_CASE("A model is not clipped by a smaller model declared after it")
+{
+    // The first model's far corner lies outside the second model's bounds, so
+    // code that sizes the world from the last SIZE chunk drops that voxel
+    // entirely rather than reporting it.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 3, 3, 3, 2 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.At(3, 3, 3) == 2);
+    CHECK(model.At(0, 0, 0) == 1);
+}
+
+TEST_CASE("Both models' voxels survive the flatten")
+{
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 3, 2, 1, 2 } } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.At(0, 0, 0) == 1);
+    CHECK(model.At(3, 1, 2) == 2); // vox (3,2,1) -> cubit (3,1,2)
+}
+
+TEST_CASE("A later model overwrites an earlier one in the same cell")
+{
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 1, 1, 1, 4 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 1, 1, 1, 9 } } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.At(1, 1, 1) == 9);
 }

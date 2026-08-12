@@ -39,7 +39,7 @@ Today `Parse` keeps one `voxSize` and appends every `XYZI` into one `rawVoxels` 
 - Consumes: nothing.
 - Produces: in `VoxLoader.cpp`'s anonymous namespace — `struct RawVoxel { std::uint8_t x, y, z, colorIndex; }` and `struct RawModel { glm::ivec3 VoxSize; std::vector<RawVoxel> Voxels; }`. In the tests — `struct Vox`, `struct ModelSpec`, `PushModel`, `PushPalette`, `MakeVoxFile`, and `MakeVoxBytes` with its existing signature preserved.
 
-- [ ] **Step 1: Rework the test helpers so a file can hold several models**
+- [x] **Step 1: Rework the test helpers so a file can hold several models**
 
 Replace lines 27-81 of `Tests/src/VoxLoaderTests.cpp` (the `struct Vox` and `MakeVoxBytes` block) with:
 
@@ -122,12 +122,12 @@ Replace lines 27-81 of `Tests/src/VoxLoaderTests.cpp` (the `struct Vox` and `Mak
 
 Add `#include <string>` and `#include <utility>` to the file's include block.
 
-- [ ] **Step 2: Build and confirm the existing suite still passes**
+- [x] **Step 2: Build and confirm the existing suite still passes**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS. The helper rework emits the same bytes in the same order, so this is a refactor with no behaviour change. If anything fails, the helpers are wrong — fix before continuing.
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 Append to `Tests/src/VoxLoaderTests.cpp`:
 
@@ -190,7 +190,7 @@ TEST_CASE("A later model overwrites an earlier one in the same cell")
 }
 ```
 
-- [ ] **Step 4: Run to verify it fails**
+- [x] **Step 4: Run to verify it fails**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A file with two models sized to the larger of them"`
 Expected: FAIL — reports `(2,2,2)`, taken from the last `SIZE` chunk, instead of `(4,4,4)`.
@@ -200,7 +200,7 @@ Expected: FAIL — the voxel at `(3,3,3)` is outside the wrongly-sized world and
 
 The other three cases (`Both models' voxels survive the flatten`, `A later model overwrites an earlier one in the same cell`, and the size case's sibling) **pass before the fix and that is expected** — they use models of equal size, where last-`SIZE`-wins coincides with the right answer. They are regression guards, not red tests. The two cases above are the ones that must be red; if either passes, stop and report BLOCKED, because the tests are then not exercising the bug.
 
-- [ ] **Step 5: Replace the accumulation with a model list**
+- [x] **Step 5: Replace the accumulation with a model list**
 
 In `Cubit/src/Voxel/VoxLoader.cpp`, replace lines 53-58 (the `voxSize`/`haveSize`/`haveVoxels`/`RawVoxel`/`rawVoxels` declarations) with:
 
@@ -220,7 +220,7 @@ In `Cubit/src/Voxel/VoxLoader.cpp`, replace lines 53-58 (the `voxSize`/`haveSize
 
 Note `RawVoxel` moves above `RawModel` because `RawModel` names it.
 
-- [ ] **Step 6: Make SIZE open a model and XYZI fill it**
+- [x] **Step 6: Make SIZE open a model and XYZI fill it**
 
 Replace the `SIZE` branch (lines 77-88) with:
 
@@ -268,7 +268,7 @@ Replace the `XYZI` branch (lines 89-105) with:
         }
 ```
 
-- [ ] **Step 7: Flatten the model list**
+- [x] **Step 7: Flatten the model list**
 
 Replace lines 129-158 (from `if (!haveSize || !haveVoxels)` to the `return model;`) with:
 
@@ -313,12 +313,12 @@ Replace lines 129-158 (from `if (!haveSize || !haveVoxels)` to the `return model
     return model;
 ```
 
-- [ ] **Step 8: Build and run the whole suite**
+- [x] **Step 8: Build and run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS, including the three new cases and every existing loader/writer/world-save case.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxLoader.cpp Tests/src/VoxLoaderTests.cpp

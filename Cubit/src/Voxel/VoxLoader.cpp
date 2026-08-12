@@ -50,12 +50,17 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
     ReadInt(bytes, offset); // MAIN content size (0)
     ReadInt(bytes, offset); // MAIN children size
 
-    glm::ivec3 voxSize{ 0 };
-    bool haveSize = false;
-    bool haveVoxels = false;
-
     struct RawVoxel { std::uint8_t x, y, z, colorIndex; };
-    std::vector<RawVoxel> rawVoxels;
+
+    //One SIZE/XYZI pair, still in vox axes. A model's index in this vector is
+    //the id the scene graph's shape nodes reference.
+    struct RawModel
+    {
+        glm::ivec3 VoxSize{ 0 };
+        std::vector<RawVoxel> Voxels;
+    };
+
+    std::vector<RawModel> models;
 
     Palette palette = DefaultPalette();
 
@@ -77,6 +82,7 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
         if (std::strcmp(id, "SIZE") == 0)
         {
             std::size_t p = contentStart;
+            glm::ivec3 voxSize{ 0 };
             voxSize.x = ReadInt(bytes, p);
             voxSize.y = ReadInt(bytes, p);
             voxSize.z = ReadInt(bytes, p);
@@ -84,24 +90,30 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
                 voxSize.x > MaxDimension || voxSize.y > MaxDimension ||
                 voxSize.z > MaxDimension)
                 throw std::runtime_error("vox: model dimension out of range");
-            haveSize = true;
+
+            // SIZE opens a model; the XYZI that follows fills it. The pair is
+            // always adjacent and always in this order.
+            models.push_back(RawModel{ voxSize, {} });
         }
         else if (std::strcmp(id, "XYZI") == 0)
         {
+            if (models.empty())
+                throw std::runtime_error("vox: voxel data before any SIZE chunk");
+
             std::size_t p = contentStart;
             const std::int32_t count = ReadInt(bytes, p);
             if (count < 0 ||
                 p + static_cast<std::size_t>(count) * 4 > bytes.size())
                 throw std::runtime_error("vox: truncated voxel data");
 
-            rawVoxels.reserve(static_cast<std::size_t>(count));
+            std::vector<RawVoxel>& voxels = models.back().Voxels;
+            voxels.reserve(static_cast<std::size_t>(count));
             for (std::int32_t i = 0; i < count; ++i)
             {
-                RawVoxel v{ bytes[p + 0], bytes[p + 1], bytes[p + 2], bytes[p + 3] };
+                voxels.push_back(RawVoxel{
+                    bytes[p + 0], bytes[p + 1], bytes[p + 2], bytes[p + 3] });
                 p += 4;
-                rawVoxels.push_back(v);
             }
-            haveVoxels = true;
         }
         else if (std::strcmp(id, "RGBA") == 0)
         {
@@ -126,34 +138,43 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
             static_cast<std::size_t>(childrenSize);
     }
 
-    if (!haveSize || !haveVoxels)
+    if (models.empty())
         throw std::runtime_error("vox: missing SIZE or XYZI chunk");
 
-    // Convert to Cubit's Y-up space: cubit(x, y, z) = vox(x, z, y).
+    // With no scene graph read yet, every model sits at the origin, so the
+    // world is the largest of them on each axis. Sizes convert to Cubit's Y-up
+    // space here: cubit(x, y, z) = vox(x, z, y).
+    glm::ivec3 worldSize{ 0 };
+    for (const RawModel& raw : models)
+        worldSize = glm::max(worldSize,
+            glm::ivec3(raw.VoxSize.x, raw.VoxSize.z, raw.VoxSize.y));
+
     VoxModel model;
-    model.Size = glm::ivec3(voxSize.x, voxSize.z, voxSize.y);
+    model.Size = worldSize;
     model.Colors = palette;
     model.Voxels.assign(
         static_cast<std::size_t>(model.Size.x) *
         static_cast<std::size_t>(model.Size.y) *
         static_cast<std::size_t>(model.Size.z), 0);
 
-    for (const RawVoxel& v : rawVoxels)
-    {
-        const int cx = v.x;
-        const int cy = v.z;
-        const int cz = v.y;
-        if (cx < 0 || cx >= model.Size.x ||
-            cy < 0 || cy >= model.Size.y ||
-            cz < 0 || cz >= model.Size.z)
-            continue; // defensively ignore voxels outside the declared size
+    // Later models win where they overlap, matching the order they are drawn.
+    for (const RawModel& raw : models)
+        for (const RawVoxel& v : raw.Voxels)
+        {
+            const int cx = v.x;
+            const int cy = v.z;
+            const int cz = v.y;
+            if (cx < 0 || cx >= model.Size.x ||
+                cy < 0 || cy >= model.Size.y ||
+                cz < 0 || cz >= model.Size.z)
+                continue; // defensively ignore voxels outside the declared size
 
-        const std::size_t index = static_cast<std::size_t>(cx) +
-            static_cast<std::size_t>(model.Size.x) *
-            (static_cast<std::size_t>(cy) +
-             static_cast<std::size_t>(model.Size.y) * static_cast<std::size_t>(cz));
-        model.Voxels[index] = v.colorIndex;
-    }
+            const std::size_t index = static_cast<std::size_t>(cx) +
+                static_cast<std::size_t>(model.Size.x) *
+                (static_cast<std::size_t>(cy) +
+                 static_cast<std::size_t>(model.Size.y) * static_cast<std::size_t>(cz));
+            model.Voxels[index] = v.colorIndex;
+        }
 
     return model;
 }
