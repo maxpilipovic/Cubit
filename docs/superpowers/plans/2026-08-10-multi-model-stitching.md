@@ -1110,7 +1110,7 @@ failed multi-gigabyte allocation."
 - Consumes: `VoxLoader::Parse` handling multi-model files (Tasks 1–4).
 - Produces: no public API change — `VoxWriter::Write` keeps its signature. Internally: `constexpr int TileSize`, `struct Placement { glm::ivec3 Origin; glm::ivec3 Size; }`, `PushString`, `PushDict`, `PushChunk`, `ExtractTile`, `WriteSingleModel`, `WriteTiled`, `BuildSceneGraph`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `Tests/src/VoxWriterTests.cpp`:
 
@@ -1187,12 +1187,12 @@ TEST_CASE("A model that fits in one tile is written exactly as before")
 
 Add `#include <cstring>` to the file's include block.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A model wider than 256 is written as several tiles"`
 Expected: FAIL — `VoxWriter::Write` throws `"vox: world is too large for a single .vox model (x = 300)"`.
 
-- [ ] **Step 3: Extract today's body as the single-model path**
+- [x] **Step 3: Extract today's body as the single-model path**
 
 In `Cubit/src/Voxel/VoxWriter.cpp`, rename `std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)` (line 53) to a free function in the anonymous namespace:
 
@@ -1205,7 +1205,7 @@ In `Cubit/src/Voxel/VoxWriter.cpp`, rename `std::vector<std::uint8_t> VoxWriter:
 
 Keep its body unchanged, including the `RequireWritableSize(model.Size)` call at the top — inside this path the check is now a genuine invariant rather than a limit on the world.
 
-- [ ] **Step 4: Add the tiling helpers**
+- [x] **Step 4: Add the tiling helpers**
 
 Add to the anonymous namespace, after `RequireWritableSize`:
 
@@ -1358,7 +1358,7 @@ Add to the anonymous namespace, after `RequireWritableSize`:
 
 Add `#include <algorithm>`, `#include <utility>` and `#include <vector>` to the include block if not already present.
 
-- [ ] **Step 5: Add the tiled path and the branch**
+- [x] **Step 5: Add the tiled path and the branch**
 
 Add after `BuildSceneGraph`, still in the anonymous namespace, a function that reuses the existing `SIZE`/`XYZI`/`RGBA` encoding. To avoid duplicating that encoding, first extract it: in `WriteSingleModel`, the three local buffers `size`, `xyzi` and `rgba` are built and then concatenated. Move the first two into helpers:
 
@@ -1534,12 +1534,12 @@ std::vector<std::uint8_t> VoxWriter::Write(const VoxModel& model)
 }
 ```
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS, including the four new cases. The pre-existing `VoxWriter round-trips…` cases passing unchanged is what proves the single-model bytes did not move.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxWriter.cpp Tests/src/VoxWriterTests.cpp
