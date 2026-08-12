@@ -1565,11 +1565,11 @@ old path and produces the same bytes it always did."
 - Consumes: `WriteTiled` from Task 5.
 - Produces: `ToVoxModel` keeps its signature and stops throwing on size.
 
-- [ ] **Step 1: Delete the two tests that assert the old limit**
+- [x] **Step 1: Delete the two tests that assert the old limit**
 
 Remove `TEST_CASE("A world too wide for a single .vox model is rejected")` (`Tests/src/WorldSaveTests.cpp:142-149`) and `TEST_CASE("A world too deep for a single .vox model is rejected")` (`:169-180`) in full. Keep `TEST_CASE("A world exactly 256 blocks on an axis is accepted")` — it still passes and still pins the single-model boundary.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `Tests/src/WorldSaveTests.cpp`:
 
@@ -1599,16 +1599,16 @@ TEST_CASE("A world past 256 blocks survives a round trip through .vox bytes")
 
 Confirm `WorldSaveTests.cpp` includes `"Cubit/Voxel/VoxLoader.h"`; add it if not.
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A world past 256 blocks survives a round trip through .vox bytes"`
 Expected: FAIL — `ToVoxModel` throws `"vox: world is too large for a single .vox model (x = 272)"`.
 
-- [ ] **Step 4: Drop the check from `ToVoxModel`**
+- [x] **Step 4: Drop the check from `ToVoxModel`**
 
 In `Cubit/src/Voxel/VoxWriter.cpp`, delete the `RequireWritableSize(model.Size);` line from `ToVoxModel`. The size limit belongs to a single written model, which is now `WriteSingleModel`'s business.
 
-- [ ] **Step 5: Correct the header comment**
+- [x] **Step 5: Correct the header comment**
 
 Replace lines 32-35 of `Cubit/include/Cubit/Voxel/VoxWriter.h`:
 
@@ -1626,12 +1626,12 @@ with:
 //placed models; that is the writer's business, not this function's.
 ```
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxWriter.cpp Cubit/include/Cubit/Voxel/VoxWriter.h Tests/src/WorldSaveTests.cpp

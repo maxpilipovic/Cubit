@@ -383,7 +383,6 @@ VoxModel ToVoxModel(const World& world)
     VoxModel model;
     model.Size = glm::ivec3(
         world.GetWidth(), world.GetHeight(), world.GetDepth());
-    RequireWritableSize(model.Size);
     model.Colors = world.GetPalette();
     model.Voxels.assign(
         static_cast<std::size_t>(model.Size.x) *

@@ -139,15 +139,6 @@ TEST_CASE("A world survives a round trip through .vox bytes")
     CHECK(FirstVoxelMismatch(model, restored) == glm::ivec3(-1));
 }
 
-TEST_CASE("A world too wide for a single .vox model is rejected")
-{
-    // 17 chunks on x is 272 blocks. Write stores a coordinate in one byte, so
-    // without this guard the file would wrap round and load back as garbage.
-    const World world(17, 1, 1);
-
-    CHECK_THROWS_AS(ToVoxModel(world), std::runtime_error);
-}
-
 TEST_CASE("A world exactly 256 blocks on an axis is accepted")
 {
     // 256 is the largest legal size, not the first illegal one: coordinates run
@@ -164,18 +155,6 @@ TEST_CASE("A world exactly 256 blocks on an axis is accepted")
 
     CHECK(restored.Size.x == 256);
     CHECK(restored.At(255, 15, 15) == 3);
-}
-
-TEST_CASE("A world too deep for a single .vox model is rejected")
-{
-    // 17 chunks on z is 272 blocks. The guard tests above only vary x, so this
-    // pins that every axis is checked, not just x three times over, and that
-    // the failing axis is named correctly in the message.
-    const World world(1, 1, 17);
-
-    CHECK_THROWS_WITH_AS(ToVoxModel(world),
-        "vox: world is too large for a single .vox model (z = 272)",
-        std::runtime_error);
 }
 
 TEST_CASE("WriteFile round-trips a world through disk")
@@ -224,4 +203,26 @@ TEST_CASE("WriteFile throws when the path cannot be opened")
     CHECK_THROWS_AS(
         VoxWriter::WriteFile(ToVoxModel(world), path.string()),
         std::runtime_error);
+}
+
+TEST_CASE("A world past 256 blocks survives a round trip through .vox bytes")
+{
+    // 17 chunks on x and z is 272 blocks: over the single-model limit, so this
+    // goes out as tiles, and the far edge is a 16-wide remainder tile — which
+    // is where a halving mistake in the placement would show up.
+    World world(17, 1, 17);
+    world.SetBlock(0, 0, 0, 1);
+    world.SetBlock(271, 5, 271, 2);
+    world.SetBlock(255, 0, 256, 3);
+    world.SetBlock(256, 0, 255, 4);
+
+    const World back = BuildWorld(VoxLoader::Parse(VoxWriter::Write(ToVoxModel(world))));
+
+    CHECK(back.GetWidth() == world.GetWidth());
+    CHECK(back.GetDepth() == world.GetDepth());
+    CHECK(back.GetBlock(0, 0, 0) == 1);
+    CHECK(back.GetBlock(271, 5, 271) == 2);
+    CHECK(back.GetBlock(255, 0, 256) == 3);
+    CHECK(back.GetBlock(256, 0, 255) == 4);
+    CHECK(back.GetBlock(100, 0, 100) == 0);
 }
