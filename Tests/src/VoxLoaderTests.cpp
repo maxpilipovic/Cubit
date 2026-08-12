@@ -366,3 +366,91 @@ TEST_CASE("A scene graph parses without disturbing the chunk walk")
     // chunks were skipped by the right number of bytes.
     CHECK(model.Colors[3].x == doctest::Approx(3.0f / 255.0f));
 }
+
+TEST_CASE("A translation places a model by its centre, not its corner")
+{
+    // A 4x4x4 model whose centre is at vox (10, 10, 10) has its minimum corner
+    // at 10 - 4/2 = 8 on every axis.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 4, 4, 4, { { 0, 0, 0, 5 } } });
+    PushSceneGraph(children, { GraphPlacement{ glm::ivec3(10, 10, 10), "" } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    // One model, so normalisation puts its corner back at the origin.
+    CHECK(model.Size == glm::ivec3(4, 4, 4));
+    CHECK(model.At(0, 0, 0) == 5);
+}
+
+TEST_CASE("An odd-sized model halves the same way on both sides")
+{
+    // Size 3 halves to 1, so a centre at 5 puts the corner at 4. Two models
+    // pin the relative offset, which is what an off-by-one would move.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 3, 3, 3, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 3, 3, 3, { { 0, 0, 0, 2 } } });
+    PushPalette(children);
+    PushSceneGraph(children, {
+        GraphPlacement{ glm::ivec3(1, 1, 1), "" },   // corner (0,0,0)
+        GraphPlacement{ glm::ivec3(4, 1, 1), "" } }); // corner (3,0,0)
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(6, 3, 3));
+    CHECK(model.At(0, 0, 0) == 1);
+    CHECK(model.At(3, 0, 0) == 2);
+}
+
+TEST_CASE("Two models stitch into one world side by side")
+{
+    // Two 2-wide models, the second offset 2 along vox x. Centres are at 1 and 3.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 1, 0, 0, 2 } } });
+    PushSceneGraph(children, {
+        GraphPlacement{ glm::ivec3(1, 1, 1), "" },
+        GraphPlacement{ glm::ivec3(3, 1, 1), "" } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(4, 2, 2));
+    CHECK(model.At(0, 0, 0) == 1);
+    CHECK(model.At(3, 0, 0) == 2); // second model's local x=1, placed at x=2
+}
+
+TEST_CASE("A translation in vox axes lands on the swapped Cubit axis")
+{
+    // Offset along vox y must move the model along Cubit z, not Cubit y.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 2 } } });
+    PushSceneGraph(children, {
+        GraphPlacement{ glm::ivec3(1, 1, 1), "" },
+        GraphPlacement{ glm::ivec3(1, 3, 1), "" } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(2, 2, 4));
+    CHECK(model.At(0, 0, 0) == 1);
+    CHECK(model.At(0, 0, 2) == 2);
+}
+
+TEST_CASE("Negative translations normalise so the world corner is the origin")
+{
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 1, 1, 1, 2 } } });
+    PushSceneGraph(children, {
+        GraphPlacement{ glm::ivec3(-9, 1, 1), "" },  // corner (-10, 0, 0)
+        GraphPlacement{ glm::ivec3(-7, 1, 1), "" } }); // corner (-8, 0, 0)
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+
+    CHECK(model.Size == glm::ivec3(4, 2, 2));
+    CHECK(model.At(0, 0, 0) == 1);
+    CHECK(model.At(3, 1, 1) == 2);
+}

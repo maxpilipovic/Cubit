@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -33,6 +34,16 @@ namespace
         return offset + 4 <= bytes.size() &&
             std::memcmp(bytes.data() + offset, tag, 4) == 0;
     }
+
+    struct RawVoxel { std::uint8_t x, y, z, colorIndex; };
+
+    //One SIZE/XYZI pair, still in vox axes. A model's index in this vector is
+    //the id the scene graph's shape nodes reference.
+    struct RawModel
+    {
+        glm::ivec3 VoxSize{ 0 };
+        std::vector<RawVoxel> Voxels;
+    };
 
     //Reads a length-prefixed .vox STRING and advances the offset. The bytes are
     //not null-terminated, so the length is the only thing that ends the string.
@@ -91,6 +102,74 @@ namespace
         std::vector<int> Children;    // child node ids; transform nodes have one
         std::vector<int> ModelIds;    // shape nodes only
     };
+
+    //The scene graph's entry point. MagicaVoxel always writes the root
+    //transform as node 0.
+    constexpr int RootNodeId = 0;
+
+    //Nothing in the format stops a hand-made file's graph containing a cycle,
+    //which would recurse until the stack ran out. A depth cap turns a crash
+    //into an error message.
+    constexpr int MaxSceneDepth = 64;
+
+    //One model with the origin the graph placed it at, in vox axes and before
+    //the world is normalised.
+    struct PlacedModel
+    {
+        int ModelId = 0;
+        glm::ivec3 VoxOrigin{ 0 };
+    };
+
+    //Walks the graph from a node, accumulating translations, and appends every
+    //model it reaches with the origin it ends up at.
+    void ResolvePlacement(
+        const std::map<int, SceneNode>& nodes,
+        const std::vector<RawModel>& models,
+        int nodeId,
+        glm::ivec3 translation,
+        std::vector<PlacedModel>& out,
+        int depth)
+    {
+        if (depth > MaxSceneDepth)
+            throw std::runtime_error("vox: scene graph is too deeply nested");
+
+        const auto it = nodes.find(nodeId);
+        if (it == nodes.end())
+            throw std::runtime_error("vox: scene graph references a missing node");
+
+        const SceneNode& node = it->second;
+
+        switch (node.Type)
+        {
+        case SceneNode::Kind::Transform:
+            translation += node.Translation;
+            // A transform holds exactly one child, so the group's loop below
+            // walks it correctly and there is no second traversal to write.
+            [[fallthrough]];
+
+        case SceneNode::Kind::Group:
+            for (const int child : node.Children)
+                ResolvePlacement(nodes, models, child, translation, out, depth + 1);
+            break;
+
+        case SceneNode::Kind::Shape:
+            for (const int modelId : node.ModelIds)
+            {
+                if (modelId < 0 ||
+                    static_cast<std::size_t>(modelId) >= models.size())
+                    throw std::runtime_error(
+                        "vox: shape node references a missing model");
+
+                //_t places the model's centre, so its minimum corner is half a
+                //model back. Sizes are positive, so halving needs no floor
+                //correction, and the writer halves identically — which is what
+                //makes writing and reading an exact inverse.
+                const glm::ivec3 half = models[modelId].VoxSize / 2;
+                out.push_back(PlacedModel{ modelId, translation - half });
+            }
+            break;
+        }
+    }
 }
 
 VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
@@ -110,16 +189,6 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
     offset += 4;
     ReadInt(bytes, offset); // MAIN content size (0)
     ReadInt(bytes, offset); // MAIN children size
-
-    struct RawVoxel { std::uint8_t x, y, z, colorIndex; };
-
-    //One SIZE/XYZI pair, still in vox axes. A model's index in this vector is
-    //the id the scene graph's shape nodes reference.
-    struct RawModel
-    {
-        glm::ivec3 VoxSize{ 0 };
-        std::vector<RawVoxel> Voxels;
-    };
 
     std::vector<RawModel> models;
     std::map<int, SceneNode> nodes;
@@ -268,34 +337,63 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
             static_cast<std::size_t>(childrenSize);
     }
 
-    (void)nodes;
-
     if (models.empty())
         throw std::runtime_error("vox: missing SIZE or XYZI chunk");
 
-    // With no scene graph read yet, every model sits at the origin, so the
-    // world is the largest of them on each axis. Sizes convert to Cubit's Y-up
-    // space here: cubit(x, y, z) = vox(x, z, y).
-    glm::ivec3 worldSize{ 0 };
-    for (const RawModel& raw : models)
-        worldSize = glm::max(worldSize,
-            glm::ivec3(raw.VoxSize.x, raw.VoxSize.z, raw.VoxSize.y));
+    std::vector<PlacedModel> placed;
+    if (nodes.empty())
+    {
+        // A file with no scene graph — which is what Cubit's own writer emits
+        // for a single model, and what MagicaVoxel wrote before the graph
+        // existed — puts every model at the origin.
+        for (std::size_t i = 0; i < models.size(); ++i)
+            placed.push_back(PlacedModel{ static_cast<int>(i), glm::ivec3(0) });
+    }
+    else
+    {
+        ResolvePlacement(nodes, models, RootNodeId, glm::ivec3(0), placed, 0);
+    }
+
+    if (placed.empty())
+        throw std::runtime_error("vox: scene graph places no models");
+
+    //The world is the union of where the models landed, in Cubit axes, so it is
+    //exactly big enough to hold every one of them wherever the file put it.
+    glm::ivec3 unionMin(std::numeric_limits<int>::max());
+    glm::ivec3 unionMax(std::numeric_limits<int>::min());
+
+    for (const PlacedModel& p : placed)
+    {
+        const glm::ivec3 voxSize = models[p.ModelId].VoxSize;
+        const glm::ivec3 origin(p.VoxOrigin.x, p.VoxOrigin.z, p.VoxOrigin.y);
+        const glm::ivec3 size(voxSize.x, voxSize.z, voxSize.y);
+
+        unionMin = glm::min(unionMin, origin);
+        unionMax = glm::max(unionMax, origin + size);
+    }
 
     VoxModel model;
-    model.Size = worldSize;
+    model.Size = unionMax - unionMin;
     model.Colors = palette;
     model.Voxels.assign(
         static_cast<std::size_t>(model.Size.x) *
         static_cast<std::size_t>(model.Size.y) *
         static_cast<std::size_t>(model.Size.z), 0);
 
-    // Later models win where they overlap, matching the order they are drawn.
-    for (const RawModel& raw : models)
+    // Later placements win where they overlap, matching the order they are
+    // drawn. Files Cubit writes never overlap; the rule exists so a hand-made
+    // one has a defined answer.
+    for (const PlacedModel& p : placed)
+    {
+        const RawModel& raw = models[p.ModelId];
+        const glm::ivec3 origin =
+            glm::ivec3(p.VoxOrigin.x, p.VoxOrigin.z, p.VoxOrigin.y) - unionMin;
+
         for (const RawVoxel& v : raw.Voxels)
         {
-            const int cx = v.x;
-            const int cy = v.z;
-            const int cz = v.y;
+            const int cx = origin.x + v.x;
+            const int cy = origin.y + v.z;
+            const int cz = origin.z + v.y;
             if (cx < 0 || cx >= model.Size.x ||
                 cy < 0 || cy >= model.Size.y ||
                 cz < 0 || cz >= model.Size.z)
@@ -307,6 +405,7 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
                  static_cast<std::size_t>(model.Size.y) * static_cast<std::size_t>(cz));
             model.Voxels[index] = v.colorIndex;
         }
+    }
 
     return model;
 }

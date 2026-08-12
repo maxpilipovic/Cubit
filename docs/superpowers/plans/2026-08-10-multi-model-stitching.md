@@ -660,7 +660,7 @@ Turn the node table into an origin per model, take the union, and normalise. Thi
 - Consumes: `SceneNode`, `nodes`, `RawModel`, `models` from Task 2; `GraphPlacement`, `PushSceneGraph` from the tests.
 - Produces: `struct PlacedModel { int ModelId; glm::ivec3 VoxOrigin; }` and `ResolvePlacement(const std::map<int, SceneNode>&, const std::vector<RawModel>&, int nodeId, glm::ivec3 translation, std::vector<PlacedModel>& out, int depth)`, plus `constexpr int RootNodeId = 0;` and `constexpr int MaxSceneDepth = 64;`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `Tests/src/VoxLoaderTests.cpp`:
 
@@ -754,12 +754,17 @@ TEST_CASE("Negative translations normalise so the world corner is the origin")
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="Two models stitch into one world side by side"`
 Expected: FAIL — the world comes back 2×2×2 with both models on top of each other, because placement is not read yet.
 
-- [ ] **Step 3: Add the traversal**
+- [x] **Step 3: Add the traversal**
+
+**Correction found while executing:** `ResolvePlacement` names `RawModel`, but Task 1
+declared `RawVoxel`/`RawModel` *inside* `Parse`, where a namespace-scope function
+cannot see them. Hoist both structs to the top of the anonymous namespace first.
+Nothing else changes — `Parse` still declares `std::vector<RawModel> models;` locally.
 
 Add to `VoxLoader.cpp`'s anonymous namespace, after `SceneNode`:
 
@@ -835,7 +840,7 @@ Add to `VoxLoader.cpp`'s anonymous namespace, after `SceneNode`:
 
 Add `#include <limits>` to the include block (Step 4 uses it).
 
-- [ ] **Step 4: Replace the flatten with a placed flatten**
+- [x] **Step 4: Replace the flatten with a placed flatten**
 
 Delete the `(void)nodes;` line added in Task 2. Replace everything from `// With no scene graph read yet...` through the closing of the blit loop (the block added in Task 1, Step 7, keeping the `if (models.empty())` throw above it) with:
 
@@ -910,12 +915,12 @@ Delete the `(void)nodes;` line added in Task 2. Replace everything from `// With
     return model;
 ```
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS, including all five new cases and the Task 1 no-graph cases (which now go through the `nodes.empty()` branch).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxLoader.cpp Tests/src/VoxLoaderTests.cpp
