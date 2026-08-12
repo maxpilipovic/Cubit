@@ -454,3 +454,40 @@ TEST_CASE("Negative translations normalise so the world corner is the origin")
     CHECK(model.At(0, 0, 0) == 1);
     CHECK(model.At(3, 1, 1) == 2);
 }
+
+TEST_CASE("A rotated model is rejected rather than placed wrongly")
+{
+    // "1" is a rotation that swaps two axes. Loading it as if it were identity
+    // would put geometry somewhere the file never asked for and say nothing.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushSceneGraph(children, { GraphPlacement{ glm::ivec3(1, 1, 1), "1" } });
+    PushPalette(children);
+
+    CHECK_THROWS_AS(VoxLoader::Parse(MakeVoxFile(children)), std::runtime_error);
+}
+
+TEST_CASE("The identity rotation is accepted when written out explicitly")
+{
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushSceneGraph(children, { GraphPlacement{ glm::ivec3(1, 1, 1), "4" } });
+    PushPalette(children);
+
+    const VoxModel model = VoxLoader::Parse(MakeVoxFile(children));
+    CHECK(model.At(0, 0, 0) == 1);
+}
+
+TEST_CASE("A union extent past the world limit is rejected")
+{
+    // Two small models pushed a very long way apart claim an enormous world.
+    std::vector<std::uint8_t> children;
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 1 } } });
+    PushModel(children, ModelSpec{ 2, 2, 2, { { 0, 0, 0, 2 } } });
+    PushSceneGraph(children, {
+        GraphPlacement{ glm::ivec3(0, 0, 0), "" },
+        GraphPlacement{ glm::ivec3(100000, 0, 0), "" } });
+    PushPalette(children);
+
+    CHECK_THROWS_AS(VoxLoader::Parse(MakeVoxFile(children)), std::runtime_error);
+}

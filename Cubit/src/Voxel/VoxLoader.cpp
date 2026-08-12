@@ -16,6 +16,22 @@ namespace
 {
     constexpr int MaxDimension = 256;
 
+    //The identity rotation as .vox packs it: bits 0-1 name the column holding
+    //row 0's non-zero entry, bits 2-3 do the same for row 1, and bits 4-6 are
+    //the three sign bits. Identity is row 0 to column 0, row 1 to column 1,
+    //all positive, which is 1 << 2.
+    //
+    //A wrong constant here refuses a file that should load, which is a message
+    //someone can act on — never a map placed somewhere it does not belong.
+    constexpr int IdentityRotation = 4;
+
+    //A file can claim any translation it likes, so the union of its models can
+    //be arbitrarily large. Without these, a malformed one asks for a
+    //multi-gigabyte allocation and is discovered only by the allocator.
+    //1024 comfortably clears the 512 maps this exists for.
+    constexpr int MaxWorldDimension = 1024;
+    constexpr std::size_t MaxWorldVolume = 128ull * 1024ull * 1024ull;
+
     //Reads a little-endian int32 at offset and advances it.
     std::int32_t ReadInt(std::span<const std::uint8_t> bytes, std::size_t& offset)
     {
@@ -88,6 +104,45 @@ namespace
         if (stream.fail())
             throw std::runtime_error("vox: malformed translation attribute");
         return t;
+    }
+
+    //Refuses a rotated model instead of ignoring the rotation. A missing "_r"
+    //means identity and is the common case, because MagicaVoxel only writes the
+    //attribute when it is not identity.
+    void RequireIdentityRotation(const std::map<std::string, std::string>& frame)
+    {
+        const auto it = frame.find("_r");
+        if (it == frame.end())
+            return;
+
+        std::istringstream stream(it->second);
+        int rotation = 0;
+        stream >> rotation;
+        if (stream.fail())
+            throw std::runtime_error("vox: malformed rotation attribute");
+
+        if (rotation != IdentityRotation)
+            throw std::runtime_error("vox: rotated models are not supported");
+    }
+
+    //Rejects a union extent no map should have.
+    void RequireLoadableSize(const glm::ivec3& size)
+    {
+        const char* const axes[3] = { "x", "y", "z" };
+
+        for (int i = 0; i < 3; ++i)
+            if (size[i] > MaxWorldDimension)
+                throw std::runtime_error(
+                    std::string("vox: stitched world is too large (")
+                    + axes[i] + " = " + std::to_string(size[i]) + ")");
+
+        const std::size_t volume =
+            static_cast<std::size_t>(size.x) *
+            static_cast<std::size_t>(size.y) *
+            static_cast<std::size_t>(size.z);
+
+        if (volume > MaxWorldVolume)
+            throw std::runtime_error("vox: stitched world has too many voxels");
     }
 
     //A scene-graph node reduced to the fields placement needs. One struct for
@@ -288,6 +343,8 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
                 if (f != 0)
                     continue;
 
+                RequireIdentityRotation(frame);
+
                 const auto t = frame.find("_t");
                 if (t != frame.end())
                     node.Translation = ParseTranslation(t->second);
@@ -374,6 +431,7 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
 
     VoxModel model;
     model.Size = unionMax - unionMin;
+    RequireLoadableSize(model.Size);
     model.Colors = palette;
     model.Voxels.assign(
         static_cast<std::size_t>(model.Size.x) *

@@ -945,7 +945,7 @@ Two guards. Neither changes a valid file; both turn a silent wrong answer or an 
 - Consumes: everything from Task 3.
 - Produces: `constexpr std::uint8_t IdentityRotation`, `constexpr int MaxWorldDimension`, `constexpr std::size_t MaxWorldVolume`, `RequireIdentityRotation(const std::map<std::string, std::string>&)`, `RequireLoadableSize(const glm::ivec3&)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `Tests/src/VoxLoaderTests.cpp`:
 
@@ -988,7 +988,7 @@ TEST_CASE("A union extent past the world limit is rejected")
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A rotated model is rejected rather than placed wrongly"`
 Expected: FAIL — no exception is thrown; the rotation is currently ignored.
@@ -996,7 +996,7 @@ Expected: FAIL — no exception is thrown; the rotation is currently ignored.
 Run: `./bin/Debug-windows-x86_64/Tests/Tests.exe -tc="A union extent past the world limit is rejected"`
 Expected: FAIL, likely by crashing or hanging on a ~100000-wide allocation. That crash *is* the bug this guard exists for. If the process dies rather than reporting a failed assertion, that still counts as red — continue.
 
-- [ ] **Step 3: Add the constants and guards**
+- [x] **Step 3: Add the constants and guards**
 
 Add to `VoxLoader.cpp`'s anonymous namespace, next to `MaxDimension`:
 
@@ -1061,7 +1061,7 @@ And after `ParseTranslation`:
     }
 ```
 
-- [ ] **Step 4: Call the guards**
+- [x] **Step 4: Call the guards**
 
 In the `nTRN` branch, inside the `if (f != 0) continue;` block's frame handling, add the rotation check immediately after the `continue`:
 
@@ -1080,12 +1080,12 @@ In `Parse`, immediately after `model.Size = unionMax - unionMin;` insert:
     RequireLoadableSize(model.Size);
 ```
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: PASS, all three new cases included.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cubit/src/Voxel/VoxLoader.cpp Tests/src/VoxLoaderTests.cpp
