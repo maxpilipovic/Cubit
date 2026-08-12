@@ -1652,7 +1652,7 @@ Removes the two tests that asserted the old refusal."
 - Consumes: nothing from earlier tasks.
 - Produces: `MapGen.exe [out.vox] [--size W H D]`.
 
-- [ ] **Step 1: Add the argument**
+- [x] **Step 1: Add the argument**
 
 Replace the body of `main` in `MapGen/src/MapGen.cpp` (lines 11-31) with:
 
@@ -1713,17 +1713,17 @@ int main(int argc, char** argv)
 
 Add `#include <cstdlib>` to the include block.
 
-- [ ] **Step 2: Build MapGen**
+- [x] **Step 2: Build MapGen**
 
 Run: `"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" MapGen/MapGen.vcxproj -p:Configuration=Debug -p:Platform=x64`
 Expected: builds clean.
 
-- [ ] **Step 3: Verify the default is unchanged**
+- [x] **Step 3: Verify the default is unchanged**
 
 Run: `./bin/Debug-windows-x86_64/MapGen/MapGen.exe /tmp-check.vox` — use a scratch path, not the shipped map.
 Expected: reports `256x64x256`. Compare its byte size against `Sandbox/assets/maps/battlefield.vox`; they should match, since the generator is deterministic on its seed and nothing about the 256 path changed. Delete the scratch file afterwards.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add MapGen/src/MapGen.cpp
