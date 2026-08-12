@@ -1747,12 +1747,12 @@ The seam between tiles is what unit tests are least able to check. This task is 
 - Consumes: everything above.
 - Produces: nothing code-facing.
 
-- [ ] **Step 1: Generate the map**
+- [x] **Step 1: Generate the map**
 
 Run: `./bin/Debug-windows-x86_64/MapGen/MapGen.exe Sandbox/assets/maps/battlefield512.vox --size 512 64 512`
 Expected: reports `512x64x512`. This is a Debug build generating 16.7M cells — allow it a minute.
 
-- [ ] **Step 2: Confirm it loads back before touching the Sandbox**
+- [x] **Step 2: Confirm it loads back before touching the Sandbox**
 
 Add a temporary case to `Tests/src/VoxLoaderTests.cpp`:
 
@@ -1770,11 +1770,11 @@ TEST_CASE("The 512 battlefield loads back at full size")
 
 Run the suite. Expected: PASS. **Keep this case** — it is the only test that exercises a real stitched file end to end.
 
-- [ ] **Step 3: Point the Sandbox at it**
+- [x] **Step 3: Point the Sandbox at it**
 
 In `Sandbox/src/Sandbox.cpp`, change the map path at line 380 from `battlefield.vox` to `battlefield512.vox`. Read the surrounding lines first: the path may be a named constant rather than a literal at the call site.
 
-- [ ] **Step 4: Build and run the Sandbox**
+- [x] **Step 4: Build and run the Sandbox**
 
 Build the Sandbox project, then launch it. Per `docs/superpowers/` practice, screenshot the GLFW30 window — **not** `MainWindowHandle` — and close via `WM_CLOSE` so the log survives.
 
@@ -1783,11 +1783,11 @@ Check, in order:
 2. **Walk to x=256 and to z=256.** There must be no wall, trench, gap or lighting seam along either. This is the failure the whole design turns on.
 3. Press `F5` to save, then `F9` to reload, and confirm the map comes back identical.
 
-- [ ] **Step 5: Record the load numbers**
+- [x] **Step 5: Record the load numbers**
 
 From the run's log, note the wall-clock time to first frame and the time until the chunk count stops rising. These are the measured replacements for the extrapolation in the spec.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sandbox/assets/maps/battlefield512.vox Sandbox/src/Sandbox.cpp Tests/src/VoxLoaderTests.cpp

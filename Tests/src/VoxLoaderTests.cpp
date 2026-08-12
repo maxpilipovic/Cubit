@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include "Cubit/Voxel/VoxLoader.h"
+#include "Cubit/Voxel/TerrainGen.h"
 
 #include <cstdint>
 #include <cstring>
@@ -490,4 +491,51 @@ TEST_CASE("A union extent past the world limit is rejected")
     PushPalette(children);
 
     CHECK_THROWS_AS(VoxLoader::Parse(MakeVoxFile(children)), std::runtime_error);
+}
+
+TEST_CASE("The 512 battlefield survives stitching cell for cell")
+{
+    // The only test that exercises a real stitched file end to end: four models
+    // written by the tiling path and read back through the scene graph. It
+    // compares against the generator rather than against itself, so a tile
+    // placed a block out — the seam at x=256 or z=256 the whole design turns
+    // on — fails here and names the first cell that moved.
+    //
+    // The suite runs from the repo root by hand and from Tests/ as a build
+    // step, so try both rather than silently passing in one of them.
+    std::filesystem::path path;
+    for (const char* candidate : {
+            "Sandbox/assets/maps/battlefield512.vox",
+            "../Sandbox/assets/maps/battlefield512.vox" })
+        if (std::filesystem::exists(candidate))
+        {
+            path = candidate;
+            break;
+        }
+
+    if (path.empty())
+        return; // asset not reachable from this working directory; skip
+
+    TerrainConfig config;
+    config.Size = glm::ivec3(512, 64, 512);
+    const VoxModel expected = TerrainGen::Generate(config);
+    const VoxModel actual = VoxLoader::LoadFile(path.string());
+
+    REQUIRE(actual.Size == glm::ivec3(512, 64, 512));
+    REQUIRE(actual.Size == expected.Size);
+
+    // The position of the first disagreement, not a bool: 16.7M cells is far
+    // too many to assert one at a time, and a seam bug is only diagnosable if
+    // the failure says where it is.
+    glm::ivec3 firstBad(-1);
+    for (int z = 0; z < expected.Size.z && firstBad.x < 0; ++z)
+        for (int y = 0; y < expected.Size.y && firstBad.x < 0; ++y)
+            for (int x = 0; x < expected.Size.x; ++x)
+                if (actual.At(x, y, z) != expected.At(x, y, z))
+                {
+                    firstBad = glm::ivec3(x, y, z);
+                    break;
+                }
+
+    CHECK(firstBad == glm::ivec3(-1));
 }

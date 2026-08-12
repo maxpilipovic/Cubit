@@ -32,9 +32,15 @@ namespace
     const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
 
     //Spawn out on the open field and drop onto the terrain. The camera looks
-    //along -z (its default facing) across the battlefield: the river valley to the
-    //left, Fort B to the right, and the flank mountains on the horizon.
-    const glm::vec3 SpawnPosition{ 80.5f, 30.0f, 112.5f };
+    //along -z (its default facing) across the battlefield, down a clear corridor
+    //rather than into a hillside.
+    //
+    //Tied to battlefield512.vox specifically: TerrainGen sizes its features in
+    //absolute blocks, so the 512 map is a different landscape rather than the
+    //256 one enlarged, and the old 256 spawn lands inside a hill here — which
+    //renders as a black screen, not as an obvious mistake. Re-pick this whenever
+    //the map changes.
+    const glm::vec3 SpawnPosition{ 240.5f, 27.0f, 300.5f };
 
     //Eye height above the centre of the player box.
     constexpr float EyeOffset = 0.7f;
@@ -71,7 +77,7 @@ namespace
 
     //The map the sandbox starts on, resolved against the working directory like
     //SavePath below.
-    constexpr const char* MapPath = "assets/maps/battlefield.vox";
+    constexpr const char* MapPath = "assets/maps/battlefield512.vox";
 
     //Where F5 writes the edited world, resolved against the current working
     //directory (the project launches from the target directory, so in practice
