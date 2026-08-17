@@ -42,6 +42,13 @@ void PerspectiveCameraController::SetPosition(const glm::vec3& position)
     m_Camera.SetPosition(m_Position);
 }
 
+void PerspectiveCameraController::SetRotation(float yaw, float pitch)
+{
+    m_Yaw = yaw;
+    m_Pitch = std::clamp(pitch, -89.0f, 89.0f);
+    UpdateCamera();
+}
+
 void PerspectiveCameraController::OnEvent(Event& event)
 {
     EventDispatcher dispatcher(event);

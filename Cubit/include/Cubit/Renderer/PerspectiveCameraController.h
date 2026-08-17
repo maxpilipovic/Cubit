@@ -26,7 +26,16 @@ public:
     //movement, such as a character controller, drive the view directly.
     void SetPosition(const glm::vec3& position);
 
+    //Aims the camera. Pitch is clamped to the same range mouse-look uses.
+    //
+    //Goes through the controller rather than the camera because both hold a
+    //copy of yaw and pitch: aiming the camera directly works until the next
+    //mouse move recomputes from the controller's stale copy and snaps back.
+    void SetRotation(float yaw, float pitch);
+
     const glm::vec3& GetPosition() const { return m_Position; }
+    float GetYaw() const { return m_Yaw; }
+    float GetPitch() const { return m_Pitch; }
 
     PerspectiveCamera& GetCamera() { return m_Camera; }
     const PerspectiveCamera& GetCamera() const { return m_Camera; }
