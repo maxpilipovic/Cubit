@@ -84,6 +84,29 @@ rejected alternatives:
 Threading is deliberately *not* the first move. It was the documented plan, and the
 measurements do not support it.
 
+## What the fix achieved
+
+Shipped the same day.
+
+| | before | after | |
+|---|---:|---:|---|
+| `PropagateAll`, Debug | 19,578 ms | **3,736 ms** | **5.2x** |
+| `PropagateAll`, Release | 1,003 ms | **230 ms** | **4.4x** |
+| total load, Debug | 33,079 ms | **~17,237 ms** | **48% cut** |
+
+The prediction held: removing operations beat making operations cheaper. 88.9% of the
+flood's writes were free-fall down open columns, and a downward walk knows that answer
+without a queue.
+
+**The ordering has now inverted.** `parse` + `BuildWorld` — the 8.5 s nobody had
+costed before this investigation — is **49% of Debug load** and the largest remaining
+target. Meshing, the thing P8 originally proposed threading, is 29% and still
+untouched.
+
+That is the lasting lesson here: this entry existed for months naming a fix for a cost
+nobody had measured, and the measurement contradicted both the size and the location of
+the problem. The cost of taking the numbers was one afternoon.
+
 ## Reproducing this
 
 Append a `TEST_CASE` probe to an existing test file rather than adding a new one — a

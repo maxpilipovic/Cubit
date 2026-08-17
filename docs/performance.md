@@ -280,7 +280,45 @@ remaining sideways BFS from the boundary between lit and unlit columns. Design, 
 flat-indexing the BFS was deferred rather than done first:
 [superpowers/specs/2026-08-16-sky-light-column-scan-design.md](superpowers/specs/2026-08-16-sky-light-column-scan-design.md).
 
-**Priority:** high. **Status:** open — measured 2026-08-16, design approved.
+**Priority:** high. **Status:** flood **DONE 2026-08-16**; meshing untouched and no
+longer the priority.
+
+### Result
+
+| | before | after | |
+|---|---:|---:|---|
+| `PropagateAll`, Debug | 19,578 ms | **3,736 ms** | **5.2x** |
+| `PropagateAll`, Release | 1,003 ms | **230 ms** | **4.4x** |
+| total load, Debug | 33,079 ms | **~17,237 ms** | **48% cut** |
+| total load, Release | 1,631 ms | **~858 ms** | **47% cut** |
+
+Proved by comparing cell for cell against a naive reference implementation kept in
+`Tests/src/SkyLightTests.cpp`, over seven synthetic worlds and a generated 128-map on
+every build, plus a one-off run over all 16.8M cells of `battlefield512.vox`. The light
+is identical, not merely similar.
+
+### What load looks like now
+
+| Phase | Debug | share | Release | share |
+|---|---:|---:|---:|---:|
+| parse `.vox` | 3,606 ms | 21% | 127 ms | 15% |
+| `BuildWorld` | 4,911 ms | 28% | 211 ms | 25% |
+| `PropagateAll` | 3,736 ms | 22% | 230 ms | 27% |
+| mesh all chunks | 4,985 ms | 29% | 289 ms | 34% |
+
+**The ordering has inverted.** `parse` + `BuildWorld` is now **49% of Debug load** and
+the largest target by a wide margin, and it has never been optimised. Meshing is now
+the biggest single line item.
+
+### On option C — flat-indexing the flood
+
+Deferred by the design, to be decided on measurement rather than expectation. The
+measurement says: **not next.** What remains in `PropagateAll` is dominated by the scan
+itself — 16.8M `SetSkyLight` plus up to 16.8M `IsBlockOpaque`, all still resolved
+through `World`'s bounds check and three divides and three modulos. Flat indexing would
+plausibly take 3,736 ms to roughly 1 s, worth ~2.7 s of Debug load.
+
+`parse` + `BuildWorld` is worth 8.5 s. Do that first. Option C stays on the table.
 
 ---
 
@@ -338,4 +376,4 @@ worth making:
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
-| P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Open — **measured 2026-08-16**: the flood is 57% of load, meshing only 15%; fix is a column scan, not threading |
+| P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Flood **done 2026-08-16** — column scan, 19.6 s → 3.7 s debug, load halved. Largest remaining piece is now `parse` + `BuildWorld` at 49% |

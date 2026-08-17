@@ -108,10 +108,14 @@ facing happened to be worth looking at, and getting it wrong rendered a black sc
 that read as a rendering bug. A spawn now finds its own ground and its own facing.
 
 What is left is **P8 — load cost**, and then gameplay. P8 was measured on 2026-08-16
-and turned out not to be the problem it was written up as: `SkyLight::PropagateAll` is
-**57% of load** and meshing only 15%, so threading the mesher — the documented fix —
-targets the smallest piece. The flood is being rewritten as a column scan instead. See
-[performance.md](performance.md) P8 and the
+and turned out not to be the problem it was written up as: the documented fix was
+threading the mesher, but meshing was only 15% of load while `SkyLight::PropagateAll`
+was 57%. Rewriting the flood as a downward column scan took it from **19.6 s to 3.7 s**
+in a debug build and **halved total load** (33.1 s → 17.2 s), with the resulting light
+proved identical cell for cell against a reference implementation.
+
+The largest remaining piece is now **`parse` + `BuildWorld` at 49% of debug load**,
+which has never been optimised. See [performance.md](performance.md) P8 and the
 [load-cost breakdown](superpowers/investigations/2026-08-16-load-cost-breakdown.md).
 
 **What the greedy-meshing attempt taught us.** The ordering note above said AO
