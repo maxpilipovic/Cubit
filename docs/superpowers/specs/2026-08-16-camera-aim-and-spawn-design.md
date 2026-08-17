@@ -86,13 +86,21 @@ the result assigns straight into a position the collision system already underst
 
 1. Scan `y` from `world.GetHeight() - 1` down to 0 for the first **solid** block.
    None found means an unusable column — pure air, or pure water.
+
+There are exactly two rejections, then: **no surface at all**, and **a surface under
+water**. Everything else in a voxel world is a place you can stand.
 2. Candidate centre is `(x + 0.5, surfaceY + 1 + halfExtents.y, z + 0.5)`. Feet rest
    exactly on the surface, so the first frame reports grounded rather than falling.
-3. Reject if `VoxelCollision::Overlaps` — the box is inside something, such as an
-   overhang or a tree trunk.
-4. Reject if `VoxelCollision::OverlapsFluid` — this is what keeps a spawn out of the
+3. Reject if `VoxelCollision::OverlapsFluid` — this is what keeps a spawn out of the
    river. It needs no water-level constant: standing on the riverbed puts the box in
    water, so the existing predicate already answers it.
+
+**There is deliberately no solid-overlap check.** It would be dead code: the scan takes
+the *first* solid block from the top, so every cell above it is non-solid by
+construction, and the 0.6-wide box centred in a 1.0 cell never crosses into a
+neighbouring column. Nothing can be in the way. Adding a `VoxelCollision::Overlaps`
+call would look prudent while being unreachable, and any test written for it could
+not fail.
 
 Columns outside the world are unusable, so a hint just off the edge walks itself back
 in rather than needing a bounds check at the call site.
@@ -106,9 +114,11 @@ while stopping a broken hint from quietly scanning the whole world.
 
 ### Two accepted consequences
 
-- **A tree canopy is a valid spawn.** The top-down scan reaches leaves before ground.
-  The engine has no notion of "leaves", and standing on a canopy is stable and
-  visible — not the failure this design exists to fix.
+- **A tree canopy is a valid spawn**, and so is any other floating surface. The
+  top-down scan reaches leaves before ground. The engine has no notion of "leaves",
+  and standing on a canopy is stable and visible — not the failure this design exists
+  to fix. This is the same property that makes a solid-overlap check unnecessary:
+  the topmost surface is always standable.
 - **Caves are never spawned into**, for free: the scan finds the cave's *roof* first
   and stands the player on top of it.
 
@@ -126,10 +136,12 @@ which hint failed and how far the search looked.
 The `SpawnPosition` constant becomes a `SpawnHintXZ` constant (`glm::ivec2`) plus a
 resolved `glm::vec3 m_Spawn`.
 
-`ResolveSpawn()` runs at the end of `LoadWorld`, so **F9 re-resolves against the
-restored terrain**. That also fixes an existing weakness at `Sandbox.cpp:417`, where
-a column solid to the sky drops the player at a constant the reloaded map may have
-since built over.
+`ResolveSpawn()` runs inside `LoadWorld`, after `SkyLight::PropagateAll` and
+**before** `LiftPlayerClearOfTerrain`, so **F9 re-resolves against the restored
+terrain**. The order matters: the lift's last-resort fallback *is* the spawn, so the
+spawn has to be valid for the new world before the lift can fall back on it. That
+also fixes an existing weakness at `Sandbox.cpp:417`, where a column solid to the sky
+drops the player at a constant the reloaded map may have since built over.
 
 All three present uses of the constant become `m_Spawn`: the initial position, the
 fall-out-of-the-world reset at `Sandbox.cpp:215`, and that fallback.
@@ -158,9 +170,13 @@ Headless doctest cases:
 - Flat floor: the expected centre, feet on the surface.
 - A hill under the hint: lands on top, not inside — the exact 512 failure.
 - Water under the hint: spirals to the bank rather than the riverbed.
-- An overhang above the hint column: rejected, search continues.
-- A column solid to the sky: rejected, search continues.
-- An all-water world: `std::nullopt`.
+- A hint outside the world: the spiral walks back in.
+- A floating lid above the hint: stands **on** the lid — pinning the canopy behaviour
+  as intended rather than leaving it to be "fixed" later.
+- A column solid to the top of the world: stands on its top face, box extending into
+  the open air above the world. Also not a rejection.
+- A world of nothing but air, and one of nothing but water: `std::nullopt` for both.
+  Water alone is not standable, and that is a different code path from empty.
 - Determinism: the same world and hint give the same answer.
 
 **Against `battlefield512.vox`**
