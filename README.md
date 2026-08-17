@@ -178,8 +178,7 @@ Finishing the engine first, in this order — see
 - **Threaded meshing** — the per-frame budget hides load cost but does not remove it
 
 Smaller gaps: reusing a chunk's GPU buffers instead of reallocating them per remesh,
-batching chunk draws, and a yaw/pitch setter on the camera controller so a spawn can
-choose its facing.
+and batching chunk draws.
 
 Deliberately out of scope: per-block textures (blocks are palette colours by design),
 LOD and streaming (maps are a fixed known size), and audio (that belongs with gameplay).

@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-11_
+_Last updated: 2026-08-16_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Gameplay (players as
@@ -73,8 +73,16 @@ Ranked by leverage. Performance items are detailed in
 7. ~~**World persistence**~~ **DONE 2026-07-31** — `ToVoxModel` plus
    `VoxWriter::WriteFile` write an edited world back to `.vox`; the Sandbox binds
    it to `F5`.
-8. **Camera aim API** — `PerspectiveCameraController` exposes only `SetPosition`, no
-   yaw/pitch setter, so a spawn cannot choose its facing.
+8. ~~**Camera aim API**~~ **DONE 2026-08-16** — `PerspectiveCameraController::SetRotation`
+   aims the camera through the controller that owns yaw and pitch (setting the camera
+   directly works only until the next mouse move recomputes from the controller's
+   stale copy), and `PerspectiveCamera::YawPitchToward` derives that pair from a point
+   to look at, inverting the convention that makes `-90°` mean `-z`. Alongside them,
+   `FindSpawn` (`Cubit/Voxel/SpawnFinder.h`) resolves an `x,z` hint into a standable
+   position: it takes the first solid block from the top of a column, stands the box
+   on it, rejects a surface under water, and spirals outward through rings of
+   increasing Chebyshev distance when a column will not do. The Sandbox composes the
+   three — resolve the ground, face the map centre level with the eye.
 
 ### Likely non-goals (given the flat-colour, fixed-map aesthetic)
 - Per-block **textures** (blocks are palette colours by design).
@@ -93,12 +101,15 @@ A bounded sequence — genuinely finishable, not endless:
 4. ~~**Greedy meshing**~~ **TRIED AND REJECTED 2026-08-06** — see P3.
 5. ~~**Multi-model stitching**~~ **DONE 2026-08-11** (full AoS-scale maps).
 
-**The arc is complete.** The engine is "done" for our purposes: the one remaining
-engine gap is the **camera aim API** (item 8) — `PerspectiveCameraController` has
-no yaw/pitch setter, so a spawn cannot choose its facing. That gap was felt
-immediately on the 512 map: picking a spawn meant searching for a spot whose view
-along the camera's fixed `-z` facing happened to be worth looking at. Everything
-else ahead of us is gameplay.
+**The arc is complete, and so is the engine gap list.** Item 8, the camera aim API,
+closed on 2026-08-16 — the last thing on this document that was still open. Picking a
+spawn used to mean searching for a spot whose view along the camera's fixed `-z`
+facing happened to be worth looking at, and getting it wrong rendered a black screen
+that read as a rendering bug. A spawn now finds its own ground and its own facing.
+
+What is left is **P8 — threading the load** (`SkyLight::PropagateAll` plus meshing on
+one thread, which is why a 512 map visibly builds itself for the first half minute in
+a debug build), and then gameplay.
 
 **What the greedy-meshing attempt taught us.** The ordering note above said AO
 should land before greedy meshing, so the merge criterion could be written
@@ -121,8 +132,15 @@ all at 512. Stitching deliberately did not touch it: how big a fort should be,
 and how far apart, is a question about how the game plays, not about how a map is
 stored. The same goes for the rest of `TerrainGen`'s absolute-sized features.
 
-**Nothing about spawning is map-aware.** `SpawnPosition` in `Sandbox.cpp` is a
-hard-coded point that has to be re-picked by hand whenever the map changes,
-because a wrong one puts the camera inside terrain and renders a black screen
-that looks like a rendering bug. A spawn that finds open ground for itself
-belongs with the camera aim API.
+**Spawning is map-aware, but the hint is still authored.** As of 2026-08-16
+`Sandbox.cpp` holds `SpawnHintXZ`, a column rather than a point: the height and
+whether that column is usable at all are resolved against the loaded map, so a hint
+over a hill or the river moves to the nearest spot that can hold the player instead
+of burying the camera. What is still by hand is *which column to suggest* — nothing
+proposes an interesting starting view on its own, and nothing knows which side of the
+map a player belongs on. That last part is a team question, so it waits for gameplay.
+
+Two behaviours of `FindSpawn` are deliberate rather than unfinished: a tree canopy is
+a valid spawn (the engine has no notion of "leaves", and the topmost surface is always
+standable — the same property that makes a solid-overlap check unnecessary), and caves
+are never spawned into, for free, because the scan finds a cave's roof first.
