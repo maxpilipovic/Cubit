@@ -44,6 +44,22 @@ void PerspectiveCamera::SetRotation(float yaw, float pitch)
     RecalculateViewMatrix();
 }
 
+glm::vec2 PerspectiveCamera::YawPitchToward(const glm::vec3& from, const glm::vec3& to)
+{
+    const glm::vec3 direction = to - from;
+
+    //Two identical points give no direction. The default facing is a usable
+    //answer; a NaN would spread silently through the view matrix.
+    if (direction == glm::vec3(0.0f))
+        return glm::vec2(-90.0f, 0.0f);
+
+    const float horizontal = glm::length(glm::vec2(direction.x, direction.z));
+
+    return glm::vec2(
+        glm::degrees(std::atan2(direction.z, direction.x)),
+        glm::degrees(std::atan2(direction.y, horizontal)));
+}
+
 glm::vec3 PerspectiveCamera::GetRightDirection() const
 {
     return glm::normalize(glm::cross(m_ForwardDirection, WorldUp));

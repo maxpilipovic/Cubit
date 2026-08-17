@@ -22,6 +22,15 @@ public:
     //Sets horizontal yaw and vertical pitch in degrees.
     void SetRotation(float yaw, float pitch);
 
+    //Returns the yaw and pitch, in degrees, that face from one point toward
+    //another.
+    //
+    //Lives here because this is where the convention lives: it inverts the
+    //forward vector RecalculateViewMatrix builds, which is the reason -90
+    //degrees means -z. A caller doing its own atan2 would be duplicating a
+    //constant it does not own.
+    static glm::vec2 YawPitchToward(const glm::vec3& from, const glm::vec3& to);
+
     const glm::vec3& GetPosition() const { return m_Position; }
     const glm::vec3& GetForwardDirection() const { return m_ForwardDirection; }
     glm::vec3 GetRightDirection() const;
