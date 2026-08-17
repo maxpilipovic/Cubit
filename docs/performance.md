@@ -1,14 +1,14 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-08-11_
+_Last updated: 2026-08-16_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
 tick items off as they are addressed. See also [engine-roadmap.md](engine-roadmap.md).
 
-Context: the shipped battlefield map is 256×64×256 = **602 chunks**, meshing ~476k
-faces. The problems below bite harder as maps grow toward the single-`.vox` max of
-256×256×256 (up to ~4096 chunks) and beyond.
+Context: the shipped battlefield map is **512×64×512** — 4096 chunks, of which 2408
+hold geometry, meshing ~1.93M faces. Figures below that predate 2026-08-11 were taken
+on the earlier 256×64×256 map (602 chunks, ~476k faces) and say so where it matters.
 
 ---
 
@@ -236,6 +236,54 @@ cost-per-call optimisations do not show up.
 
 ---
 
+## P8 — Load floods light and meshes the whole world on one thread
+
+**Where:** `Cubit/src/Voxel/SkyLight.cpp` — `SkyLight::PropagateAll`;
+`Cubit/src/Renderer/WorldRenderer.cpp` — `WorldRenderer::Update`.
+
+**Measured 2026-08-16** on `battlefield512.vox` (512x64x512, 16.8M cells). Full method
+and counters:
+[superpowers/investigations/2026-08-16-load-cost-breakdown.md](superpowers/investigations/2026-08-16-load-cost-breakdown.md).
+
+| Phase | Debug | Release | Share |
+|---|---:|---:|---:|
+| parse `.vox` | 3,606 ms | 127 ms | 11% |
+| `BuildWorld` | 4,911 ms | 211 ms | 15% |
+| **`PropagateAll`** | **19,578 ms** | **1,003 ms** | **59%** |
+| — clear every cell | 807 ms | 55 ms | 2% |
+| — seed top layer | 34 ms | 3 ms | 0.1% |
+| — **the flood** | **18,736 ms** | **945 ms** | **57%** |
+| mesh all 4,096 chunks | 4,985 ms | 289 ms | 15% |
+| **Total** | **33,079 ms** | **1,631 ms** | |
+
+**The ~5.2 s quoted below for `PropagateAll` is a 256-map figure.** On the shipped map
+it is 19.6 s.
+
+**Meshing is the smallest of the three costs, not the biggest.** The half-minute of
+"the world builds itself around you" is the deliberate 4 ms `MeshBudgetMilliseconds`
+slice spreading 5 s of work across frames — not 30 s of work. The cost that blocks
+before a single frame renders is the flood.
+
+**So threading the mesher targets 15% of load, and is no longer the recommended first
+move** — which is what this entry used to say.
+
+**Why the flood is slow.** 11.35M cell visits, 68.1M neighbour tests (exactly 6 per
+visit), 11.09M light writes. Visits ~= writes ~= air-cell count, so the BFS is *not*
+thrashing — each cell is written about once. The cost is per-operation: every neighbour
+test does `IsInBounds` + `IsBlockOpaque` + `GetSkyLight`, three `World`-addressed calls
+of a bounds check plus three divides and three modulos, ~200M lookups in all. And
+**88.9% of the writes are full-strength light falling straight down open columns**,
+one queue entry at a time.
+
+**Fix:** replace the open-column part with a downward scan per column, seeding the
+remaining sideways BFS from the boundary between lit and unlit columns. Design, and why
+flat-indexing the BFS was deferred rather than done first:
+[superpowers/specs/2026-08-16-sky-light-column-scan-design.md](superpowers/specs/2026-08-16-sky-light-column-scan-design.md).
+
+**Priority:** high. **Status:** open — measured 2026-08-16, design approved.
+
+---
+
 ## Where an edit stands now
 
 A break on open ground, 256×64×256 battlefield, debug build:
@@ -247,7 +295,8 @@ A break on open ground, 256×64×256 battlefield, debug build:
 | **worst case in one frame** | **199 ms** | 26 ms | **~4 ms** (P1 slice) |
 
 Optimised build: 0.93 ms of work per click. Still open at load: `SkyLight::PropagateAll`
-floods the whole world once and takes ~5.2 s in a debug build (254 ms optimised).
+floods the whole world once and takes ~5.2 s in a debug build (254 ms optimised) **on
+the 256 map**. On the shipped 512 map it is 19.6 s — see P8, which measures it properly.
 
 **Load cost at 512×64×512, measured 2026-08-11** (debug build, RTX 3060 Ti). This
 replaces the earlier extrapolation from the 256 map:
@@ -289,4 +338,4 @@ worth making:
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
-| P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Open — cost scales with map area, and 512 maps made it visible; fix is threading |
+| P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Open — **measured 2026-08-16**: the flood is 57% of load, meshing only 15%; fix is a column scan, not threading |

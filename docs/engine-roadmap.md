@@ -107,9 +107,12 @@ spawn used to mean searching for a spot whose view along the camera's fixed `-z`
 facing happened to be worth looking at, and getting it wrong rendered a black screen
 that read as a rendering bug. A spawn now finds its own ground and its own facing.
 
-What is left is **P8 — threading the load** (`SkyLight::PropagateAll` plus meshing on
-one thread, which is why a 512 map visibly builds itself for the first half minute in
-a debug build), and then gameplay.
+What is left is **P8 — load cost**, and then gameplay. P8 was measured on 2026-08-16
+and turned out not to be the problem it was written up as: `SkyLight::PropagateAll` is
+**57% of load** and meshing only 15%, so threading the mesher — the documented fix —
+targets the smallest piece. The flood is being rewritten as a column scan instead. See
+[performance.md](performance.md) P8 and the
+[load-cost breakdown](superpowers/investigations/2026-08-16-load-cost-breakdown.md).
 
 **What the greedy-meshing attempt taught us.** The ordering note above said AO
 should land before greedy meshing, so the merge criterion could be written
