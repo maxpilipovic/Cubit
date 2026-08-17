@@ -2,9 +2,14 @@
 
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/SkyLight.h"
+#include "Cubit/Voxel/TerrainGen.h"
+#include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/World.h"
 
 #include <chrono>
+#include <cstdint>
+#include <deque>
+#include <functional>
 #include <set>
 #include <vector>
 
@@ -535,4 +540,220 @@ TEST_CASE("Placing a transparent block on the top layer keeps it at full strengt
 
     CHECK(world.GetSkyLight(8, top, 8) == SkyLight::Max);
     CHECK(world.GetSkyLight(8, top - 1, 8) == SkyLight::Max);
+}
+
+namespace
+{
+    //A deliberately naive sky-light propagation, kept as an oracle for the
+    //optimised one: seed the top layer, then spread until nothing brightens.
+    //
+    //This is the implementation the column scan replaced. Do not optimise it
+    //and do not share code with the engine — its only job is to be obviously
+    //correct, so that a disagreement means the fast path is wrong.
+    void ReferencePropagate(World& world)
+    {
+        const int width = world.GetWidth();
+        const int height = world.GetHeight();
+        const int depth = world.GetDepth();
+
+        for (int z = 0; z < depth; ++z)
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    world.SetSkyLight(x, y, z, 0);
+
+        //Index 5 is straight down, the one direction light travels for free.
+        constexpr glm::ivec3 directions[6] =
+        {
+            {  1,  0,  0 }, { -1,  0,  0 },
+            {  0,  0,  1 }, {  0,  0, -1 },
+            {  0,  1,  0 }, {  0, -1,  0 },
+        };
+        constexpr int downIndex = 5;
+
+        std::deque<glm::ivec3> queue;
+        const int top = height - 1;
+
+        for (int z = 0; z < depth; ++z)
+            for (int x = 0; x < width; ++x)
+                if (!world.IsBlockOpaque(x, top, z))
+                {
+                    world.SetSkyLight(x, top, z, SkyLight::Max);
+                    queue.push_back(glm::ivec3(x, top, z));
+                }
+
+        while (!queue.empty())
+        {
+            const glm::ivec3 cell = queue.front();
+            queue.pop_front();
+
+            const int level = world.GetSkyLight(cell.x, cell.y, cell.z);
+            if (level <= 1)
+                continue;
+
+            for (int d = 0; d < 6; ++d)
+            {
+                const glm::ivec3 next = cell + directions[d];
+
+                if (!world.IsInBounds(next.x, next.y, next.z))
+                    continue;
+                if (world.IsBlockOpaque(next.x, next.y, next.z))
+                    continue;
+
+                const int value = (d == downIndex && level == SkyLight::Max)
+                    ? SkyLight::Max
+                    : level - 1;
+
+                if (world.GetSkyLight(next.x, next.y, next.z) >= value)
+                    continue;
+
+                world.SetSkyLight(
+                    next.x, next.y, next.z, static_cast<std::uint8_t>(value));
+                queue.push_back(next);
+            }
+        }
+    }
+
+    //Builds the world twice, lights one each way, and reports the first cell
+    //where they disagree.
+    //
+    //The position, not a bool: a whole-world equality check that fails with
+    //"not equal" is undiagnosable, and a lighting disagreement is almost always
+    //in one shadowed corner that you need named to find.
+    void CheckMatchesReference(const std::function<World()>& build)
+    {
+        World expected = build();
+        World actual = build();
+
+        ReferencePropagate(expected);
+        SkyLight::PropagateAll(actual);
+
+        glm::ivec3 firstBad(-1);
+        int referenceLevel = -1;
+        int actualLevel = -1;
+
+        for (int y = 0; y < expected.GetHeight() && firstBad.x < 0; ++y)
+            for (int z = 0; z < expected.GetDepth() && firstBad.x < 0; ++z)
+                for (int x = 0; x < expected.GetWidth(); ++x)
+                {
+                    const int e = expected.GetSkyLight(x, y, z);
+                    const int a = actual.GetSkyLight(x, y, z);
+
+                    if (e != a)
+                    {
+                        firstBad = glm::ivec3(x, y, z);
+                        referenceLevel = e;
+                        actualLevel = a;
+                        break;
+                    }
+                }
+
+        INFO("first difference at " << firstBad.x << "," << firstBad.y << ","
+             << firstBad.z << " reference=" << referenceLevel
+             << " actual=" << actualLevel);
+        CHECK(firstBad == glm::ivec3(-1));
+    }
+}
+
+TEST_CASE("Column scan matches the reference over a flat floor")
+{
+    CheckMatchesReference([]
+    {
+        World world(2, 2, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{1});
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference under an overhang")
+{
+    //The sideways-spreading case: cells under the slab are lit only by light
+    //that came in from the side and dimmed on the way.
+    CheckMatchesReference([]
+    {
+        World world(2, 2, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{1});
+
+        for (int z = 4; z < 28; ++z)
+            for (int x = 4; x < 28; ++x)
+                world.SetBlock(x, 8, z, BlockId{1});
+
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference around a sealed cave")
+{
+    //Nothing lit borders the hollow, so it must stay dark in both.
+    CheckMatchesReference([]
+    {
+        World world(2, 2, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 0; y < 12; ++y)
+                for (int x = 0; x < world.GetWidth(); ++x)
+                    world.SetBlock(x, y, z, BlockId{1});
+
+        for (int z = 10; z < 20; ++z)
+            for (int y = 4; y < 8; ++y)
+                for (int x = 10; x < 20; ++x)
+                    world.SetBlock(x, y, z, BlockId{0});
+
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference with a column closed at the very top")
+{
+    //An empty lit range: the scan stops before writing anything, and that
+    //column's neighbours have to notice it is dark.
+    CheckMatchesReference([]
+    {
+        World world(2, 2, 2);
+        const int top = world.GetHeight() - 1;
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{1});
+
+        world.SetBlock(5, top, 5, BlockId{1});
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference in a world of pure air")
+{
+    //Every cell is Max and no cell borders darkness, so the seed set is empty.
+    CheckMatchesReference([] { return World(1, 1, 1); });
+}
+
+TEST_CASE("Column scan matches the reference across staircase relief")
+{
+    //The case that stresses the seed y-ranges hardest: every column differs in
+    //height from its neighbour, so every column contributes a seed range.
+    CheckMatchesReference([]
+    {
+        World world(2, 2, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                for (int y = 0; y <= x; ++y)
+                    world.SetBlock(x, y, z, BlockId{1});
+
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference on generated terrain")
+{
+    //Real structure rather than hand-built shapes: hills, a river of
+    //non-opaque water, forests and forts. Smaller than the shipped map on
+    //purpose — structure is what breaks this, not scale.
+    CheckMatchesReference([]
+    {
+        TerrainConfig config;
+        config.Size = glm::ivec3(128, 64, 128);
+        return BuildWorld(TerrainGen::Generate(config));
+    });
 }
