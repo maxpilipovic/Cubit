@@ -1,5 +1,6 @@
 #include "Cubit/Cubit.h"
 #include "Cubit/Voxel/SkyLight.h"
+#include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
@@ -11,6 +12,7 @@
 #include <exception>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -31,16 +33,12 @@ namespace
     //Half extents of the player's 0.6 x 1.8 x 0.6 collision box.
     const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
 
-    //Spawn out on the open field and drop onto the terrain. The camera looks
-    //along -z (its default facing) across the battlefield, down a clear corridor
-    //rather than into a hillside.
-    //
-    //Tied to battlefield512.vox specifically: TerrainGen sizes its features in
-    //absolute blocks, so the 512 map is a different landscape rather than the
-    //256 one enlarged, and the old 256 spawn lands inside a hill here — which
-    //renders as a black screen, not as an obvious mistake. Re-pick this whenever
-    //the map changes.
-    const glm::vec3 SpawnPosition{ 240.5f, 27.0f, 300.5f };
+    //Roughly where to start. Only a column: the height, and whether this exact
+    //column is usable at all, are resolved against the loaded map. A hint over
+    //a hill or the river moves to the nearest spot that can hold the player
+    //rather than burying the camera in terrain — which used to render as a
+    //black screen and read as a rendering bug.
+    const glm::ivec2 SpawnHintXZ{ 240, 300 };
 
     //Eye height above the centre of the player box.
     constexpr float EyeOffset = 0.7f;
@@ -109,6 +107,24 @@ public:
         //A sandbox that cannot load its map has nothing to do, so unlike F9 this
         //does not catch — the failure propagates out of the constructor.
         LoadWorld(MapPath);
+
+        // LoadWorld resolves the spawn but deliberately does not teleport to
+        // it: F9 reloads mid-session and should leave the player where they
+        // were working. Starting fresh is the one time it should.
+        m_PlayerPosition = m_Spawn;
+
+        // Face the middle of the map, level with the eye. Aiming at the literal
+        // centre of the world box would tilt the view into the ground.
+        const glm::vec3 eye = m_PlayerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
+        const glm::vec3 target(
+            static_cast<float>(m_World.GetWidth()) * 0.5f,
+            eye.y,
+            static_cast<float>(m_World.GetDepth()) * 0.5f);
+
+        const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
+        m_CameraController.SetRotation(rotation.x, rotation.y);
+
+        UpdateCameraPosition();
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -212,7 +228,7 @@ public:
         // The chunk is not a closed world, so a player can walk off its edge.
         if (m_PlayerPosition.y < FallResetHeight)
         {
-            m_PlayerPosition = SpawnPosition;
+            m_PlayerPosition = m_Spawn;
             m_VerticalVelocity = 0.0f;
         }
 
@@ -389,6 +405,10 @@ private:
         // a fully dark world into their vertex colours.
         SkyLight::PropagateAll(m_World);
 
+        // Before the lift, not after: the lift's last-resort fallback is the
+        // spawn, so it has to be valid for the world just loaded.
+        ResolveSpawn();
+
         LiftPlayerClearOfTerrain();
         m_VerticalVelocity = 0.0f;
         UpdateCameraPosition();
@@ -414,7 +434,33 @@ private:
 
         // A column solid to the sky has nowhere to stand.
         if (VoxelCollision::Overlaps(m_World, m_PlayerPosition, PlayerHalfExtents))
-            m_PlayerPosition = SpawnPosition;
+            m_PlayerPosition = m_Spawn;
+    }
+
+    //Resolves the spawn hint against the loaded map.
+    void ResolveSpawn()
+    {
+        const std::optional<glm::vec3> found =
+            FindSpawn(m_World, SpawnHintXZ, PlayerHalfExtents);
+
+        if (found)
+        {
+            m_Spawn = *found;
+            return;
+        }
+
+        // Nothing standable within the search radius. Drop in from above the
+        // hint and say so: the whole point is that a bad spawn stops being a
+        // silent black screen.
+        CB_ERROR(
+            "No spawn found within " + std::to_string(MaxSpawnSearchRadius) +
+            " columns of " + std::to_string(SpawnHintXZ.x) + "," +
+            std::to_string(SpawnHintXZ.y) + " - dropping in from above");
+
+        m_Spawn = glm::vec3(
+            static_cast<float>(SpawnHintXZ.x) + 0.5f,
+            static_cast<float>(m_World.GetHeight()) - PlayerHalfExtents.y,
+            static_cast<float>(SpawnHintXZ.y) + 0.5f);
     }
 
     //Writes the edited world beside the executable and logs where it went.
@@ -489,7 +535,8 @@ private:
     World m_World{ 1, 1, 1 };
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};
-    glm::vec3 m_PlayerPosition{ SpawnPosition };
+    glm::vec3 m_Spawn{ 0.0f };
+    glm::vec3 m_PlayerPosition{ 0.0f };
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
     bool m_EyeInFluid = false;
