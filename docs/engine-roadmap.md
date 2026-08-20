@@ -1,11 +1,13 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-16_
+_Last updated: 2026-08-20_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
-voxel engine, and the order we intend to finish it in. Gameplay (players as
-entities, teams, combat, networking) is deliberately **out of scope** here — this
-document is about finishing the *engine* first.
+voxel engine, and the order we intend to finish it in. Most of it is scoped to
+the *voxel* engine, with gameplay itself — teams, combat, networking — out of
+scope. The exception is "Beyond the voxel engine" below, which records the
+engine-side systems a multiplayer FPS will need and that a single-player voxel
+sandbox never asked for.
 
 ## What Cubit is today
 
@@ -128,6 +130,111 @@ merging are the ones a shading gradient disqualifies.
 
 Worth remembering before adopting another technique whose headline figure comes
 from engines with flat-shaded faces.
+
+## Beyond the voxel engine — gaps found 2026-08-20
+
+Everything above is about voxels: meshing, lighting, load time, map format. That
+list is genuinely nearly closed. What follows is the other axis — the systems a
+multiplayer FPS needs from an engine that a single-player voxel sandbox never
+asked for. None of it is on the arc above, because the arc was scoped to voxels.
+
+**These are candidates, not a plan.** Recorded so they are not rediscovered, and
+deliberately split by whether they get more expensive to delay.
+
+### Worth doing before gameplay
+
+Only three, and each for a specific reason rather than general tidiness.
+
+1. **Fixed timestep, and a delta-time clamp.** `Application::Run` passes raw
+   wall-clock delta straight to `Layer::OnUpdate`. Two problems. The clamp is the
+   small one: `glfwPollEvents` blocks for the whole of a window drag on Win32, so
+   the next frame's delta is however long the window was held, and Sandbox's
+   gravity integrates across all of it. It does not tunnel — `MaxStep = 0.25` in
+   `VoxelCollision` saves that — but it is a hitch and a snap to the ground, and
+   an F9 reload has the same shape because the reload runs inside the key
+   callback.
+
+   The real one is the fixed tick. Client-side prediction and server
+   reconciliation require the client and the server to run *the same*
+   simulation step over the same input; a variable delta makes that impossible.
+   This is the single item here that gets dramatically more expensive to delay,
+   because every line of gameplay written against a variable `Timestep` has to be
+   rewritten when it lands. Accumulator loop, fixed step, render interpolates
+   between the last two states.
+
+2. **Debug line and box rendering, plus a `KHR_debug` callback.** There is no way
+   to draw a line or a wireframe box, so a frustum, an AABB, a raycast, or
+   `FindSpawn`'s outward spiral cannot be looked at — every visual bug so far was
+   found by screenshotting and squinting. Separately, `glGetError` and
+   `GL_DEBUG_OUTPUT` appear nowhere in the codebase: a GL error today is silent.
+   Both are small, and both pay for themselves on the next bug rather than
+   eventually.
+
+3. **A `BlockEdit` value type.** Not an entity system — just making an edit a
+   piece of *data* that can be applied, sent, and replayed, instead of
+   `Sandbox.cpp` calling `World::SetBlock` directly. It is the seam replication,
+   undo, and demo recording all key off, and it is a small change now against a
+   refactor of every call site later.
+
+### Let the game pull these
+
+Real gaps, but building them now means designing against a guess. Each becomes
+obvious, and better shaped, the moment something concretely needs it.
+
+- **An entity or actor concept.** The player is three fields on `SandboxLayer`
+  (`m_PlayerPosition`, `m_VerticalVelocity`, `m_Grounded`) with the character
+  controller inlined in `Sandbox.cpp`. Nothing represents "a thing in the world
+  with a position and a box", which is what other players, projectiles, and
+  replication all need. But there is exactly *one* entity today, and an
+  abstraction over one instance is a guess. Extracting the character controller
+  out of the Sandbox is worth doing on its own; a general entity system is not,
+  yet.
+- **A way to draw geometry that is not a chunk.** `Renderer::Submit` is generic,
+  but it is the only seam — every caller hand-builds its own `VertexArray`
+  (`WorldRenderer`, `HudLayer`). There is no `Mesh` type, no model loading, no
+  transform hierarchy, so a player model or a held weapon has nowhere to come
+  from.
+- **A render-target abstraction.** No FBO anywhere. Blocks post-processing,
+  shadow maps, and screen effects. Visible symptom today: underwater fog is
+  per-vertex in the world shader, so it fogs geometry but not the clear colour —
+  the sky stays dry-looking from under the river.
+- **An asset layer.** All four shaders are raw string literals in Sandbox
+  sources. `Texture2D` takes pixels only; nothing loads an image file and there
+  is no image decoder in `vendor/`. Paths are working-directory-relative
+  constants.
+- **Configuration.** Resolution, field of view, mouse sensitivity, `SpawnHintXZ`
+  and the map path are compile-time constants. Changing sensitivity is a rebuild.
+- **Profiling instrumentation.** Every figure in `performance.md` came from
+  timing code written ad hoc and then deleted; there is no scope timer in the
+  engine. Given that `parse` + `BuildWorld` is the documented next target, that
+  harness is about to be written a fourth time. A scope macro emitting Chrome
+  trace JSON would make P4, P5 and the parse work measurable without a bespoke
+  rig each time.
+- **Lifetime handles on `EventBus` and `LayerStack`.** `Subscribe` stores
+  `this`-capturing lambdas with no way to remove them, and there is no
+  `PopLayer`/`PopOverlay` at all. Safe today only because nothing is ever
+  removed; a menu, a map transition, or a disconnect makes it a dangling call.
+  (`Publish` also copies the whole callback vector on every publish.)
+- **Threading.** No `<thread>`, `<mutex>` or `<atomic>` anywhere. Known for
+  meshing; note that `parse` + `BuildWorld`, the actual largest load cost, is
+  also trivially parallel.
+
+### Two things this list should not be read as saying
+
+**Networking is not an eighth bullet.** It is a second project of roughly the
+size of everything built so far: prediction, reconciliation, lag compensation for
+hitscan, delta-encoded terrain edits, a headless authoritative server, snapshot
+interpolation. The fixed timestep above is a *precondition* for it, not a down
+payment on it. The one piece of good news is that `Cubit/src/Voxel/` includes no
+GL headers at all — the simulation core already runs without a context, which is
+the hardest part of a headless server to retrofit and is done. What stands in the
+way is `Application` hard-creating a window and calling `Renderer::Init`.
+
+**And this list does not terminate on its own.** The arc above declared the
+engine gap list empty on 2026-08-16, and this section immediately added ten more
+items; a further pass would add ten after that. Engine work is unbounded by
+nature. The only thing that closes it is a game saying what it actually needs,
+which is why all but three of these deliberately wait.
 
 ## Follow-ups the engine work deliberately left alone
 
