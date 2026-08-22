@@ -145,22 +145,36 @@ deliberately split by whether they get more expensive to delay.
 
 Only three, and each for a specific reason rather than general tidiness.
 
-1. **Fixed timestep, and a delta-time clamp.** `Application::Run` passes raw
-   wall-clock delta straight to `Layer::OnUpdate`. Two problems. The clamp is the
-   small one: `glfwPollEvents` blocks for the whole of a window drag on Win32, so
-   the next frame's delta is however long the window was held, and Sandbox's
-   gravity integrates across all of it. It does not tunnel — `MaxStep = 0.25` in
-   `VoxelCollision` saves that — but it is a hitch and a snap to the ground, and
-   an F9 reload has the same shape because the reload runs inside the key
-   callback.
+1. ~~**Fixed timestep, and a delta-time clamp.**~~ **DONE 2026-08-22** — a new
+   `FrameClock` turns the variable wall-clock frame delta into a whole number of
+   fixed 1/60s steps plus an interpolation alpha, capping surplus at 5 ticks per
+   frame; a stall past that cap is discarded rather than repaid, so a long hitch
+   skips wall-clock time instead of draining in slow motion — the clamp problem
+   named above is handled by construction rather than by a separate check.
+   `Layer::OnUpdate` was removed outright rather than redefined, split into
+   `OnFixedUpdate(Timestep)` for simulation and `OnFrameUpdate(Timestep)` for
+   per-frame work, with `OnRender` gaining an `alpha`; removal was deliberate —
+   redefining in place would have left every existing override silently running
+   on the wrong clock, where removal forced each call site to say which one it
+   wanted. `Application::Run` fans out the tick loop outer and the layers inner,
+   so every layer takes one step before any layer takes the next. The Sandbox
+   camera now interpolates between the previous and current fixed-step player
+   position by `alpha`, with the four discontinuous moves (spawn, F9 reload, and
+   the like) routed through a `TeleportPlayer` helper that snaps both positions
+   so they are never interpolated through. On screen at 144 fps against the 60
+   Hz tick, frames outrun steps by roughly 2.4x, so the interpolation is doing
+   real work on essentially every frame rather than sitting there speculatively.
+   Two checks remain unverified rather than passed, because keyboard input
+   cannot be delivered to the window from a script: jumping and dragging the
+   window while airborne (confirming no snap to the ground on release), and the
+   F9 reload path (confirming the player stays put with no camera smear). Both
+   are left for the user to check by hand.
 
-   The real one is the fixed tick. Client-side prediction and server
-   reconciliation require the client and the server to run *the same*
-   simulation step over the same input; a variable delta makes that impossible.
-   This is the single item here that gets dramatically more expensive to delay,
-   because every line of gameplay written against a variable `Timestep` has to be
-   rewritten when it lands. Accumulator loop, fixed step, render interpolates
-   between the last two states.
+   What this item does not do is bind input to the numbered ticks a client
+   predicting its own movement would replay — the fixed step is the
+   precondition for that, not the prediction itself, and that binding belongs
+   with the `BlockEdit` value type below (item 3), once an edit is a piece of
+   data rather than a direct call.
 
 2. **Debug line and box rendering, plus a `KHR_debug` callback.** There is no way
    to draw a line or a wireframe box, so a frustum, an AABB, a raycast, or
