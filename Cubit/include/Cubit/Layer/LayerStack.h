@@ -28,11 +28,14 @@ public:
     //Adds an owned overlay above all regular layers.
     void PushOverlay(std::unique_ptr<Layer> overlay);
 
-    //Updates regular layers and overlays in forward order.
-    void OnUpdate(Timestep timestep);
+    //Advances regular layers and overlays by one fixed step, in forward order.
+    void OnFixedUpdate(Timestep step);
+
+    //Updates regular layers and overlays once for the frame, in forward order.
+    void OnFrameUpdate(Timestep delta);
 
     //Renders regular layers and overlays in forward order.
-    void OnRender();
+    void OnRender(float alpha);
 
     //Routes an event from the newest overlay toward the base layers.
     void OnEvent(Event& event);

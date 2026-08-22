@@ -40,11 +40,14 @@ public:
     Window& GetWindow();
 
 protected:
-    //Updates client behavior for one frame.
-    virtual void OnUpdate(Timestep timestep);
+    //Advances client simulation by one fixed step.
+    virtual void OnFixedUpdate(Timestep step);
 
-    //Renders client behavior for one frame.
-    virtual void OnRender();
+    //Updates client behavior once per frame with the real elapsed time.
+    virtual void OnFrameUpdate(Timestep delta);
+
+    //Renders client behavior for one frame, interpolated by `alpha`.
+    virtual void OnRender(float alpha);
 
 private:
     //Stops the application after a routed window-close request.

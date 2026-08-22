@@ -101,7 +101,7 @@ public:
     }
 
     //Tracks a smoothed frame rate for the readout.
-    void OnUpdate(Timestep timestep) override
+    void OnFrameUpdate(Timestep timestep) override
     {
         const float seconds = static_cast<float>(timestep.GetSeconds());
         if (seconds <= 0.0f)
@@ -115,8 +115,9 @@ public:
     }
 
     //Draws the overlay with depth testing off so it sits above the scene.
-    void OnRender() override
+    void OnRender(float alpha) override
     {
+        (void)alpha;
         Renderer::SetDepthTest(false);
         Renderer::BeginScene(m_Camera);
 

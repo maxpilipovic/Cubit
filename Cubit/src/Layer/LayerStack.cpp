@@ -40,16 +40,22 @@ void LayerStack::PushOverlay(std::unique_ptr<Layer> overlay)
     overlayPointer->OnAttach();
 }
 
-void LayerStack::OnUpdate(Timestep timestep)
+void LayerStack::OnFixedUpdate(Timestep step)
 {
     for (const auto& layer : m_Data->Layers)
-        layer->OnUpdate(timestep);
+        layer->OnFixedUpdate(step);
 }
 
-void LayerStack::OnRender()
+void LayerStack::OnFrameUpdate(Timestep delta)
 {
     for (const auto& layer : m_Data->Layers)
-        layer->OnRender();
+        layer->OnFrameUpdate(delta);
+}
+
+void LayerStack::OnRender(float alpha)
+{
+    for (const auto& layer : m_Data->Layers)
+        layer->OnRender(alpha);
 }
 
 void LayerStack::OnEvent(Event& event)

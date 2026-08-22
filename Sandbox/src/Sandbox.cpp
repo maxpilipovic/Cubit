@@ -166,7 +166,7 @@ public:
 
     //Walks the player through the chunk under gravity and moves the camera to
     //the resulting eye position.
-    void OnUpdate(Timestep timestep) override
+    void OnFixedUpdate(Timestep timestep) override
     {
         const float seconds = static_cast<float>(timestep.GetSeconds());
         const bool inFluid = VoxelCollision::OverlapsFluid(
@@ -236,8 +236,9 @@ public:
     }
 
     //Draws the meshed voxel world through Cubit's scene renderer.
-    void OnRender() override
+    void OnRender(float alpha) override
     {
+        (void)alpha;
         m_WorldRenderer.Update(m_World);
 
         Renderer::BeginScene(m_CameraController.GetCamera());

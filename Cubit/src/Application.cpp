@@ -1,6 +1,7 @@
 #include "cub.h"
 
 #include "Cubit/Application.h"
+#include "Cubit/FrameClock.h"
 #include "Cubit/Input.h"
 #include "Cubit/Layer/LayerStack.h"
 #include "Cubit/Logger.h"
@@ -65,6 +66,7 @@ void Application::Run()
 
     using Clock = std::chrono::steady_clock;
     auto lastFrameTime = Clock::now();
+    FrameClock frameClock;
 
     while (m_Data->Running)
     {
@@ -79,13 +81,27 @@ void Application::Run()
 
         const Timestep timestep(frameDuration.count());
 
-        m_Data->Layers.OnUpdate(timestep);
-        OnUpdate(timestep);
+        // Every layer takes one step before any layer takes the next. Stepping a
+        // layer to completion first would let a layer read another's state from
+        // up to MaxTicksPerFrame steps in the future.
+        constexpr Timestep step = FrameClock::Step();
+        const int ticks = frameClock.Advance(frameDuration.count());
+        for (int tick = 0; tick < ticks; ++tick)
+        {
+            m_Data->Layers.OnFixedUpdate(step);
+            OnFixedUpdate(step);
+        }
+
+        // After the steps, so per-frame work observes their result.
+        m_Data->Layers.OnFrameUpdate(timestep);
+        OnFrameUpdate(timestep);
+
+        const float alpha = frameClock.Alpha();
 
         Renderer::SetClearColor(0.08f, 0.10f, 0.15f, 1.0f);
         Renderer::Clear();
-        m_Data->Layers.OnRender();
-        OnRender();
+        m_Data->Layers.OnRender(alpha);
+        OnRender(alpha);
         m_Data->WindowInstance->SwapBuffers();
     }
 }
@@ -133,13 +149,19 @@ Window& Application::GetWindow()
     return *m_Data->WindowInstance;
 }
 
-void Application::OnUpdate(Timestep timestep)
+void Application::OnFixedUpdate(Timestep step)
 {
-    (void)timestep;
+    (void)step;
 }
 
-void Application::OnRender()
+void Application::OnFrameUpdate(Timestep delta)
 {
+    (void)delta;
+}
+
+void Application::OnRender(float alpha)
+{
+    (void)alpha;
 }
 
 bool Application::OnWindowClose(WindowCloseEvent& event)
