@@ -21,7 +21,7 @@ namespace DebugFont
     constexpr std::uint32_t CellHeight = GlyphHeight + 1;
 
     //Characters in the same order as the glyph table below.
-    constexpr std::string_view Order = "0123456789-.: ACDEFGNOPS";
+    constexpr std::string_view Order = "0123456789-.: ACDEFGNOPST";
 
     //Each glyph is seven rows of five columns, top row first.
     constexpr const char* Glyphs[][GlyphHeight] =
@@ -49,7 +49,8 @@ namespace DebugFont
         { "#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#", "#...#" }, // N
         { ".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###." }, // O
         { "####.", "#...#", "#...#", "####.", "#....", "#....", "#...." }, // P
-        { ".####", "#....", "#....", ".###.", "....#", "....#", "####." }  // S
+        { ".####", "#....", "#....", ".###.", "....#", "....#", "####." }, // S
+        { "#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.." }  // T
     };
 
     constexpr std::uint32_t GlyphCount =

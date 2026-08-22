@@ -31,6 +31,11 @@ struct HudState
     std::size_t DrawnChunks = 0;
     std::size_t TotalChunks = 0;
     std::size_t PendingChunks = 0;
+
+    //Fixed simulation steps run during the last frame. Above 1 the renderer is
+    //behind the simulation; at FrameClock::MaxTicksPerFrame the loop has stopped
+    //running every step it owes and the simulation is running slow.
+    int StepsPerFrame = 0;
 };
 
 //Draws screen-space overlay art on top of the rendered scene.
@@ -236,6 +241,9 @@ private:
 
         y -= lineHeight;
         DrawText("PENDING " + std::to_string(m_State->PendingChunks), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("STEPS " + std::to_string(m_State->StepsPerFrame), TextMargin, y);
 
         y -= lineHeight;
         DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)), TextMargin, y);

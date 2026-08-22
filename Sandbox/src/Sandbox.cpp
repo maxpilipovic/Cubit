@@ -171,6 +171,7 @@ public:
         // The step is about to overwrite the position rendering interpolates
         // from, so keep it first.
         m_PreviousPlayerPosition = m_PlayerPosition;
+        ++m_StepsThisFrame;
 
         const float seconds = static_cast<float>(timestep.GetSeconds());
         const bool inFluid = VoxelCollision::OverlapsFluid(
@@ -235,6 +236,14 @@ public:
             TeleportPlayer(m_Spawn);
             m_VerticalVelocity = 0.0f;
         }
+    }
+
+    //Publishes how many fixed steps ran this frame, then resets for the next.
+    void OnFrameUpdate(Timestep timestep) override
+    {
+        (void)timestep;
+        m_HudState->StepsPerFrame = m_StepsThisFrame;
+        m_StepsThisFrame = 0;
     }
 
     //Draws the meshed voxel world through Cubit's scene renderer.
@@ -560,10 +569,12 @@ private:
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
     glm::vec3 m_PlayerPosition{ 0.0f };
-    // Where the player stood at the end of the previous fixed step. Rendering
-    // interpolates between this and the current position, so motion stays smooth
-    // when frames and steps do not line up.
+    //Where the player stood at the end of the previous fixed step. Rendering
+    //interpolates between this and the current position, so motion stays smooth
+    //when frames and steps do not line up.
     glm::vec3 m_PreviousPlayerPosition{ 0.0f };
+    //Counted across the current frame's steps and published by OnFrameUpdate.
+    int m_StepsThisFrame = 0;
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
     bool m_EyeInFluid = false;
