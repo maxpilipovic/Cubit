@@ -48,7 +48,7 @@ TEST_CASE("Every layer receives every fixed step and one frame update")
     stack.OnFixedUpdate(FrameClock::Step());
     stack.OnFrameUpdate(Timestep(0.033));
 
-    //Two steps and one frame update reach both, not one each or two frames.
+    // Two steps and one frame update reach both, not one each or two frames.
     CHECK(layerPointer->FixedUpdates == 2);
     CHECK(overlayPointer->FixedUpdates == 2);
     CHECK(layerPointer->FrameUpdates == 1);

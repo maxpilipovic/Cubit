@@ -33,8 +33,9 @@ struct HudState
     std::size_t PendingChunks = 0;
 
     //Fixed simulation steps run during the last frame. Above 1 the renderer is
-    //behind the simulation; at FrameClock::MaxTicksPerFrame the loop has stopped
-    //running every step it owes and the simulation is running slow.
+    //behind the simulation; a value sustained at FrameClock::MaxTicksPerFrame
+    //suggests the frame rate has fallen far enough that steps may be being
+    //dropped.
     int StepsPerFrame = 0;
 };
 

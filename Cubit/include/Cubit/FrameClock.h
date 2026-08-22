@@ -22,7 +22,7 @@ public:
     int Advance(double frameSeconds);
 
     //How far the accumulator sits between the last completed step and the next,
-    //in [0, 1). Rendering interpolates by this.
+    //in [0, 1]. Rendering interpolates by this.
     float Alpha() const;
 
     //The duration every fixed step advances the simulation by.

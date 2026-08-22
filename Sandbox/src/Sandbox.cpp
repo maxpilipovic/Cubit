@@ -164,8 +164,9 @@ public:
         m_Shader = std::make_unique<Shader>(vertexSource, fragmentSource);
     }
 
-    //Walks the player through the chunk under gravity and moves the camera to
-    //the resulting eye position.
+    //Advances the player through the chunk by one fixed step under gravity.
+    //The camera is deliberately NOT moved here — rendering interpolates the
+    //eye between steps in OnRender.
     void OnFixedUpdate(Timestep timestep) override
     {
         // The step is about to overwrite the position rendering interpolates
@@ -354,6 +355,10 @@ private:
     //Interpolating a respawn or a reload would smear the camera across the map
     //for a frame, so both positions are written together and the lerp that
     //follows is a no-op.
+    //
+    //Deliberately does not reset m_VerticalVelocity — that stays the caller's
+    //business, and all current callers zero it themselves. A future teleport
+    //site that forgets inherits whatever fall velocity the player had.
     void TeleportPlayer(const glm::vec3& position)
     {
         m_PlayerPosition = position;

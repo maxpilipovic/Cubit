@@ -159,11 +159,18 @@ Only three, and each for a specific reason rather than general tidiness.
    wanted. `Application::Run` fans out the tick loop outer and the layers inner,
    so every layer takes one step before any layer takes the next. The Sandbox
    camera now interpolates between the previous and current fixed-step player
-   position by `alpha`, with the four discontinuous moves (spawn, F9 reload, and
+   position by `alpha`, with every discontinuous move (spawn, F9 reload, and
    the like) routed through a `TeleportPlayer` helper that snaps both positions
-   so they are never interpolated through. On screen at 144 fps against the 60
-   Hz tick, frames outrun steps by roughly 2.4x, so the interpolation is doing
-   real work on essentially every frame rather than sitting there speculatively.
+   so they are never interpolated through. There are three call sites — the
+   constructor, the fall reset, and `LiftPlayerClearOfTerrain` — the last of
+   which used to produce two separate outcomes (the lift result and the
+   solid-column fallback) before this rewrite collapsed them into one
+   teleport; that rewrite is also what closed the last gap, because the old
+   version mutated `m_PlayerPosition` in a loop and would have left the
+   previous position stale after an F9 reload. On screen at 144 fps against
+   the 60 Hz tick, frames outrun steps by roughly 2.4x, so most frames run
+   zero ticks and `STEPS` is seen alternating between 0 and 1 — roughly 0, 0,
+   1 repeating — rather than sitting at a steady 1.
    Two checks remain unverified rather than passed, because keyboard input
    cannot be delivered to the window from a script: jumping and dragging the
    window while airborne (confirming no snap to the ground on release), and the
