@@ -41,8 +41,8 @@ TEST_CASE("A zero delta owes nothing")
 
 TEST_CASE("Short frames accumulate into a step on the frame that crosses")
 {
-    //The fencepost this unit exists for: two frames of 0.4 owe nothing, and the
-    //third crosses the boundary rather than the second.
+    // The fencepost this unit exists for: two frames of 0.4 owe nothing, and the
+    // third crosses the boundary rather than the second.
     FrameClock clock;
 
     CHECK(clock.Advance(Step * 0.4) == 0);
@@ -57,8 +57,20 @@ TEST_CASE("A long stall runs at most the cap and discards the surplus")
 
     CHECK(clock.Advance(3.0) == FrameClock::MaxTicksPerFrame);
 
-    //Whole steps still owed are dropped, so nothing is left to interpolate by.
+    // Whole steps still owed are dropped, so nothing is left to interpolate by.
     CHECK(clock.Alpha() == doctest::Approx(0.0f));
+}
+
+TEST_CASE("A frame owing exactly the cap keeps its leftover fraction")
+{
+    // Separates dropping a whole step still owed from dropping whenever the cap
+    // is reached. The second form would throw away a legitimate alpha, and every
+    // other case in this file passes under either.
+    FrameClock clock;
+
+    CHECK(clock.Advance(Step * (FrameClock::MaxTicksPerFrame + 0.5)) ==
+        FrameClock::MaxTicksPerFrame);
+    CHECK(clock.Alpha() == doctest::Approx(0.5f));
 }
 
 TEST_CASE("The frame after a stall carries no debt")
@@ -72,7 +84,7 @@ TEST_CASE("The frame after a stall carries no debt")
 
 TEST_CASE("A negative delta is ignored rather than subtracted")
 {
-    //A clock that ran backwards would hand back time the simulation already ran.
+    // A clock that ran backwards would hand back time the simulation already ran.
     FrameClock clock;
     clock.Advance(Step * 0.75);
 
@@ -88,8 +100,8 @@ TEST_CASE("A thousand awkward frames do not drift")
     for (int frame = 0; frame < 1000; ++frame)
         total += clock.Advance(0.0073);
 
-    //7.3 seconds at 60 Hz is 438 steps. Allow one either side for the accumulated
-    //floating-point error this test exists to bound.
+    // 7.3 seconds at 60 Hz is 438 steps. Allow one either side for the accumulated
+    // floating-point error this test exists to bound.
     CHECK(total >= 437);
     CHECK(total <= 439);
 }
