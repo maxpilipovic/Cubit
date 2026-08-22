@@ -111,7 +111,7 @@ public:
         // LoadWorld resolves the spawn but deliberately does not teleport to
         // it: F9 reloads mid-session and should leave the player where they
         // were working. Starting fresh is the one time it should.
-        m_PlayerPosition = m_Spawn;
+        TeleportPlayer(m_Spawn);
 
         // Face the middle of the map, level with the eye. Aiming at the literal
         // centre of the world box would tilt the view into the ground.
@@ -124,7 +124,7 @@ public:
         const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
         m_CameraController.SetRotation(rotation.x, rotation.y);
 
-        UpdateCameraPosition();
+        UpdateCameraPosition(1.0f);
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -168,6 +168,10 @@ public:
     //the resulting eye position.
     void OnFixedUpdate(Timestep timestep) override
     {
+        // The step is about to overwrite the position rendering interpolates
+        // from, so keep it first.
+        m_PreviousPlayerPosition = m_PlayerPosition;
+
         const float seconds = static_cast<float>(timestep.GetSeconds());
         const bool inFluid = VoxelCollision::OverlapsFluid(
             m_World, m_PlayerPosition, PlayerHalfExtents);
@@ -228,17 +232,16 @@ public:
         // The chunk is not a closed world, so a player can walk off its edge.
         if (m_PlayerPosition.y < FallResetHeight)
         {
-            m_PlayerPosition = m_Spawn;
+            TeleportPlayer(m_Spawn);
             m_VerticalVelocity = 0.0f;
         }
-
-        UpdateCameraPosition();
     }
 
     //Draws the meshed voxel world through Cubit's scene renderer.
     void OnRender(float alpha) override
     {
-        (void)alpha;
+        UpdateCameraPosition(alpha);
+
         m_WorldRenderer.Update(m_World);
 
         Renderer::BeginScene(m_CameraController.GetCamera());
@@ -326,11 +329,26 @@ private:
         return direction;
     }
 
-    //Places the camera at eye height above the player, in world space.
-    void UpdateCameraPosition()
+    //Places the camera at eye height above the player, in world space, at the
+    //point the player occupied `alpha` of the way through the current step.
+    void UpdateCameraPosition(float alpha)
     {
+        const glm::vec3 position =
+            glm::mix(m_PreviousPlayerPosition, m_PlayerPosition, alpha);
+
         m_CameraController.SetPosition(
-            m_PlayerPosition + WorldOffset + glm::vec3(0.0f, EyeOffset, 0.0f));
+            position + WorldOffset + glm::vec3(0.0f, EyeOffset, 0.0f));
+    }
+
+    //Moves the player without interpolating through the space in between.
+    //
+    //Interpolating a respawn or a reload would smear the camera across the map
+    //for a frame, so both positions are written together and the lerp that
+    //follows is a no-op.
+    void TeleportPlayer(const glm::vec3& position)
+    {
+        m_PlayerPosition = position;
+        m_PreviousPlayerPosition = position;
     }
 
     //Breaks or places a block along the camera's view ray.
@@ -412,7 +430,7 @@ private:
 
         LiftPlayerClearOfTerrain();
         m_VerticalVelocity = 0.0f;
-        UpdateCameraPosition();
+        UpdateCameraPosition(1.0f);
     }
 
     //Steps the player up until their box is clear of solid blocks.
@@ -429,13 +447,17 @@ private:
     {
         const float top = static_cast<float>(m_World.GetHeight());
 
-        while (m_PlayerPosition.y < top &&
-            VoxelCollision::Overlaps(m_World, m_PlayerPosition, PlayerHalfExtents))
-            m_PlayerPosition.y += 1.0f;
+        glm::vec3 lifted = m_PlayerPosition;
+        while (lifted.y < top &&
+            VoxelCollision::Overlaps(m_World, lifted, PlayerHalfExtents))
+            lifted.y += 1.0f;
 
         // A column solid to the sky has nowhere to stand.
-        if (VoxelCollision::Overlaps(m_World, m_PlayerPosition, PlayerHalfExtents))
-            m_PlayerPosition = m_Spawn;
+        if (VoxelCollision::Overlaps(m_World, lifted, PlayerHalfExtents))
+            lifted = m_Spawn;
+
+        // A lift is a discontinuity, so it must not be interpolated through.
+        TeleportPlayer(lifted);
     }
 
     //Resolves the spawn hint against the loaded map.
@@ -538,6 +560,10 @@ private:
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
     glm::vec3 m_PlayerPosition{ 0.0f };
+    // Where the player stood at the end of the previous fixed step. Rendering
+    // interpolates between this and the current position, so motion stays smooth
+    // when frames and steps do not line up.
+    glm::vec3 m_PreviousPlayerPosition{ 0.0f };
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
     bool m_EyeInFluid = false;
