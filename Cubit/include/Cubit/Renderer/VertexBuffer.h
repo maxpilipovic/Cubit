@@ -10,6 +10,10 @@ public:
     //Creates GPU storage containing raw vertex data.
     VertexBuffer(const void* data, std::uint32_t size);
 
+    //Creates empty GPU storage sized for vertex data that is rewritten every
+    //frame.
+    explicit VertexBuffer(std::uint32_t size);
+
     //Releases the owned OpenGL vertex buffer.
     ~VertexBuffer();
 

@@ -5,6 +5,7 @@
 #include "Cubit/Input.h"
 #include "Cubit/Layer/LayerStack.h"
 #include "Cubit/Logger.h"
+#include "Cubit/Renderer/DebugDraw.h"
 #include "Cubit/Renderer/Renderer.h"
 #include "Cubit/Window.h"
 #include "Core/CoreLogger.h"
@@ -52,6 +53,10 @@ Application::Application()
 
 Application::~Application()
 {
+    // Before delete m_Data, which destroys the window and with it the GL
+    // context these resources belong to.
+    DebugDraw::Shutdown();
+
     Input::SetWindow(nullptr);
     delete m_Data;
     CB_CORE_INFO("Application destroyed");

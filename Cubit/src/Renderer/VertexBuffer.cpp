@@ -11,6 +11,13 @@ VertexBuffer::VertexBuffer(const void* data, std::uint32_t size)
     glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);
 }
 
+VertexBuffer::VertexBuffer(std::uint32_t size)
+{
+    glGenBuffers(1, &m_RendererId);
+    glBindBuffer(GL_ARRAY_BUFFER, m_RendererId);
+    glBufferData(GL_ARRAY_BUFFER, size, nullptr, GL_DYNAMIC_DRAW);
+}
+
 VertexBuffer::~VertexBuffer()
 {
     if (m_RendererId != 0)
