@@ -32,6 +32,7 @@
 #include "Cubit/Timestep.h"
 #include "Cubit/Window.h"
 #include "Cubit/Voxel/Block.h"
+#include "Cubit/Voxel/BlockEdit.h"
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
 #include "Cubit/Voxel/VoxelCollision.h"

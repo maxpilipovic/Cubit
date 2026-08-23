@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct PlayerDiedEvent
 {
@@ -431,18 +432,19 @@ private:
         if (button == MouseCode::Right && hit.Normal == glm::ivec3(0))
             return false;
 
-        if (!m_World.IsInBounds(target.x, target.y, target.z))
+        const BlockEdit edit{
+            target,
+            button == MouseCode::Left ? BlockId{0} : m_PlaceBlock };
+
+        // Bounds and relighting both belong to ApplyBlockEdit now: an edit is
+        // one operation, not a sequence a caller has to remember the rest of.
+        const std::optional<BlockEdit> inverse = ApplyBlockEdit(m_World, edit);
+        if (!inverse)
             return false;
 
-        m_World.SetBlock(
-            target.x,
-            target.y,
-            target.z,
-            button == MouseCode::Left ? BlockId{0} : m_PlaceBlock);
-
-        // Relight the region the edit could have affected, and mark whatever
-        // chunks actually changed dirty so they remesh with the new light.
-        SkyLight::Repropagate(m_World, target.x, target.y, target.z);
+        m_Undo.push_back(*inverse);
+        if (m_Undo.size() > MaxUndoDepth)
+            m_Undo.erase(m_Undo.begin());
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
@@ -450,6 +452,24 @@ private:
             std::to_string(target.y) + "," + std::to_string(target.z));
 
         return true;
+    }
+
+    //Reverses the most recent edit.
+    //
+    //The entry is popped whether or not applying it changes anything: an
+    //inverse that comes back empty describes a cell some later edit has already
+    //overwritten, so keeping it would stall the stack on the same dead entry
+    //every press. Applying an inverse is itself an edit, but its own inverse is
+    //deliberately not pushed — that would make U alternate between two states
+    //instead of walking back through history.
+    void UndoLastEdit()
+    {
+        if (m_Undo.empty())
+            return;
+
+        const BlockEdit inverse = m_Undo.back();
+        m_Undo.pop_back();
+        ApplyBlockEdit(m_World, inverse);
     }
 
     //Logs a player-death notification received from the gameplay event bus.
@@ -478,6 +498,8 @@ private:
 
         LiftPlayerClearOfTerrain();
         m_VerticalVelocity = 0.0f;
+        // The stack describes a world that no longer exists.
+        m_Undo.clear();
         UpdateCameraPosition(1.0f);
     }
 
@@ -590,6 +612,12 @@ private:
             return true;
         }
 
+        if (event.GetKeyCode() == KeyCode::U)
+        {
+            UndoLastEdit();
+            return true;
+        }
+
         const int key = static_cast<int>(event.GetKeyCode());
         const int first = static_cast<int>(KeyCode::D1);
         if (key >= first && key < first + PlaceableBlockCount)
@@ -614,6 +642,10 @@ private:
     glm::vec3 m_PreviousPlayerPosition{ 0.0f };
     //Counted across the current frame's steps and published by OnFrameUpdate.
     int m_StepsThisFrame = 0;
+    //Inverses of applied edits, newest last. Capped so a long session cannot
+    //creep; the oldest entries are the least likely to be wanted back.
+    static constexpr std::size_t MaxUndoDepth = 256;
+    std::vector<BlockEdit> m_Undo;
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
     bool m_EyeInFluid = false;
