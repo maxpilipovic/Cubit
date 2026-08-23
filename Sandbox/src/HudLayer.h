@@ -37,6 +37,9 @@ struct HudState
     //suggests the frame rate has fallen far enough that steps may be being
     //dropped.
     int StepsPerFrame = 0;
+
+    //Edits that can still be undone.
+    std::size_t UndoDepth = 0;
 };
 
 //Draws screen-space overlay art on top of the rendered scene.
@@ -245,6 +248,9 @@ private:
 
         y -= lineHeight;
         DrawText("STEPS " + std::to_string(m_State->StepsPerFrame), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("UNDO " + std::to_string(m_State->UndoDepth), TextMargin, y);
 
         y -= lineHeight;
         DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)), TextMargin, y);

@@ -248,6 +248,7 @@ public:
     {
         (void)timestep;
         m_HudState->StepsPerFrame = m_StepsThisFrame;
+        m_HudState->UndoDepth = m_Undo.size();
         m_StepsThisFrame = 0;
     }
 
