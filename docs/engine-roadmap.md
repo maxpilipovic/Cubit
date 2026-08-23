@@ -218,11 +218,42 @@ Only three, and each for a specific reason rather than general tidiness.
    plane triples; and thick lines, which need quad expansion since
    `glLineWidth` above 1.0 isn't supported in core profile.
 
-3. **A `BlockEdit` value type.** Not an entity system — just making an edit a
-   piece of *data* that can be applied, sent, and replayed, instead of
-   `Sandbox.cpp` calling `World::SetBlock` directly. It is the seam replication,
-   undo, and demo recording all key off, and it is a small change now against a
-   refactor of every call site later.
+3. ~~**A `BlockEdit` value type.**~~ **DONE 2026-08-22** — `BlockEdit` is one
+   block and one position, applied through `ApplyBlockEdit(World&, const
+   BlockEdit&)`, which returns `std::optional<BlockEdit>` — the inverse —
+   rather than the design carrying a `Previous` field: a client sending an
+   edit cannot honestly report the previous block, it only believes it knows,
+   so the previous value comes back from applying instead. Applying also
+   relights, calling `SkyLight::Repropagate` before returning, so an edit is
+   one operation rather than a ritual whose second half every caller has to
+   remember — a caller that forgot would produce wrong light that reads as a
+   lighting bug, not a missing call. An out-of-range position returns
+   `nullopt` rather than throwing the way `World::SetBlock` does, because once
+   an edit is data that can arrive from a file or a socket, a bad coordinate
+   is malformed input rather than a caller bug; and a no-op — setting a block
+   to what it already is — is rejected the same way, which is what keeps undo
+   meaningful: an inverse that does nothing when popped would make the player
+   press `U` twice for one change.
+
+   The Sandbox proves the seam rather than just compiling against it:
+   `SandboxLayer` now routes its edit through `ApplyBlockEdit` instead of
+   calling `World::SetBlock` directly, and keeps the returned inverses on a
+   256-deep undo stack popped by `U`, cleared on reload because those
+   inverses describe a world that no longer exists. Eleven unit tests back
+   it, and the one that actually carries the design builds a sealed air
+   chamber under an intact roof, breaks the roof to flood it with light,
+   applies the inverse, and checks the chamber is dark again cell by cell.
+   Review found that assertion was initially unfalsifiable — a comparator
+   stubbed to always report "no difference" passed the whole suite — so a
+   further test now proves the comparator itself can fail before trusting it
+   to prove anything else.
+
+   Left out: redo, edit recording for demo playback, publishing edits on the
+   `EventBus`, and tick numbering — `FrameClock` counts steps per frame, not
+   total ticks, so a tick field would have nothing honest to fill it. With
+   this item done, all three "worth doing before gameplay" entries are
+   closed. What remains on that list is the "let the game pull these" set,
+   which deliberately waits for a game to ask for it.
 
 ### Let the game pull these
 
