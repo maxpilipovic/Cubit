@@ -40,8 +40,18 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
             throw std::runtime_error("Failed to initialize GLFW");
     }
 
+    // GLAD resolves glDebugMessageCallback only through its 4.3 core path — it
+    // was generated without the GL_KHR_debug extension — so a 3.3 context leaves
+    // the pointer null on every driver, however much KHR_debug the driver
+    // actually supports. Debug builds therefore ask for 4.3; Release keeps the
+    // 3.3 floor, since that is the version that ships.
+#ifdef CB_DEBUG
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+#endif
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // A debug context is what lets the driver report through the callback
