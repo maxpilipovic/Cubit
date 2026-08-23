@@ -194,6 +194,31 @@ TEST_CASE("A sequence of edits undone in reverse restores every block")
         CHECK(world.GetBlock(i, i + 1, i + 2) == BlockId{0});
 }
 
+TEST_CASE("The light comparison reports the first differing cell")
+{
+    // Guards the guard. The round-trip case below is only evidence if this
+    // comparison can itself fail, and the obvious mutation of ApplyBlockEdit —
+    // deleting the relight — trips an earlier assertion without ever reaching
+    // it. So corrupt a known cell of the snapshot and require that exact
+    // coordinate back.
+    World world = MakeChamberWorld();
+    SkyLight::PropagateAll(world);
+
+    std::vector<std::uint8_t> before = SnapshotLight(world);
+
+    // SnapshotLight walks z outermost, then y, then x.
+    const glm::ivec3 cell(16, 8, 16);
+    const std::size_t index =
+        (static_cast<std::size_t>(cell.z) * world.GetHeight() + cell.y) *
+            world.GetWidth() + cell.x;
+    before[index] = static_cast<std::uint8_t>(before[index] + 1);
+
+    const std::optional<glm::ivec3> difference = FirstLightDifference(world, before);
+
+    REQUIRE(difference.has_value());
+    CHECK(*difference == cell);
+}
+
 TEST_CASE("An edit and its inverse leave every sky-light value unchanged")
 {
     // The property that carries the design. A Repropagate that floods the
