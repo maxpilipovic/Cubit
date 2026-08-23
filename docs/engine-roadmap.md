@@ -239,7 +239,7 @@ Only three, and each for a specific reason rather than general tidiness.
    `SandboxLayer` now routes its edit through `ApplyBlockEdit` instead of
    calling `World::SetBlock` directly, and keeps the returned inverses on a
    256-deep undo stack popped by `U`, cleared on reload because those
-   inverses describe a world that no longer exists. Eleven unit tests back
+   inverses describe a world that no longer exists. Ten unit tests back
    it, and the one that actually carries the design builds a sealed air
    chamber under an intact roof, breaks the roof to flood it with light,
    applies the inverse, and checks the chamber is dark again cell by cell.

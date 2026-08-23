@@ -90,12 +90,13 @@ current map is a 256x64x256 battlefield.
   off the map
 - Breaking and placing blocks along the view ray, within reach, relit on each edit
 - A debug HUD: crosshair, position, grounded flag, total meshed faces, drawn and total
-  chunks, chunks still pending a remesh, and a smoothed frame rate — drawn with a 5x7
-  bitmap font defined in code
+  chunks, chunks still pending a remesh, physics steps per frame, undo stack depth, and
+  a smoothed frame rate — drawn with a 5x7 bitmap font defined in code
 
 **Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
-a block, right click places one, and `1`–`8` pick the colour. `F5` saves the edited
-world, `F9` restores it — a checkpoint pair for authoring a map by playing it.
+a block, right click places one, and `1`–`8` pick the colour. `U` undoes the last block
+edit. `F5` saves the edited world, `F9` restores it — a checkpoint pair for authoring a
+map by playing it.
 
 ## Building
 

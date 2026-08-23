@@ -489,6 +489,9 @@ private:
         // current world untouched, rather than half-replaced.
         m_World = BuildWorld(VoxLoader::LoadFile(path));
 
+        // The stack describes a world that no longer exists.
+        m_Undo.clear();
+
         // Light has to exist before anything meshes, or the first frames bake
         // a fully dark world into their vertex colours.
         SkyLight::PropagateAll(m_World);
@@ -499,8 +502,6 @@ private:
 
         LiftPlayerClearOfTerrain();
         m_VerticalVelocity = 0.0f;
-        // The stack describes a world that no longer exists.
-        m_Undo.clear();
         UpdateCameraPosition(1.0f);
     }
 

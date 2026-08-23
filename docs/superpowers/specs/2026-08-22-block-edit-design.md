@@ -97,8 +97,8 @@ It **loses** two things, both of which now belong to `ApplyBlockEdit`:
 - the `SkyLight::Repropagate(...)` call.
 
 That migration is the point of the change: the ritual moves inside the unit, so no
-future caller has to know it. The log line is derived from the result rather than
-from which mouse button was pressed.
+future caller has to know it. The log line is derived from which mouse button was
+pressed, since left click always writes air and right click never does.
 
 It **gains** an undo stack:
 

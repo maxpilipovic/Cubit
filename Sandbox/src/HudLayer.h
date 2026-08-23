@@ -226,7 +226,7 @@ private:
         DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), TextMargin, y);
 
         y -= lineHeight;
-        // The debug font only carries "0123456789-.: ACDEFGNOPST", so the flags
+        // The debug font only carries "0123456789-.: ACDEFGNOPSTU", so the flags
         // are digits and the label avoids every letter it lacks — an unsupported
         // character renders as a blank, which would silently hide a set flag.
         DrawText(

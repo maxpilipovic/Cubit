@@ -4,6 +4,7 @@
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -207,7 +208,7 @@ TEST_CASE("The light comparison reports the first differing cell")
     std::vector<std::uint8_t> before = SnapshotLight(world);
 
     // SnapshotLight walks z outermost, then y, then x.
-    const glm::ivec3 cell(16, 8, 16);
+    const glm::ivec3 cell(14, 7, 19);
     const std::size_t index =
         (static_cast<std::size_t>(cell.z) * world.GetHeight() + cell.y) *
             world.GetWidth() + cell.x;
