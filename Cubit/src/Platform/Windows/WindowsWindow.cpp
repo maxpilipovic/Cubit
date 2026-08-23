@@ -43,6 +43,13 @@ WindowsWindow::WindowsWindow(const WindowProperties& properties)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    // A debug context is what lets the driver report through the callback
+    // installed in OpenGLContext::Init. It costs performance, so only Debug
+    // builds ask for one.
+#ifdef CB_DEBUG
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+#endif
     m_Window = glfwCreateWindow(
         static_cast<int>(m_Data.Width),
         static_cast<int>(m_Data.Height),
