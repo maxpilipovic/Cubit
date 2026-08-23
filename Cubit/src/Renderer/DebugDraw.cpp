@@ -62,9 +62,8 @@ namespace
         if (s_VertexBuffer != nullptr && vertexCount <= s_Capacity)
             return;
 
-        s_Capacity = vertexCount;
         s_VertexBuffer = std::make_unique<VertexBuffer>(
-            static_cast<std::uint32_t>(s_Capacity * sizeof(DebugVertex)));
+            static_cast<std::uint32_t>(vertexCount * sizeof(DebugVertex)));
 
         // The array records the buffer it was configured against, so it is
         // rebuilt alongside it rather than left pointing at the freed one.
@@ -75,6 +74,8 @@ namespace
                 { ShaderDataType::Float3 },
                 { ShaderDataType::Float4 }
             });
+
+        s_Capacity = vertexCount;
     }
 }
 

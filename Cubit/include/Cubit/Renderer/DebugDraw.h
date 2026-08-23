@@ -17,6 +17,11 @@ class Camera;
 //reference to plumb one through. This header pulls in no OpenGL, so such code
 //may call it without acquiring a rendering dependency — but a build that never
 //calls Flush accumulates without bound, which is what Clear is for.
+//
+//Main thread only, and one GL context only: the batch is an unsynchronised
+//vector, and the GPU resources are process-wide statics with no notion of which
+//context created them. Neither is a limit anything hits today, and both are
+//cheap to state now rather than to discover later.
 class CB_API DebugDraw
 {
 public:

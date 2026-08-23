@@ -92,7 +92,10 @@ TEST_CASE("A degenerate box is drawn rather than rejected")
 
 TEST_CASE("An inverted box is drawn as given rather than corrected")
 {
-    // A debug tool that silently repairs its input hides the bug being hunted.
+    // This documents intent rather than verifying it. Swapping min and max maps
+    // corner index i to ~i & 7, a bijection, so a normalizing AddBox and this
+    // one emit the same 24 vertices in a different order — no implementation
+    // built from per-axis corner combinations could fail this.
     DebugLineBatch batch;
     batch.AddBox(BoxMax, BoxMin, Red);
 

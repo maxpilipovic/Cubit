@@ -24,10 +24,10 @@ namespace
         (void)source;
         (void)type;
         (void)id;
-        (void)length;
         (void)userParameter;
 
-        const std::string text = std::string("OpenGL: ") + message;
+        const std::string text =
+            "OpenGL: " + std::string(message, static_cast<std::size_t>(length));
 
         if (severity == GL_DEBUG_SEVERITY_HIGH)
         {
@@ -61,9 +61,12 @@ void OpenGLContext::Init()
         reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     // Without this a GL error produces no output at all and surfaces as wrong
-    // pixels, which is the most expensive way to find out. GL_DEBUG_OUTPUT is
-    // core only in 4.3 and this context is 3.3, so the entry point is probed
-    // rather than assumed; nearly every driver offers it through GL_KHR_debug.
+    // pixels, which is the most expensive way to find out. The entry point is
+    // probed because GLAD resolves it only through its 4.3 core path — it was
+    // generated without the GL_KHR_debug extension — and only Debug builds ask
+    // for a 4.3 context. So this branch always succeeds in Debug and always
+    // fails in Release; how much KHR_debug the driver supports never enters
+    // into it.
     if (glDebugMessageCallback != nullptr)
     {
         glEnable(GL_DEBUG_OUTPUT);
@@ -89,7 +92,7 @@ void OpenGLContext::Init()
     }
     else
     {
-        CB_CORE_WARN("OpenGL debug output unavailable: no KHR_debug entry point");
+        CB_CORE_WARN("OpenGL debug output unavailable: needs the 4.3 context only Debug builds request");
     }
 }
 

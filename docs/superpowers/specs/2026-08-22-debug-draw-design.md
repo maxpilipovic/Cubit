@@ -1,7 +1,7 @@
 # Debug Line Rendering and GL Debug Output — Design
 
 **Date:** 2026-08-22
-**Status:** Approved (pending spec review)
+**Status:** Shipped 2026-08-22 — see the amendments below
 
 ## Goal
 
@@ -270,3 +270,26 @@ Build, run the Sandbox, screenshot, close via `WM_CLOSE`.
 - Any on/off toggle. Immediate mode means not calling it, and a key binding cannot
   be exercised by a screenshot script anyway.
 - Replacing the Sandbox's inline shader strings with an asset layer.
+
+## Amendments after implementation
+
+The Part 3 argument above — probe on a 3.3 context rather than pay for a 4.3
+one — turned out to be wrong, and not for a reason the driver had any say in.
+GLAD in this project was generated without the `GL_KHR_debug` extension, so it
+resolves `glDebugMessageCallback` only through `load_GL_VERSION_4_3`. On a 3.3
+context that pointer is null unconditionally; no driver's `KHR_debug` support,
+however complete, could ever have made the probe succeed. The "nearly every
+driver already offers this on 3.3" claim was true of drivers and irrelevant to
+GLAD. What shipped instead: Debug builds request a 4.3 context and Release
+keeps 3.3, so the probe still runs — and now it means something. It succeeds
+in Debug and fails in Release by construction, which is exactly the coverage
+this spec wanted, just reached by raising the ceiling for the builds that can
+afford it rather than raising the floor for everyone.
+
+`DebugDraw` also picked up a `Shutdown()` this document's sketch omits.
+`Application`'s destructor deletes the window, and with it the GL context,
+before the process tears down its statics. Without `Shutdown()`, the
+namespace-scope `unique_ptr`s in `DebugDraw.cpp` would release their GL
+objects at static destruction — after the context is already gone. `Shutdown`
+gives `Application` a place to release them while the context is still current,
+the same reason it calls it explicitly rather than leaving it to DLL unload.
