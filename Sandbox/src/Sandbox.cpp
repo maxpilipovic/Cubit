@@ -33,6 +33,9 @@ namespace
     //Half extents of the player's 0.6 x 1.8 x 0.6 collision box.
     const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
 
+    //Near-black, so the outline reads against both lit terrain and sky.
+    const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
+
     //Roughly where to start. Only a column: the height, and whether this exact
     //column is usable at all, are resolved against the loaded map. A hint over
     //a hill or the river moves to the nearest spot that can hold the player
@@ -268,6 +271,12 @@ public:
             m_CameraController.GetCamera().GetPosition());
         Renderer::EndScene();
 
+        // Flushed here, while the world camera is current. The HUD overlay
+        // renders after this layer and leaves an orthographic matrix behind, so
+        // a later flush would draw these lines in screen space.
+        DrawTargetedBlockOutline();
+        DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
+
         m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
         m_HudState->DrawnChunks = m_WorldRenderer.DrawnChunkCount();
         m_HudState->TotalChunks = m_WorldRenderer.TotalChunkCount();
@@ -363,6 +372,31 @@ private:
     {
         m_PlayerPosition = position;
         m_PreviousPlayerPosition = position;
+    }
+
+    //Outlines the block a click would break, using the same ray the edit uses so
+    //a disagreement between what is highlighted and what an edit hits is itself
+    //visible.
+    void DrawTargetedBlockOutline()
+    {
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        const VoxelRayHit hit = VoxelRaycast::Cast(
+            m_World,
+            camera.GetPosition() - WorldOffset,
+            camera.GetForwardDirection(),
+            ReachDistance,
+            true);
+
+        if (!hit.Hit)
+            return;
+
+        // Nudged outward a hair so the outline is not z-fighting with the block
+        // face it traces.
+        constexpr float Swell = 0.002f;
+        const glm::vec3 min = glm::vec3(hit.Block) - glm::vec3(Swell);
+        const glm::vec3 max = min + glm::vec3(1.0f + Swell * 2.0f);
+
+        DebugDraw::Box(min, max, OutlineColor);
     }
 
     //Breaks or places a block along the camera's view ray.
