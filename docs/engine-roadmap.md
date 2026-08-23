@@ -183,13 +183,40 @@ Only three, and each for a specific reason rather than general tidiness.
    with the `BlockEdit` value type below (item 3), once an edit is a piece of
    data rather than a direct call.
 
-2. **Debug line and box rendering, plus a `KHR_debug` callback.** There is no way
-   to draw a line or a wireframe box, so a frustum, an AABB, a raycast, or
-   `FindSpawn`'s outward spiral cannot be looked at — every visual bug so far was
-   found by screenshotting and squinting. Separately, `glGetError` and
-   `GL_DEBUG_OUTPUT` appear nowhere in the codebase: a GL error today is silent.
-   Both are small, and both pay for themselves on the next bug rather than
-   eventually.
+2. ~~**Debug line and box rendering, plus a `KHR_debug` callback.**~~ **DONE
+   2026-08-22** — a `DebugLineBatch` accumulates line and wireframe-box
+   geometry on the CPU with no GL headers in sight, so it is unit tested
+   rather than eyeballed; the test that actually matters checks that each of
+   a box's 8 corners has edge-degree exactly 3, because a wrong edge table
+   still produces 24 vertices all sitting on real corners, so neither a count
+   nor an on-a-corner check would have caught it (mutation-tested by breaking
+   an edge and watching degrees come back 4,4,2,2). `DebugDraw` wraps one
+   batch plus lazily created GPU resources behind static calls, so
+   `SpawnFinder` and `VoxelCollision` can draw without a renderer reference
+   and `Cubit/src/Voxel/` stays GL-free; the flush is explicit and takes a
+   camera rather than running automatically at end-of-frame, because
+   `HudLayer` leaves an orthographic matrix current when it renders last, and
+   an implicit flush would have drawn world-space lines in HUD screen space.
+   The Sandbox now outlines the voxel the edit ray is aimed at, using the same
+   ray the editing path uses — confirmed on screen as a wireframe box
+   correctly occluded against neighbouring blocks, with no z-fighting.
+
+   The design had argued for keeping the 3.3 context and probing
+   `glDebugMessageCallback` for null, reasoning that most drivers expose
+   `GL_KHR_debug` even on 3.3. That was wrong, and not for a driver reason:
+   GLAD had been generated without the `GL_KHR_debug` extension, so
+   `glad_glDebugMessageCallback` is only ever assigned inside
+   `load_GL_VERSION_4_3`, which returns early below a 4.3 context. On a 3.3
+   context the pointer is null on every driver regardless of what the driver
+   actually supports — there was no probe that could have succeeded. Debug
+   builds now request a 4.3 core context while Release keeps 3.3, shaders
+   stay `#version 330`, and the log confirms `OpenGL debug output enabled`
+   with zero driver messages since.
+
+   Left out: a `Frustum` debug helper, because Cubit's `Frustum` stores six
+   planes rather than eight corners and recovering corners means intersecting
+   plane triples; and thick lines, which need quad expansion since
+   `glLineWidth` above 1.0 isn't supported in core profile.
 
 3. **A `BlockEdit` value type.** Not an entity system — just making an edit a
    piece of *data* that can be applied, sent, and replayed, instead of
