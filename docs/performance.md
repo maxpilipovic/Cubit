@@ -383,6 +383,12 @@ plausibly take 3,736 ms to roughly 1 s, worth ~2.7 s of Debug load.
 
 `parse` + `BuildWorld` is worth 8.5 s. Do that first. Option C stays on the table.
 
+**Done 2026-08-27 — see P11.** Two things above turned out wrong, and both were
+wrong in the same way: they were inferred from a single timer around the whole of
+`PropagateAll` rather than measured per phase. The scan did **not** dominate what
+remained — the flood did, 51% to the scan's 43%. And "roughly 1 s" undersold the
+result by more than a factor of two: it is **413 ms**.
+
 ---
 
 ## P9 — Reading the map file one byte at a time
@@ -497,6 +503,107 @@ has now expired.
 
 ---
 
+## P11 — Sky light resolved every cell through `World`
+
+**Where:** `Cubit/src/Voxel/SkyLight.cpp` — `SkyLight::PropagateAll`.
+
+**What happened:** the column scan and the flood both addressed cells through
+`World`, which turns a world position into a chunk and an offset: a bounds check,
+three divides and three modulos, per read and per write. The scan does that for all
+16.8M cells; the flood does it again for every neighbour of every cell it touches.
+
+**First, the split — because the page had guessed it wrong.** `PropagateAll` was a
+single profiler scope, so which of its phases held the 79% was inference, and the
+inference above (P8, "On option C") said the scan. Splitting it into `Scan`, `Seed`
+and `Flood` scopes said otherwise:
+
+| phase | Debug | share |
+|---|---:|---:|
+| `PropagateAll/Scan` | 1,457.8 ms | 43% |
+| `PropagateAll/Seed` | 146.7 ms | 4% |
+| **`PropagateAll/Flood`** | **1,707.8 ms** | **51%** |
+
+The flood was the larger half. A fix aimed only at the scan would have left more
+behind than it removed.
+
+**Fix:** copy the world's opacity into one flat array, propagate there, copy the
+finished light back. A neighbour is reached by adding a constant.
+
+Three details carry most of the win, and only the first was the plan:
+
+- **A padded border, left opaque.** The flood skips opaque neighbours anyway, so a
+  one-cell border that is always opaque stops it at the world edge with no bounds
+  check existing at all. Same trick as `ChunkMesher`'s 18-cube neighbourhood. The
+  old `IsInBounds` test folded into `IsOpaque` rather than sitting beside it.
+- **Cells laid out y-fastest** — the opposite of a `Chunk` — so a column is
+  contiguous and the scan is a straight sweep. This also made the scan's second
+  loop disappear: the array arrives zeroed, where the old scan had to blank the
+  cells below each column because it was writing over the previous load's light.
+- **A 4-byte index instead of a 12-byte `ivec3`**, in a `std::vector` walked by
+  cursor instead of a `std::deque` popped from the front. In a debug build a deque
+  pop is several checked operations, and this turned out to be a large part of what
+  the flood was spending.
+
+`Flood` became a template over its cell source so the edit path keeps addressing
+cells through `World`. `Repropagate` must not touch this array — it settles a
+handful of cells in 0.03 ms, and building a 35 MB copy of the world per click would
+be a catastrophic regression. One rule, two addressings, for the reason P7 gives:
+the free-fall case in the middle of that rule is exactly what would drift between
+two copies of it.
+
+**Priority:** was the whole of the remaining load cost. **Status:** DONE 2026-08-27.
+
+| phase | Debug before | Debug after | | Release before | Release after |
+|---|---:|---:|---|---:|---:|
+| `Gather` | — | 35.1 ms | | — | 8.1 ms |
+| `Scan` | 1,457.8 ms | **18.9 ms** | **77x** | 115.7 ms | 4.5 ms |
+| `Seed` | 146.7 ms | 46.8 ms | 3.1x | 19.7 ms | 4.0 ms |
+| `Flood` | 1,707.8 ms | **257.2 ms** | **6.6x** | 105.1 ms | 33.0 ms |
+| `Scatter` | — | 41.4 ms | | — | 7.1 ms |
+| **`PropagateAll`** | **3,370.7 ms** | **413.5 ms** | **8.2x** | **250.4 ms** | **63.9 ms** |
+
+Medians of three runs, before and after captured back to back in one session so
+they share machine state. Every run's first pass was cold-cache and inflated every
+phase including ones this change does not touch; those are the outliers the medians
+discard.
+
+Proved unchanged by nine cases comparing the result cell for cell against the naive
+reference implementation in `Tests/src/SkyLightTests.cpp`. Two were added
+beforehand for the chunk seams this rewrite crosses, and both were mutation-tested
+— dropping the chunk y-origin in the gather makes them fail and name the first bad
+cell. On screen the Sandbox reports `FACES 1927774`, matching the recorded face
+count exactly.
+
+### Where load stands now
+
+| Phase | Debug | share | Release |
+|---|---:|---:|---:|
+| file read + `Parse` (`LoadFile`) | 546.5 ms | 38% | 59.2 ms |
+| `BuildWorld` | 462.6 ms | 33% | 47.7 ms |
+| `SkyLight::PropagateAll` | 413.5 ms | 29% | 63.9 ms |
+| **Total** | **~1,423 ms** | | **~171 ms** |
+
+Against the 4,291 ms Debug measured immediately before this change, a **67% cut**;
+against the 33,079 ms this page opened P8 with, a **96% cut**.
+
+**There is no longer a dominant phase.** Every load item that has been optimised was
+found by one being three to twenty times the others; the three that remain are
+within 1.3x of each other, and none is doing anything obviously wasteful. Load is
+done unless something else makes it matter again.
+
+`LoadFile` and `BuildWorld` read slightly higher here than in P10's table (546 vs
+458, 463 vs 427). Nothing touched those paths — it is run-to-run drift, and it is
+the reason the phase this change *did* touch was measured back to back rather than
+against a figure from another day.
+
+**What is now the largest single cost in getting a map on screen is meshing**, at
+~4,985 ms Debug — larger than the whole of load. It does not stall, because the 4 ms
+budget slice spreads it over frames, which is why it is not in the table above; what
+it costs is the half-minute of the world visibly building itself. See P1, whose
+remaining half is threading it.
+
+---
+
 ## Where an edit stands now
 
 A break on open ground, 256×64×256 battlefield, debug build:
@@ -554,3 +661,4 @@ worth making:
 | P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Flood **done 2026-08-16** — column scan, 19.6 s → 3.7 s debug, load halved. Largest remaining piece is now `parse` + `BuildWorld` at 49% |
 | P9 | Map file read one byte at a time | `VoxLoader::LoadFile` | Was highest of remaining load cost | **Done 2026-08-27** — sized buffer + one `read`, 2,112 ms → 30.5 ms debug (69x), ~17% off total debug load |
 | P10 | `BuildWorld` marked chunks dirty per solid block, redundantly | `BuildWorld`, `World::SetBlock` | Was highest of remaining load cost | **Done 2026-08-27** — `SetBlockAssumingDirty`, 4,496 ms → 427 ms debug (10.5x); load now 79% `PropagateAll` |
+| P11 | Sky light resolved every cell through `World` | `SkyLight::PropagateAll` | Was all of the remaining load cost | **Done 2026-08-27** — flat padded array, 3,371 ms → 413 ms debug (8.2x); total load 4.29 s → 1.42 s, and no phase dominates any more |

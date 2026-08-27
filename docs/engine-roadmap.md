@@ -120,6 +120,29 @@ The largest remaining piece is now **`parse` + `BuildWorld` at 49% of debug load
 which has never been optimised. See [performance.md](performance.md) P8 and the
 [load-cost breakdown](superpowers/investigations/2026-08-16-load-cost-breakdown.md).
 
+**Load is finished, 2026-08-27.** Four fixes in one day took debug load from 33.1 s
+to **1.42 s**, a 96% cut: P9 read the map file in one call instead of a byte at a
+time, P10 stopped `BuildWorld` marking six million chunks dirty redundantly, and P11
+moved sky light off `World`'s divide-and-modulo addressing onto a flat padded array.
+What makes this the end of the arc rather than another inversion is that **no phase
+dominates any more** — the file read, `BuildWorld` and `PropagateAll` are within
+1.3x of each other and none is doing anything obviously wasteful. Every previous
+round was found by one phase being three to twenty times the others.
+
+Each of those three rounds also began by correcting a written prediction on this
+page or `performance.md`, which is the durable lesson: P8 predicted threading the
+mesher and the cost was the flood; P10 predicted ~130 ms and got 427; P11's own
+entry predicted the scan dominated and it was the flood, at 51%. Every one of those
+was inferred from a timer wrapped around too much at once. **Measure the phase you
+are about to change, not the function containing it** — the profiler exists now, so
+this costs one build and one run.
+
+The largest single cost in getting a map on screen is now **meshing**, ~5 s in a
+debug build, which is larger than the whole of load. It does not stall — the 4 ms
+budget slice spreads it over frames — but it is the half-minute of the world
+visibly building itself around you. That is P1's remaining half, and threading it
+is the only performance item left with real leverage.
+
 **What the greedy-meshing attempt taught us.** The ordering note above said AO
 should land before greedy meshing, so the merge criterion could be written
 AO-aware from the start. That was right as far as it went, but it understated the
@@ -288,9 +311,12 @@ obvious, and better shaped, the moment something concretely needs it.
   `PopLayer`/`PopOverlay` at all. Safe today only because nothing is ever
   removed; a menu, a map transition, or a disconnect makes it a dangling call.
   (`Publish` also copies the whole callback vector on every publish.)
-- **Threading.** No `<thread>`, `<mutex>` or `<atomic>` anywhere. Known for
-  meshing; note that `parse` + `BuildWorld`, the actual largest load cost, is
-  also trivially parallel.
+- **Threading.** No `<thread>`, `<mutex>` or `<atomic>` outside `Profiler.cpp`,
+  which has them only for its own per-thread buffers — no engine work is
+  threaded. **Meshing is now the one that matters**, at ~5 s of debug work
+  spread across frames, larger than the whole of load. `parse` + `BuildWorld`
+  was named here as the largest load cost; it is not any more (P9/P10/P11 took
+  load to 1.42 s), and threading it would now be chasing a third of a second.
 
 **Profiling instrumentation shipped early, 2026-08-27.** This list used to carry a
 bullet for it, predicting that the ad hoc timing rig behind every figure in
