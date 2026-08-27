@@ -490,3 +490,4 @@ worth making:
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
 | P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Flood **done 2026-08-16** — column scan, 19.6 s → 3.7 s debug, load halved. Largest remaining piece is now `parse` + `BuildWorld` at 49% |
 | P9 | Map file read one byte at a time | `VoxLoader::LoadFile` | Was highest of remaining load cost | **Done 2026-08-27** — sized buffer + one `read`, 2,112 ms → 30.5 ms debug (69x), ~17% off total debug load |
+| P10 | `BuildWorld` marks chunks dirty per solid block, redundantly | `VoxLoader.cpp` `BuildWorld`, `World::SetBlock` | High | **Measured 2026-08-27** — dirty-marking is ~100% of `BuildWorld`, all 5.95M inserts redundant; fix not yet designed. See the [investigation](superpowers/investigations/2026-08-27-buildworld-cost.md) |
