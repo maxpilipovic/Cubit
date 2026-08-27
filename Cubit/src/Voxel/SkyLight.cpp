@@ -3,6 +3,7 @@
 #include "Cubit/Voxel/SkyLight.h"
 
 #include "Cubit/Voxel/World.h"
+#include "Cubit/Profiler.h"
 
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -190,6 +191,8 @@ namespace
 
 void SkyLight::PropagateAll(World& world)
 {
+    CB_PROFILE_SCOPE("SkyLight::PropagateAll");
+
     const int width = world.GetWidth();
     const int height = world.GetHeight();
     const int depth = world.GetDepth();

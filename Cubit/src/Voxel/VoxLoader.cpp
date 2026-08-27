@@ -2,6 +2,7 @@
 
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/Chunk.h"
+#include "Cubit/Profiler.h"
 
 #include <cstring>
 #include <fstream>
@@ -229,6 +230,8 @@ namespace
 
 VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
 {
+    CB_PROFILE_SCOPE("VoxLoader::Parse");
+
     std::size_t offset = 0;
 
     if (!TagEquals(bytes, offset, "VOX "))
@@ -470,6 +473,8 @@ VoxModel VoxLoader::Parse(std::span<const std::uint8_t> bytes)
 
 VoxModel VoxLoader::LoadFile(const std::string& path)
 {
+    CB_PROFILE_SCOPE("VoxLoader::LoadFile");
+
     std::ifstream file(path, std::ios::binary);
     if (!file)
         throw std::runtime_error("vox: cannot open file: " + path);
@@ -483,6 +488,8 @@ VoxModel VoxLoader::LoadFile(const std::string& path)
 
 World BuildWorld(const VoxModel& model)
 {
+    CB_PROFILE_SCOPE("BuildWorld");
+
     const int chunksX = (model.Size.x + Chunk::Width - 1) / Chunk::Width;
     const int chunksY = (model.Size.y + Chunk::Height - 1) / Chunk::Height;
     const int chunksZ = (model.Size.z + Chunk::Depth - 1) / Chunk::Depth;

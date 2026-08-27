@@ -110,7 +110,12 @@ public:
         //The world starts with every chunk dirty, so the first render meshes it.
         //A sandbox that cannot load its map has nothing to do, so unlike F9 this
         //does not catch — the failure propagates out of the constructor.
+        //Load is the phase worth a capture: it is one-shot, it is the largest
+        //remaining cost in the engine, and it is what docs/performance.md P8
+        //tabulates. Written beside the executable, like the assets it loads.
+        Profiler::BeginSession("load", "profile-load.json");
         LoadWorld(MapPath);
+        Profiler::EndSession();
 
         // LoadWorld resolves the spawn but deliberately does not teleport to
         // it: F9 reloads mid-session and should leave the player where they

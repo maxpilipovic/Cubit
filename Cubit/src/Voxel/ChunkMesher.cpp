@@ -8,6 +8,7 @@
 
 #include "Core/CoreLogger.h"
 #include "Voxel/Neighbourhood.h"
+#include "Cubit/Profiler.h"
 
 #include <array>
 
@@ -287,6 +288,8 @@ namespace
 
 ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int chunkZ)
 {
+    CB_PROFILE_SCOPE("ChunkMesher::Build");
+
     ChunkMeshData mesh;
     const glm::ivec3 origin = World::GetChunkOrigin(chunkX, chunkY, chunkZ);
 

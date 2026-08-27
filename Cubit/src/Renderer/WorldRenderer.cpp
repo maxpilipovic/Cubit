@@ -7,6 +7,7 @@
 #include "Cubit/Renderer/Frustum.h"
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
+#include "Cubit/Profiler.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -38,6 +39,8 @@ namespace
 
 void WorldRenderer::Update(World& world)
 {
+    CB_PROFILE_SCOPE("WorldRenderer::Update");
+
     // Absorb this frame's changes into the pending set, then let the world forget
     // them: tracking changes is the world's job, scheduling remeshes is ours.
     for (const glm::ivec3& coord : world.DirtyChunks())
