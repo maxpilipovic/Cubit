@@ -434,6 +434,69 @@ attacking.
 
 ---
 
+## P10 — `BuildWorld` marked chunks dirty once per solid block
+
+**Where:** `Cubit/src/Voxel/VoxLoader.cpp` — `BuildWorld`; `Cubit/src/Voxel/World.cpp`
+— `World::SetBlock`.
+
+**What happened:** `BuildWorld` wrote every solid block through `World::SetBlock`,
+which ends in `MarkChunkDirtyAt` — three divides, three modulos, a 3x3x3 loop, and
+a `std::set<glm::ivec3>` insert that descends a red-black tree of 4,096 entries.
+On the shipped map that ran **5,952,784 times**.
+
+**And every one of them was wasted.** The `World` constructor inserts all 4,096
+chunk coordinates into the dirty set before the first block is written — that costs
+10.8 ms. So all six million subsequent inserts found the key already present and
+changed nothing.
+
+Full method and the probe that isolated it:
+[the investigation](superpowers/investigations/2026-08-27-buildworld-cost.md).
+
+**Fix:** `World::SetBlockAssumingDirty` writes a block without marking, and
+`BuildWorld` uses it. Both setters share one private `WriteBlock`, so the bounds
+check and the addressing exist once and the two differ by exactly the marking call.
+`SetBlock` is unchanged — it has one other production caller, `ApplyBlockEdit`,
+where marking is the whole point, and `WorldDirtyTests` pins its behaviour.
+
+**Priority:** was highest of the remaining load cost. **Status:** DONE 2026-08-27.
+
+| `BuildWorld` | before | after | |
+|---|---:|---:|---|
+| Debug | 4,496.4 ms | **427.1 ms** | **10.5x** |
+| Release | 219.6 ms | **43.4 ms** | 5.1x |
+
+Medians of three runs. What remains is what the work actually is: ~123 ms scanning
+the model and ~300 ms of writes.
+
+**A calibration note.** The prediction from the probe was ~130 ms, and the answer
+is ~427 ms. The probe showed `SetBlock`'s own work — bounds check, six divides and
+modulos, an array write — was negligible *relative to marking*, and that got
+rounded to negligible outright. Six million of anything is not free. The direction
+was right and the magnitude was off by 3x; worth remembering when reading a "the
+rest is free" conclusion off a profile.
+
+### Where load stands now
+
+| Phase | Debug | Release |
+|---|---:|---:|
+| file read | 31.3 ms | ~24 ms |
+| `VoxLoader::Parse` | 427.3 ms | ~32 ms |
+| `BuildWorld` | 427.1 ms | 43.4 ms |
+| **`SkyLight::PropagateAll`** | **3,379.4 ms** | **227.3 ms** |
+| **Total** | **4,265 ms** | **333 ms** |
+
+Against the 10,381 ms Debug that P9 and P10 started from, that is a **59% cut**,
+and against the 33,079 ms this page opened P8 with, an **87% cut**.
+
+**The ordering has inverted again.** `SkyLight::PropagateAll` is now **79% of Debug
+load** and every other phase is under 10%. Option C below — flat-indexing the
+flood, deferred in 2026-08-16 on the grounds that `parse` + `BuildWorld` was worth
+more — is now the only load item worth measuring, because `parse` + `BuildWorld`
+together are 20% of what is left. That deferral was correct when it was made and
+has now expired.
+
+---
+
 ## Where an edit stands now
 
 A break on open ground, 256×64×256 battlefield, debug build:
@@ -490,4 +553,4 @@ worth making:
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
 | P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Flood **done 2026-08-16** — column scan, 19.6 s → 3.7 s debug, load halved. Largest remaining piece is now `parse` + `BuildWorld` at 49% |
 | P9 | Map file read one byte at a time | `VoxLoader::LoadFile` | Was highest of remaining load cost | **Done 2026-08-27** — sized buffer + one `read`, 2,112 ms → 30.5 ms debug (69x), ~17% off total debug load |
-| P10 | `BuildWorld` marks chunks dirty per solid block, redundantly | `VoxLoader.cpp` `BuildWorld`, `World::SetBlock` | High | **Measured 2026-08-27** — dirty-marking is ~100% of `BuildWorld`, all 5.95M inserts redundant; fix not yet designed. See the [investigation](superpowers/investigations/2026-08-27-buildworld-cost.md) |
+| P10 | `BuildWorld` marked chunks dirty per solid block, redundantly | `BuildWorld`, `World::SetBlock` | Was highest of remaining load cost | **Done 2026-08-27** — `SetBlockAssumingDirty`, 4,496 ms → 427 ms debug (10.5x); load now 79% `PropagateAll` |

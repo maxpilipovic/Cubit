@@ -43,6 +43,22 @@ public:
     //Changes a block; throws when the position is outside the world.
     void SetBlock(int x, int y, int z, BlockId block);
 
+    //Changes a block without marking anything dirty; throws when the position is
+    //outside the world.
+    //
+    //Legal only when every chunk this position could affect is *already* dirty —
+    //its own, and on a chunk boundary its diagonal neighbours too, since that is
+    //the set SetBlock would have marked. In practice that means filling a world
+    //straight from the constructor, which marks all of them. Used anywhere else
+    //it leaves a stale mesh, which on screen reads as a rendering bug rather
+    //than as a missing call.
+    //
+    //It exists because marking during a bulk fill is not merely expensive, it is
+    //wasted: BuildWorld's several million calls each descend the dirty set's
+    //tree to discover the chunk is already in it, and that cost 4.5 s of a debug
+    //load while changing nothing. See docs/performance.md P10.
+    void SetBlockAssumingDirty(int x, int y, int z, BlockId block);
+
     //Returns the colour of a block by looking its id up in this world's palette.
     //The alpha channel carries the block's opacity.
     glm::vec4 GetBlockColor(BlockId block) const { return m_Palette[block]; }
@@ -137,6 +153,11 @@ public:
     int GetDepth() const { return m_ChunksZ * Chunk::Depth; }
 
 private:
+    //Writes a block and nothing else. The two public setters differ only in
+    //whether they mark afterwards, so the bounds check and the addressing live
+    //here once rather than in both.
+    void WriteBlock(int x, int y, int z, BlockId block);
+
     //Returns the chunk holding a world position, which must be in bounds.
     std::size_t GetChunkIndex(int chunkX, int chunkY, int chunkZ) const;
 

@@ -526,7 +526,12 @@ World BuildWorld(const VoxModel& model)
             {
                 const std::uint8_t id = model.At(x, y, z);
                 if (id != 0)
-                    world.SetBlock(x, y, z, id);
+                    //Not SetBlock: the world above was just constructed, and a
+                    //new world has every chunk dirty already, so marking here
+                    //would descend the dirty set's tree once per solid block
+                    //only to find the chunk present. On the shipped map that
+                    //was 4.5 s of a debug load spent changing nothing.
+                    world.SetBlockAssumingDirty(x, y, z, id);
             }
 
     return world;

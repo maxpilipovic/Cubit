@@ -558,3 +558,21 @@ TEST_CASE("The 512 battlefield survives stitching cell for cell")
 
     CHECK(firstBad == glm::ivec3(-1));
 }
+
+//The invariant BuildWorld's speed depends on. It fills the world with
+//SetBlockAssumingDirty, which is only correct because the World constructor has
+//already marked every chunk — so if that ever stops being true, the map loads
+//and then never meshes, which on screen is an empty world rather than an error.
+//Nothing else asserts it, so it is asserted here rather than assumed.
+TEST_CASE("A world built from a model has every chunk dirty")
+{
+    const auto bytes = MakeVoxBytes(40, 40, 40, { { 1, 2, 3, 4 } });
+    const World world = BuildWorld(VoxLoader::Parse(bytes));
+
+    const std::size_t chunks = static_cast<std::size_t>(world.GetChunksX()) *
+        static_cast<std::size_t>(world.GetChunksY()) *
+        static_cast<std::size_t>(world.GetChunksZ());
+
+    CHECK(chunks > 1); // a single-chunk world would make this vacuous
+    CHECK(world.DirtyChunks().size() == chunks);
+}

@@ -86,3 +86,22 @@ Time `MarkChunkDirtyAt` separately rather than trying to instrument inside the h
 loop: it is public, and calling it over the same cells against an already-full
 dirty set reproduces exactly the state `SetBlock` sees, without adding per-call
 scope overhead that would distort the thing being measured.
+
+## What the fix achieved
+
+Shipped the same day. `World::SetBlockAssumingDirty` writes a block without
+marking; `BuildWorld` uses it.
+
+| `BuildWorld` | before | after | |
+|---|---:|---:|---|
+| Debug | 4,496.4 ms | **427.1 ms** | **10.5x** |
+| Release | 219.6 ms | **43.4 ms** | 5.1x |
+
+The prediction above was ~130 ms and the answer is ~427 ms. This probe showed
+`SetBlock`'s own work was negligible *relative to marking*, and writing it up
+rounded that to negligible outright. Six million of anything is not free — the
+writes are ~300 ms of the 427. Direction right, magnitude off by 3x.
+
+Total debug load is now **4,265 ms**, of which `SkyLight::PropagateAll` is
+**79%**. Every other phase is under 10%. See [performance.md](../../performance.md)
+P10.

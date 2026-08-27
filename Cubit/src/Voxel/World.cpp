@@ -44,7 +44,7 @@ BlockId World::GetBlock(int x, int y, int z) const
         z % Chunk::Depth);
 }
 
-void World::SetBlock(int x, int y, int z, BlockId block)
+void World::WriteBlock(int x, int y, int z, BlockId block)
 {
     if (!IsInBounds(x, y, z))
         throw std::out_of_range("World block coordinates are out of bounds");
@@ -59,8 +59,19 @@ void World::SetBlock(int x, int y, int z, BlockId block)
         y % Chunk::Height,
         z % Chunk::Depth,
         block);
+}
 
+void World::SetBlock(int x, int y, int z, BlockId block)
+{
+    WriteBlock(x, y, z, block);
     MarkChunkDirtyAt(x, y, z);
+}
+
+void World::SetBlockAssumingDirty(int x, int y, int z, BlockId block)
+{
+    //The whole difference from SetBlock is the marking call it does not make.
+    //Kept adjacent so that difference stays one visible line.
+    WriteBlock(x, y, z, block);
 }
 
 std::uint8_t World::GetSkyLight(int x, int y, int z) const

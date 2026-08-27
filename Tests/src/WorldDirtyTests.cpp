@@ -2,6 +2,8 @@
 
 #include "Cubit/Voxel/World.h"
 
+#include <stdexcept>
+
 namespace
 {
     // A 3x3x3 chunk world (48 blocks per axis) so a centre chunk has a
@@ -129,4 +131,54 @@ TEST_CASE("A chunk-corner edit marks the diagonal chunk, not just face neighbour
     CHECK(world.DirtyChunks().count(glm::ivec3(0, 0, 0)) == 1);
     CHECK(world.DirtyChunks().count(glm::ivec3(1, 1, 1)) == 1);
     CHECK(world.DirtyChunks().size() == 8);
+}
+
+// --- SetBlockAssumingDirty -------------------------------------------------
+//
+// The bulk-fill path. BuildWorld populates a world that its own constructor has
+// already marked dirty in full, so marking per block re-descends the dirty set's
+// tree several million times to discover the chunk is already in it — 4.5 s of a
+// debug load, changing nothing. See docs/performance.md P10.
+
+TEST_CASE("SetBlockAssumingDirty writes the block")
+{
+    World world = MakeWorld();
+
+    world.SetBlockAssumingDirty(24, 24, 24, BlockId{4});
+
+    CHECK(world.GetBlock(24, 24, 24) == BlockId{4});
+}
+
+TEST_CASE("SetBlockAssumingDirty marks nothing")
+{
+    World world = MakeWorld();
+    world.ClearDirty();
+
+    // The same position that "An interior edit marks exactly one chunk" above
+    // proves SetBlock does mark, so the two differ only in the marking.
+    world.SetBlockAssumingDirty(24, 24, 24, BlockId{1});
+
+    CHECK(world.DirtyChunks().empty());
+}
+
+TEST_CASE("SetBlockAssumingDirty marks nothing even on a chunk boundary")
+{
+    World world = MakeWorld();
+    world.ClearDirty();
+
+    // A corner block, which SetBlock would spread across eight chunks.
+    world.SetBlockAssumingDirty(16, 16, 16, BlockId{1});
+
+    CHECK(world.DirtyChunks().empty());
+}
+
+TEST_CASE("SetBlockAssumingDirty rejects a position outside the world")
+{
+    World world = MakeWorld();
+
+    CHECK_THROWS_AS(
+        world.SetBlockAssumingDirty(-1, 0, 0, BlockId{1}), std::out_of_range);
+    CHECK_THROWS_AS(
+        world.SetBlockAssumingDirty(world.GetWidth(), 0, 0, BlockId{1}),
+        std::out_of_range);
 }
