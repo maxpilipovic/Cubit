@@ -231,10 +231,21 @@ void Profiler::Record(const char* name,
     if (!s_Active.load(std::memory_order_acquire))
         return;
 
+    //Duration is a difference of two session-relative timestamps rather than
+    //a directly measured (end - start) interval: Microseconds floors, and a
+    //start floored independently from a duration floored from the raw
+    //interval do not compose back into a real point on the timeline -- two
+    //genuinely nested scopes could round to Start + Duration values where the
+    //outer appears to end before the inner does. Flooring both endpoints
+    //against the same origin first makes Start + Duration exactly equal the
+    //floored end, so containment holds without rounding slack.
+    const std::int64_t startMicroseconds = Microseconds(s_SessionStart, start);
+    const std::int64_t endMicroseconds = Microseconds(s_SessionStart, end);
+
     t_Buffer.Results.push_back(ProfileResult{
         name,
-        Microseconds(s_SessionStart, start),
-        Microseconds(start, end),
+        startMicroseconds,
+        endMicroseconds - startMicroseconds,
         t_Buffer.ThreadId });
 }
 
