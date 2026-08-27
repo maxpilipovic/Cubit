@@ -252,8 +252,13 @@ to open.
 
 ## Part 4 — Call sites
 
-Six scopes, chosen to reproduce exactly the table `performance.md` P8 publishes, so
-the trace is directly comparable against the figures already recorded there:
+Six scopes, chosen to cover the phases `performance.md` P8 tabulates — but not to
+reproduce that table exactly. The Sandbox's load session only ever captures four
+of them: `LoadFile`, `Parse`, `BuildWorld`, and `PropagateAll` all run before
+`LoadWorld` returns, and the session closes there. `ChunkMesher::Build` and
+`WorldRenderer::Update` fire afterwards, across the frames that follow, so they
+are instrumented but by construction fall outside a load capture — meshing is
+not comparable against the profiler's numbers the way the other four phases are.
 
 | Scope | File |
 |---|---|

@@ -315,11 +315,22 @@ the biggest single line item.
 Every figure above came from a hand-timed rig, written for one investigation and
 deleted afterwards — the third time that had happened. `CB_PROFILE_SCOPE`
 (design: [superpowers/specs/2026-08-25-profiler-design.md](superpowers/specs/2026-08-25-profiler-design.md))
-now wraps `VoxLoader::LoadFile`, `VoxLoader::Parse`, `BuildWorld`, and
-`SkyLight::PropagateAll` directly in the Sandbox's load path, and its first run —
-medians of three runs each, Debug and Release, over `battlefield512.vox` — agrees
-with the figures above to within ~12% on every phase except one: `LoadFile` had
-never been split from `Parse` before.
+instruments six scopes in total, but the Sandbox wraps only four of them —
+`VoxLoader::LoadFile`, `VoxLoader::Parse`, `BuildWorld`, and
+`SkyLight::PropagateAll` — in the load session it opens around `LoadWorld`. The
+other two, `ChunkMesher::Build` and `WorldRenderer::Update`, are instrumented
+too, but they fire after `LoadWorld` returns, across the frames that follow,
+and the load session has already closed by then. That is deliberate: extending
+the session across the first render would make a capture named "load" cover
+frame work as well, which is worse than the gap it leaves. **Meshing is
+therefore not in the table below.** It still carries only its previously
+recorded figure — 4,985 ms Debug / 289 ms Release, 29% / 34% share, from the
+table two sections up — not a profiler-measured one.
+
+The four phases the load session does capture were run three times each,
+Debug and Release, over `battlefield512.vox`; the table below is their
+medians. Those medians agree with the figures above to within ~12% on every
+phase except one: `LoadFile` had never been split from `Parse` before.
 
 | Phase | Debug | Release | Debug/Release |
 |---|---:|---:|---:|
@@ -329,13 +340,20 @@ never been split from `Parse` before.
 | `BuildWorld` | 4,496.4 ms | 219.6 ms | 20.5x |
 | `SkyLight::PropagateAll` | 3,376.4 ms | 234.7 ms | 14.4x |
 
+The file-read row is computed per run — file read = LoadFile − Parse on each of
+the three runs — and only then is the median taken across runs, which is why it
+does not equal the printed medians subtracted from each other: 2508.8 − 389.1 =
+2119.7, not the 2101.0 shown; 141.7 − 32.1 = 109.6, not 111.4. The figures are
+right; subtracting the two median rows above is simply the wrong arithmetic to
+reproduce them.
+
 `BuildWorld` is still the largest single line item in load. What the split adds is
 the second thing hiding inside the old "parse `.vox`" row: **83.7% of `LoadFile`
 in Debug (78.7% in Release) is spent reading the bytes off disk, not interpreting
-them** — reading costs roughly four to five times what parsing does. The cause is
-visible in `Cubit/src/Voxel/VoxLoader.cpp`: `LoadFile` builds its buffer with
-`std::istreambuf_iterator<char>`, byte at a time, over a 23.8 MB file. That is a
-five-line fix, and nobody could see it while "parse `.vox`" was one row.
+them** — reading costs 5.4x what parsing does in Debug and 3.5x in Release. The
+cause is visible in `Cubit/src/Voxel/VoxLoader.cpp`: `LoadFile` builds its buffer
+with `std::istreambuf_iterator<char>`, byte at a time, over a 23.8 MB file. That
+is a five-line fix, and nobody could see it while "parse `.vox`" was one row.
 
 Two caveats, not to be dropped:
 

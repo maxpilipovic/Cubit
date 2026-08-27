@@ -113,9 +113,18 @@ public:
         //Load is the phase worth a capture: it is one-shot, it is the largest
         //remaining cost in the engine, and it is what docs/performance.md P8
         //tabulates. Written beside the executable, like the assets it loads.
+        //
+        //Guarded on CB_DIST even though the macros already compile out under it:
+        //BeginSession/EndSession themselves are not macros, so left unguarded
+        //they would still open a session, record nothing, and write an empty
+        //profile-load.json beside a shipped executable on every launch.
+#ifndef CB_DIST
         Profiler::BeginSession("load", "profile-load.json");
+#endif
         LoadWorld(MapPath);
+#ifndef CB_DIST
         Profiler::EndSession();
+#endif
 
         // LoadWorld resolves the spawn but deliberately does not teleport to
         // it: F9 reloads mid-session and should leave the player where they

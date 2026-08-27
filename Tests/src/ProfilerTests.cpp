@@ -22,11 +22,14 @@ namespace
 
 TEST_CASE("A timed scope is recorded under its name")
 {
-    Profiler::BeginSession("test", TempTracePath("cubit_profiler_one.json"));
+    const std::string path = TempTracePath("cubit_profiler_one.json");
+
+    Profiler::BeginSession("test", path);
     {
         CB_PROFILE_SCOPE("Alpha");
     }
     const std::vector<ProfileResult> results = Profiler::EndSession();
+    std::filesystem::remove(path);
 
     REQUIRE(results.size() == 1);
     CHECK(std::string(results[0].Name) == "Alpha");
@@ -39,7 +42,9 @@ TEST_CASE("A timed scope is recorded under its name")
 
 TEST_CASE("A nested scope is contained within the scope around it")
 {
-    Profiler::BeginSession("test", TempTracePath("cubit_profiler_nested.json"));
+    const std::string path = TempTracePath("cubit_profiler_nested.json");
+
+    Profiler::BeginSession("test", path);
     {
         CB_PROFILE_SCOPE("Outer");
         {
@@ -47,6 +52,7 @@ TEST_CASE("A nested scope is contained within the scope around it")
         }
     }
     const std::vector<ProfileResult> results = Profiler::EndSession();
+    std::filesystem::remove(path);
 
     REQUIRE(results.size() == 2);
 
@@ -80,21 +86,34 @@ TEST_CASE("A nested scope is contained within the scope around it")
 
 TEST_CASE("A scope entered with no session active is dropped")
 {
+    const std::string path = TempTracePath("cubit_profiler_orphan.json");
+
     {
         CB_PROFILE_SCOPE("Orphan");
     }
 
-    Profiler::BeginSession("test", TempTracePath("cubit_profiler_orphan.json"));
+    Profiler::BeginSession("test", path);
     const std::vector<ProfileResult> results = Profiler::EndSession();
+    std::filesystem::remove(path);
 
-    //Recording is gated before the buffer is touched, so a stray macro in
-    //engine code costs nothing when nobody is measuring.
+    //This does NOT prove the s_Active gate in Profiler::Record actually ran:
+    //BeginSession's own clear loop wipes every registered thread buffer before
+    //EndSession ever reads it, so an orphaned sample would be erased either
+    //way -- with the gate doing its job or with it deleted outright. What this
+    //genuinely pins down is the outward guarantee: a macro fired outside any
+    //session does not corrupt the capture that follows. The gate's own effect
+    //is not observable through the public API and is covered by inspection
+    //(see Profiler::Record's comment), not by this assertion -- the same
+    //honesty the BlockEdit comparator test in docs/engine-roadmap.md needed
+    //after an unfalsifiable assertion passed there once.
     CHECK(results.empty());
 }
 
 TEST_CASE("Scopes from two threads merge with distinct thread ids")
 {
-    Profiler::BeginSession("test", TempTracePath("cubit_profiler_threads.json"));
+    const std::string path = TempTracePath("cubit_profiler_threads.json");
+
+    Profiler::BeginSession("test", path);
 
     {
         CB_PROFILE_SCOPE("Main");
@@ -114,6 +133,7 @@ TEST_CASE("Scopes from two threads merge with distinct thread ids")
     worker.join();
 
     const std::vector<ProfileResult> results = Profiler::EndSession();
+    std::filesystem::remove(path);
 
     REQUIRE(results.size() == 2);
 

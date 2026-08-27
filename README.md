@@ -20,7 +20,7 @@ sky light and ambient occlusion. Water is see-through and you swim through it ra
 than walking on it, with the screen washing blue and hazing out while you are under.
 Swimming alone will not get you up the banks, though — there is no step-up assist, so
 climbing out means digging or building a way up, same as anywhere else on the map. The
-current map is a 256x64x256 battlefield.
+current map is a 512x64x512 battlefield.
 
 **Platform and core loop**
 
@@ -87,7 +87,7 @@ current map is a 256x64x256 battlefield.
 
 **Sandbox**
 
-- Loads `assets/maps/battlefield.vox` — 1024 chunks, of which around 600 hold geometry
+- Loads `assets/maps/battlefield512.vox` — 4,096 chunks, of which 2,408 hold geometry
 - A player box that falls, lands, jumps, slides along walls, and respawns after falling
   off the map
 - Breaking and placing blocks along the view ray, within reach, relit on each edit
@@ -114,11 +114,13 @@ Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, the
 post-build steps, so the running app resolves `assets/...` the way a shipped build
 would.
 
-To regenerate the map, build and run `MapGen` with the output path you want it written
-to, then rebuild `Sandbox` so the new file is copied next to the executable:
+To regenerate the map, build and run `MapGen` with the size and output path you want
+it written to, then rebuild `Sandbox` so the new file is copied next to the executable.
+The shipped map is 512x64x512, which needs an explicit `--size` since `MapGen`
+defaults to 256x64x256:
 
 ```bat
-MapGen.exe <repo>\Sandbox\assets\maps\battlefield.vox
+MapGen.exe --size 512 64 512 <repo>\Sandbox\assets\maps\battlefield512.vox
 ```
 
 ## Tests

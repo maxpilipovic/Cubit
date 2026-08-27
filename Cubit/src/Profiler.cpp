@@ -41,7 +41,11 @@ namespace
         return a.DurationMicroseconds > b.DurationMicroseconds;
     }
 
-    //Escapes the two characters a JSON string may not contain.
+    //Escapes the two characters a JSON string needs a caller to escape by hand:
+    //quote and backslash. JSON also forbids raw control characters (U+0000 -
+    //U+001F) verbatim in a string, but those are not escaped here — they are
+    //unreachable from both __FUNCSIG__ and every scope name in this codebase,
+    //so handling them would be defensive code with nothing to defend against.
     std::string Escape(const char* text)
     {
         std::string escaped;
