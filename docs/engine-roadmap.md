@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-20_
+_Last updated: 2026-08-27_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Most of it is scoped to
@@ -283,12 +283,6 @@ obvious, and better shaped, the moment something concretely needs it.
   constants.
 - **Configuration.** Resolution, field of view, mouse sensitivity, `SpawnHintXZ`
   and the map path are compile-time constants. Changing sensitivity is a rebuild.
-- **Profiling instrumentation.** Every figure in `performance.md` came from
-  timing code written ad hoc and then deleted; there is no scope timer in the
-  engine. Given that `parse` + `BuildWorld` is the documented next target, that
-  harness is about to be written a fourth time. A scope macro emitting Chrome
-  trace JSON would make P4, P5 and the parse work measurable without a bespoke
-  rig each time.
 - **Lifetime handles on `EventBus` and `LayerStack`.** `Subscribe` stores
   `this`-capturing lambdas with no way to remove them, and there is no
   `PopLayer`/`PopOverlay` at all. Safe today only because nothing is ever
@@ -297,6 +291,17 @@ obvious, and better shaped, the moment something concretely needs it.
 - **Threading.** No `<thread>`, `<mutex>` or `<atomic>` anywhere. Known for
   meshing; note that `parse` + `BuildWorld`, the actual largest load cost, is
   also trivially parallel.
+
+**Profiling instrumentation shipped early, 2026-08-27.** This list used to carry a
+bullet for it, predicting that the ad hoc timing rig behind every figure in
+`performance.md` — written by hand and deleted three times over — was "about to
+be written a fourth time" now that `parse` + `BuildWorld` was the documented next
+target. It was not. `CB_PROFILE_SCOPE` times named scopes into a Chrome trace,
+compiled into Debug and Release and out of `CB_DIST`, and its first run split
+`parse` into the file read and the actual parsing — a distinction each of the
+three previous hand-rolled investigations had folded into one number. See
+[performance.md](performance.md) and
+[superpowers/specs/2026-08-25-profiler-design.md](superpowers/specs/2026-08-25-profiler-design.md).
 
 ### Two things this list should not be read as saying
 

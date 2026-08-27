@@ -1,6 +1,6 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-08-16_
+_Last updated: 2026-08-27_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
@@ -309,6 +309,50 @@ is identical, not merely similar.
 **The ordering has inverted.** `parse` + `BuildWorld` is now **49% of Debug load** and
 the largest target by a wide margin, and it has never been optimised. Meshing is now
 the biggest single line item.
+
+### The parse row splits — measured with the profiler, 2026-08-27
+
+Every figure above came from a hand-timed rig, written for one investigation and
+deleted afterwards — the third time that had happened. `CB_PROFILE_SCOPE`
+(design: [superpowers/specs/2026-08-25-profiler-design.md](superpowers/specs/2026-08-25-profiler-design.md))
+now wraps `VoxLoader::LoadFile`, `VoxLoader::Parse`, `BuildWorld`, and
+`SkyLight::PropagateAll` directly in the Sandbox's load path, and its first run —
+medians of three runs each, Debug and Release, over `battlefield512.vox` — agrees
+with the figures above to within ~12% on every phase except one: `LoadFile` had
+never been split from `Parse` before.
+
+| Phase | Debug | Release | Debug/Release |
+|---|---:|---:|---:|
+| `VoxLoader::LoadFile` (contains `Parse`) | 2,508.8 ms | 141.7 ms | 17.7x |
+| — `VoxLoader::Parse` | 389.1 ms | 32.1 ms | 12.1x |
+| — **file read** (`LoadFile` − `Parse`) | **2,101.0 ms** | **111.4 ms** | 18.9x |
+| `BuildWorld` | 4,496.4 ms | 219.6 ms | 20.5x |
+| `SkyLight::PropagateAll` | 3,376.4 ms | 234.7 ms | 14.4x |
+
+`BuildWorld` is still the largest single line item in load. What the split adds is
+the second thing hiding inside the old "parse `.vox`" row: **83.7% of `LoadFile`
+in Debug (78.7% in Release) is spent reading the bytes off disk, not interpreting
+them** — reading costs roughly four to five times what parsing does. The cause is
+visible in `Cubit/src/Voxel/VoxLoader.cpp`: `LoadFile` builds its buffer with
+`std::istreambuf_iterator<char>`, byte at a time, over a 23.8 MB file. That is a
+five-line fix, and nobody could see it while "parse `.vox`" was one row.
+
+Two caveats, not to be dropped:
+
+- **Debug `LoadFile` is cache-sensitive — a real 33.7% run-to-run spread, not
+  noise.** A cold run taken right after a build landed within 8.4% of the 3,606 ms
+  this page quotes above; two warm runs came in 30-32% lower. That is OS
+  file-cache state, not a disagreement between the old rig and the new tool — both
+  are measuring a disk-bound path, just in different cache states. Every other
+  phase's spread was under 5%, and every other phase agrees with the figures above
+  within ~12%.
+- **The "~20x" Debug/Release multiplier this page cites elsewhere is not uniform
+  per phase.** It holds for `BuildWorld` (20.5x) and the file read (18.9x), but is
+  lower for `Parse` (12.1x) and `PropagateAll` (14.4x).
+
+Figures from here on are reproducible by running the Sandbox and reading the
+`profile-load.json` it writes next to the executable — not by rebuilding
+instrumentation.
 
 ### On option C — flat-indexing the flood
 

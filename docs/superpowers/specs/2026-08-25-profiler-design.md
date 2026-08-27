@@ -1,7 +1,7 @@
 # Scope Profiler — Design
 
 **Date:** 2026-08-25
-**Status:** Designed
+**Status:** Shipped 2026-08-27
 
 ## Goal
 
@@ -203,10 +203,24 @@ void Profiler::Record(const char* name, time_point start, time_point end)
 }
 ```
 
+**Implementation correction, not anticipated by this design: `Start` and `Duration`
+must come from the same subtraction, not be floored independently.** The first
+version of `Record` rounded `start` and `end - start` to microseconds separately,
+which does not guarantee `Start + Duration` lands back on a point on the session
+timeline — a genuinely nested scope could round to read as escaping its parent, an
+intermittent test failure that looked like ordinary flakiness rather than a bug in
+this design. `Record` now converts `start` and `end` to session-relative
+microseconds first and derives `DurationMicroseconds` by subtracting the two,
+which makes containment exact by construction. Recorded here because it is the
+kind of thing that would otherwise be rediscovered.
+
 `EndSession` takes the mutex, drains every registered buffer plus the merged store,
-sorts by `(ThreadId, StartMicroseconds)`, writes, and clears each buffer's results
-while leaving it registered — so a second session on the same threads costs no
-re-registration and starts empty.
+sorts by `(ThreadId asc, StartMicroseconds asc, DurationMicroseconds desc)`, writes,
+and clears each buffer's results while leaving it registered — so a second session
+on the same threads costs no re-registration and starts empty. The third key is
+not decoration: `std::sort` is unstable, and a nested pair entered in the same
+microsecond ties on the first two keys, so without the duration tiebreaker the
+outer scope of a same-microsecond nesting can sort after the inner one.
 
 **`BeginSession` while a session is active** ends the previous one first, writing
 its file, and logs `CB_CORE_WARN`. Nothing is lost, and the warning names the
@@ -282,7 +296,10 @@ matching `WorldSaveTests.cpp:165-170`.
 
 **No assertion of the form "this took at least N milliseconds."** `ChunkMesherTests:323`
 is already flaky under load and wall-clock thresholds are how a suite acquires more
-of that. Duration is asserted `> 0` and by containment only.
+of that. Duration is asserted `>= 0` and by containment only — not `> 0` as first
+written here. An empty scope completes in under a microsecond and truncates to
+exactly zero, so `> 0` was precisely the flaky wall-clock assertion this section
+otherwise forbids.
 
 Adding a new test file means re-running `premake5 vs2026`, since the file globs in
 `premake5.lua` expand at generation time.

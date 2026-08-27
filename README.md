@@ -31,6 +31,8 @@ current map is a 256x64x256 battlefield.
   about each other
 - Polled input, cursor capture, frame timesteps, flushed logging, and debug-only
   assertions
+- `CB_PROFILE_SCOPE` times named scopes into a Chrome trace, compiled into Debug
+  and Release and out of Dist
 
 **Rendering**
 
@@ -121,7 +123,7 @@ MapGen.exe <repo>\Sandbox\assets\maps\battlefield.vox
 
 ## Tests
 
-`Tests` is a doctest suite — around 140 cases — covering the parts that can be checked
+`Tests` is a doctest suite — 270 cases — covering the parts that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 frustum culling, `.vox` loading and writing, and the generated terrain's invariants. It
