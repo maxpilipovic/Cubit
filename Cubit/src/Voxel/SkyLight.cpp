@@ -2,12 +2,14 @@
 
 #include "Cubit/Voxel/SkyLight.h"
 
+#include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/World.h"
 #include "Cubit/Profiler.h"
 
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <utility>
@@ -87,28 +89,37 @@ namespace
                 cell.x, cell.y, cell.z, static_cast<std::uint8_t>(level));
     }
 
-    //Spreads light outward from every cell already in the queue until nothing
-    //can be brightened. A cell is only enqueued when its value actually rises,
-    //so this terminates: each cell can rise at most Max times.
-    void Flood(World& world, std::deque<glm::ivec3>& queue,
-        LightRecorder* recorder)
+    //The one rule for how sky light spreads, over whichever source of cells it
+    //is handed. A cell is only enqueued when its value actually rises, so this
+    //terminates: each cell can rise at most Max times.
+    //
+    //A template rather than two copies for the reason P7 gave when the mesher
+    //grew a second way to reach a cell: the rule is subtle - the free fall in
+    //the middle of it is the whole difference between sky light and a plain
+    //flood fill - and two copies of a subtle rule drift. Here one caller
+    //addresses cells through World and the other through a flat array, and
+    //only the addressing differs.
+    template <typename Cells>
+    void Flood(Cells& cells, std::vector<typename Cells::Cell>& queue)
     {
-        while (!queue.empty())
+        //Indexing rather than popping: the queue only grows, so a cursor over
+        //it is the same traversal order with no per-cell deallocation. It also
+        //keeps every cell visited around, which is what makes this cheap in a
+        //debug build, where a std::deque pop is several checked operations.
+        for (std::size_t head = 0; head < queue.size(); ++head)
         {
-            const glm::ivec3 cell = queue.front();
-            queue.pop_front();
+            //By value, before any push_back below can reallocate the queue.
+            const typename Cells::Cell cell = queue[head];
 
-            const int level = world.GetSkyLight(cell.x, cell.y, cell.z);
+            const int level = cells.Get(cell);
             if (level <= 1)
                 continue; // Nothing left to give a neighbour.
 
             for (int d = 0; d < 6; ++d)
             {
-                const glm::ivec3 next = cell + Directions[d];
+                const typename Cells::Cell next = cells.Step(cell, d);
 
-                if (!world.IsInBounds(next.x, next.y, next.z))
-                    continue;
-                if (world.IsBlockOpaque(next.x, next.y, next.z))
+                if (cells.IsOpaque(next))
                     continue;
 
                 // Full-strength sky light falls without dimming, which is what
@@ -118,11 +129,277 @@ namespace
                     ? SkyLight::Max
                     : level - 1;
 
-                if (world.GetSkyLight(next.x, next.y, next.z) >= value)
+                if (cells.Get(next) >= value)
                     continue;
 
-                SetLight(world, recorder, next, value);
+                cells.Set(next, value);
                 queue.push_back(next);
+            }
+        }
+    }
+
+    //Cells addressed through World. The edit path uses this: it settles a
+    //handful of cells and would rather not build a copy of the world to do it.
+    class WorldCells
+    {
+    public:
+        using Cell = glm::ivec3;
+
+        WorldCells(World& world, LightRecorder* recorder)
+            : m_World(world), m_Recorder(recorder) {}
+
+        Cell Step(const Cell& cell, int d) const { return cell + Directions[d]; }
+
+        //Outside the world reads as opaque, so the flood stops at the edge.
+        //That is the same thing the separate bounds check used to do, folded
+        //into the question the flood was going to ask anyway.
+        bool IsOpaque(const Cell& cell) const
+        {
+            return !m_World.IsInBounds(cell.x, cell.y, cell.z) ||
+                m_World.IsBlockOpaque(cell.x, cell.y, cell.z);
+        }
+
+        int Get(const Cell& cell) const
+        {
+            return m_World.GetSkyLight(cell.x, cell.y, cell.z);
+        }
+
+        void Set(const Cell& cell, int level)
+        {
+            SetLight(m_World, m_Recorder, cell, level);
+        }
+
+    private:
+        World& m_World;
+        LightRecorder* m_Recorder;
+    };
+
+    //The whole world's opacity and sky light, each copied into one flat array,
+    //so a neighbour is reached by adding a constant instead of by a bounds
+    //check, three divides and three modulos through World.
+    //
+    //Every side is padded by one cell, and the padding is opaque. The flood
+    //skips an opaque neighbour anyway, so a border that is always opaque stops
+    //it at the world edge without a bounds check ever being written - the same
+    //trick, for the same reason, as ChunkMesher's 18-cube neighbourhood.
+    //
+    //Cells are laid out y-fastest, so a column is contiguous. That is the
+    //opposite of how a Chunk stores its cells, and deliberately: the scan
+    //walks every column of the world top to bottom and is the pass worth
+    //laying out for, while the flood only ever visits what borders darkness.
+    class LightField
+    {
+    public:
+        using Cell = std::int32_t;
+
+        explicit LightField(const World& world)
+            : m_Width(world.GetWidth())
+            , m_Height(world.GetHeight())
+            , m_Depth(world.GetDepth())
+            , m_StrideX(world.GetHeight() + 2)
+            , m_StrideZ((world.GetHeight() + 2) * (world.GetWidth() + 2))
+        {
+            const std::size_t count = static_cast<std::size_t>(m_StrideZ) *
+                static_cast<std::size_t>(m_Depth + 2);
+
+            //Opaque everywhere to begin with, so the border needs no separate
+            //pass - only the interior is overwritten below.
+            m_Opaque.assign(count, 1);
+            m_Light.assign(count, 0);
+
+            m_Origin = 1 + m_StrideX + m_StrideZ;
+
+            //Ordered to match Directions, so index 5 is still straight down.
+            m_Offsets[0] =  m_StrideX;  m_Offsets[1] = -m_StrideX;
+            m_Offsets[2] =  m_StrideZ;  m_Offsets[3] = -m_StrideZ;
+            m_Offsets[4] =  1;          m_Offsets[5] = -1;
+
+            Gather(world);
+        }
+
+        //The flat index of a world cell.
+        Cell At(int x, int y, int z) const
+        {
+            return m_Origin + y + x * m_StrideX + z * m_StrideZ;
+        }
+
+        Cell Step(Cell cell, int d) const { return cell + m_Offsets[d]; }
+        bool IsOpaque(Cell cell) const { return m_Opaque[cell] != 0; }
+        int Get(Cell cell) const { return m_Light[cell]; }
+        void Set(Cell cell, int level)
+        {
+            m_Light[cell] = static_cast<std::uint8_t>(level);
+        }
+
+        //Writes the light every column gets straight from the sky, and records
+        //in skyBottom the lowest cell each column reaches that way.
+        //
+        //Only the lit run is written. Everything from the first opaque block
+        //down is already 0 from construction, where the old scan had to blank
+        //it explicitly because it was writing over the previous load's light.
+        void ScanColumns(std::vector<int>& skyBottom)
+        {
+            CB_PROFILE_SCOPE("PropagateAll/Scan");
+
+            for (int z = 0; z < m_Depth; ++z)
+            {
+                for (int x = 0; x < m_Width; ++x)
+                {
+                    const std::size_t base = static_cast<std::size_t>(At(x, 0, z));
+                    const std::uint8_t* opaque = m_Opaque.data() + base;
+                    std::uint8_t* light = m_Light.data() + base;
+
+                    int y = m_Height - 1;
+
+                    for (; y >= 0 && opaque[y] == 0; --y)
+                        light[y] = SkyLight::Max;
+
+                    skyBottom[static_cast<std::size_t>(x) +
+                        static_cast<std::size_t>(m_Width) *
+                        static_cast<std::size_t>(z)] = y + 1;
+                }
+            }
+        }
+
+        //Copies the settled light back into the world's chunks.
+        void ScatterInto(World& world) const
+        {
+            CB_PROFILE_SCOPE("PropagateAll/Scatter");
+
+            ForEachChunk(world.GetChunksX(), world.GetChunksY(),
+                world.GetChunksZ(),
+                [&](int cx, int cy, int cz, int ox, int oy, int oz)
+                {
+                    std::uint8_t* light =
+                        world.GetChunkForWrite(cx, cy, cz).SkyLightData();
+
+                    for (int lz = 0; lz < Chunk::Depth; ++lz)
+                    {
+                        for (int lx = 0; lx < Chunk::Width; ++lx)
+                        {
+                            std::uint8_t* dst = light + lx +
+                                Chunk::Width * Chunk::Height * lz;
+                            const std::uint8_t* src = m_Light.data() +
+                                At(ox + lx, oy, oz + lz);
+
+                            for (int ly = 0; ly < Chunk::Height; ++ly)
+                                dst[ly * Chunk::Width] = src[ly];
+                        }
+                    }
+                });
+        }
+
+    private:
+        //Walks the chunk grid, handing the body each chunk's grid position and
+        //the world position of its minimum corner. Both bulk passes want
+        //exactly this, and neither wants to recompute the origin inline.
+        template <typename Body>
+        static void ForEachChunk(int chunksX, int chunksY, int chunksZ, Body body)
+        {
+            for (int cz = 0; cz < chunksZ; ++cz)
+                for (int cy = 0; cy < chunksY; ++cy)
+                    for (int cx = 0; cx < chunksX; ++cx)
+                        body(cx, cy, cz,
+                            cx * Chunk::Width,
+                            cy * Chunk::Height,
+                            cz * Chunk::Depth);
+        }
+
+        //Copies the world's opacity in, a chunk at a time.
+        //
+        //The inner loop runs along y so the writes into this field are
+        //sequential; that makes the reads out of the chunk stride by
+        //Chunk::Width instead, which costs nothing because a chunk's 4096
+        //cells are already in cache by the second of them.
+        void Gather(const World& world)
+        {
+            CB_PROFILE_SCOPE("PropagateAll/Gather");
+
+            //Resolving opacity per cell would mean 16.8M calls into World for
+            //an answer with only 256 possible questions.
+            std::uint8_t opaqueById[256];
+            for (int id = 0; id < 256; ++id)
+            {
+                opaqueById[id] =
+                    world.IsIdOpaque(static_cast<BlockId>(id)) ? 1 : 0;
+            }
+
+            ForEachChunk(world.GetChunksX(), world.GetChunksY(),
+                world.GetChunksZ(),
+                [&](int cx, int cy, int cz, int ox, int oy, int oz)
+                {
+                    const BlockId* blocks =
+                        world.GetChunk(cx, cy, cz).BlockData();
+
+                    for (int lz = 0; lz < Chunk::Depth; ++lz)
+                    {
+                        for (int lx = 0; lx < Chunk::Width; ++lx)
+                        {
+                            const BlockId* src = blocks + lx +
+                                Chunk::Width * Chunk::Height * lz;
+                            std::uint8_t* dst = m_Opaque.data() +
+                                At(ox + lx, oy, oz + lz);
+
+                            for (int ly = 0; ly < Chunk::Height; ++ly)
+                                dst[ly] = opaqueById[src[ly * Chunk::Width]];
+                        }
+                    }
+                });
+        }
+
+        int m_Width = 0;
+        int m_Height = 0;
+        int m_Depth = 0;
+        int m_StrideX = 0;
+        int m_StrideZ = 0;
+        Cell m_Origin = 0;
+
+        Cell m_Offsets[6]{};
+
+        std::vector<std::uint8_t> m_Opaque;
+        std::vector<std::uint8_t> m_Light;
+    };
+
+    //Seeds only the lit cells that border an unlit one. A lit cell whose every
+    //neighbour is lit or opaque can brighten nothing, so queueing it would
+    //cost six neighbour tests to discover it has nothing to do.
+    void SeedBoundaries(const LightField& field, int width, int depth,
+        const std::vector<int>& skyBottom, std::vector<LightField::Cell>& queue)
+    {
+        CB_PROFILE_SCOPE("PropagateAll/Seed");
+
+        for (int z = 0; z < depth; ++z)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                const int lit = skyBottom[static_cast<std::size_t>(x) +
+                    static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(z)];
+
+                //How far down a neighbouring column stays dark. Taking the
+                //deepest of the four gives the union of their ranges in one
+                //span: every range starts at this column's own lit floor, so
+                //they nest.
+                int deepest = lit;
+
+                for (const glm::ivec2& step : HorizontalSteps)
+                {
+                    const int nx = x + step.x;
+                    const int nz = z + step.y;
+
+                    //Outside the world contributes no darkness, matching the
+                    //opaque border the flood itself stops on.
+                    if (nx < 0 || nz < 0 || nx >= width || nz >= depth)
+                        continue;
+
+                    deepest = std::max(deepest,
+                        skyBottom[static_cast<std::size_t>(nx) +
+                            static_cast<std::size_t>(width) *
+                            static_cast<std::size_t>(nz)]);
+                }
+
+                for (int y = lit; y < deepest; ++y)
+                    queue.push_back(field.At(x, y, z));
             }
         }
     }
@@ -133,7 +410,7 @@ namespace
     //still reaches is harmless: the flood that follows only raises values, and
     //that source is in readd.
     void Unflood(World& world, LightRecorder& recorder,
-        const glm::ivec3& origin, std::deque<glm::ivec3>& readd)
+        const glm::ivec3& origin, std::vector<glm::ivec3>& readd)
     {
         //The cell still holds the light it had while it was open, which is
         //exactly the light the new block has just cut off.
@@ -187,113 +464,34 @@ namespace
             }
         }
     }
-
-    //Writes the light every column gets straight from the sky, and records in
-    //skyBottom the lowest cell each column reaches that way. Max for the open
-    //run under the sky, 0 for everything from the first opaque block down;
-    //that covers what a separate blanket clear used to do, which is why there
-    //no longer is one.
-    //
-    //This replaces the bulk of the flood rather than speeding it up. Light
-    //falls without dimming, so an open column is a straight run of Max that a
-    //breadth-first search discovers one queue entry and six neighbour tests at
-    //a time — 89% of the writes it was making, for a result a downward walk
-    //already knows.
-    void ScanColumns(World& world, std::vector<int>& skyBottom)
-    {
-        CB_PROFILE_SCOPE("PropagateAll/Scan");
-
-        const int width = world.GetWidth();
-        const int height = world.GetHeight();
-        const int depth = world.GetDepth();
-
-        for (int z = 0; z < depth; ++z)
-        {
-            for (int x = 0; x < width; ++x)
-            {
-                int y = height - 1;
-
-                for (; y >= 0 && !world.IsBlockOpaque(x, y, z); --y)
-                    world.SetSkyLight(x, y, z, SkyLight::Max);
-
-                skyBottom[static_cast<std::size_t>(x) +
-                    static_cast<std::size_t>(width) *
-                    static_cast<std::size_t>(z)] = y + 1;
-
-                for (; y >= 0; --y)
-                    world.SetSkyLight(x, y, z, 0);
-            }
-        }
-    }
-
-    //Seeds only the lit cells that border an unlit one. A lit cell whose every
-    //neighbour is lit or opaque can brighten nothing, so queueing it would
-    //cost six neighbour tests to discover it has nothing to do.
-    void SeedBoundaries(const World& world, const std::vector<int>& skyBottom,
-        std::deque<glm::ivec3>& queue)
-    {
-        CB_PROFILE_SCOPE("PropagateAll/Seed");
-
-        const int width = world.GetWidth();
-        const int depth = world.GetDepth();
-
-        for (int z = 0; z < depth; ++z)
-        {
-            for (int x = 0; x < width; ++x)
-            {
-                const int lit = skyBottom[static_cast<std::size_t>(x) +
-                    static_cast<std::size_t>(width) *
-                    static_cast<std::size_t>(z)];
-
-                //How far down a neighbouring column stays dark. Taking the
-                //deepest of the four gives the union of their ranges in one
-                //span: every range starts at this column's own lit floor, so
-                //they nest.
-                int deepest = lit;
-
-                for (const glm::ivec2& step : HorizontalSteps)
-                {
-                    const int nx = x + step.x;
-                    const int nz = z + step.y;
-
-                    //Outside the world contributes no darkness, matching the
-                    //bounds check the flood itself makes.
-                    if (nx < 0 || nz < 0 || nx >= width || nz >= depth)
-                        continue;
-
-                    deepest = std::max(deepest,
-                        skyBottom[static_cast<std::size_t>(nx) +
-                            static_cast<std::size_t>(width) *
-                            static_cast<std::size_t>(nz)]);
-                }
-
-                for (int y = lit; y < deepest; ++y)
-                    queue.push_back(glm::ivec3(x, y, z));
-            }
-        }
-    }
 }
 
 void SkyLight::PropagateAll(World& world)
 {
     CB_PROFILE_SCOPE("SkyLight::PropagateAll");
 
+    const int width = world.GetWidth();
+    const int depth = world.GetDepth();
+
+    LightField field(world);
+
     //The lowest cell in each column that sky light reaches directly, or height
     //when the column is closed at the very top and reaches nothing.
     std::vector<int> skyBottom(
-        static_cast<std::size_t>(world.GetWidth()) *
-        static_cast<std::size_t>(world.GetDepth()),
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(depth),
         world.GetHeight());
 
-    ScanColumns(world, skyBottom);
+    field.ScanColumns(skyBottom);
 
-    std::deque<glm::ivec3> queue;
-    SeedBoundaries(world, skyBottom, queue);
+    std::vector<LightField::Cell> queue;
+    SeedBoundaries(field, width, depth, skyBottom, queue);
 
     {
         CB_PROFILE_SCOPE("PropagateAll/Flood");
-        Flood(world, queue, nullptr);
+        Flood(field, queue);
     }
+
+    field.ScatterInto(world);
 }
 
 void SkyLight::Repropagate(World& world, int x, int y, int z)
@@ -301,7 +499,7 @@ void SkyLight::Repropagate(World& world, int x, int y, int z)
     const glm::ivec3 edit(x, y, z);
 
     LightRecorder recorder(world);
-    std::deque<glm::ivec3> queue;
+    std::vector<glm::ivec3> queue;
 
     if (world.IsBlockOpaque(x, y, z))
     {
@@ -334,6 +532,7 @@ void SkyLight::Repropagate(World& world, int x, int y, int z)
         }
     }
 
-    Flood(world, queue, &recorder);
+    WorldCells cells(world, &recorder);
+    Flood(cells, queue);
     recorder.MarkChangedChunks();
 }

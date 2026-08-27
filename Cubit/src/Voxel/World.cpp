@@ -200,6 +200,14 @@ const Chunk& World::GetChunk(int chunkX, int chunkY, int chunkZ) const
     return m_Chunks[GetChunkIndex(chunkX, chunkY, chunkZ)];
 }
 
+Chunk& World::GetChunkForWrite(int chunkX, int chunkY, int chunkZ)
+{
+    if (!IsChunkInBounds(chunkX, chunkY, chunkZ))
+        throw std::out_of_range("Chunk coordinates are out of bounds");
+
+    return m_Chunks[GetChunkIndex(chunkX, chunkY, chunkZ)];
+}
+
 bool World::IsChunkInBounds(int chunkX, int chunkY, int chunkZ) const
 {
     return chunkX >= 0 && chunkX < m_ChunksX &&

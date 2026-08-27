@@ -130,6 +130,16 @@ public:
     //Returns a chunk by its grid position; throws when outside the grid.
     const Chunk& GetChunk(int chunkX, int chunkY, int chunkZ) const;
 
+    //Returns a chunk for writing; throws when outside the grid.
+    //
+    //Marks nothing dirty, for the same reason SetBlockAssumingDirty does not:
+    //the callers are bulk passes that already know which chunks they touch.
+    //Sky light propagation is the only one - it copies the finished light back
+    //in a chunk at a time and decides separately which chunks changed. A
+    //caller that wants a single cell changed and the renderer told about it
+    //wants SetSkyLight or ApplyBlockEdit, not this.
+    Chunk& GetChunkForWrite(int chunkX, int chunkY, int chunkZ);
+
     //Reports whether chunk grid coordinates are inside the world.
     bool IsChunkInBounds(int chunkX, int chunkY, int chunkZ) const;
 

@@ -45,6 +45,20 @@ public:
     //Reports whether local coordinates are inside the chunk.
     static bool IsInBounds(int x, int y, int z);
 
+    //Direct access to this chunk's storage, for passes that copy a whole chunk
+    //in or out in one go. Cells are addressed x + Width * (y + Height * z), so
+    //x runs contiguously, y strides by Width and z by Width * Height.
+    //
+    //Wide on purpose, and narrow in use: a pass that reads or writes all 4096
+    //cells through GetBlock/SetSkyLight pays a bounds check and an index
+    //computation per cell, and in a debug build a function call too, none of
+    //which it needs - it already knows every cell is in range. Sky light
+    //propagation copies the world out and the finished light back in exactly
+    //once each, and that is what these are for. Anything touching cells one at
+    //a time belongs on the checked accessors above.
+    const BlockId* BlockData() const { return m_Blocks.data(); }
+    std::uint8_t* SkyLightData() { return m_SkyLight.data(); }
+
 private:
     //Converts three-dimensional local coordinates into array storage.
     static std::size_t GetIndex(int x, int y, int z);
