@@ -51,8 +51,14 @@ namespace
 
     struct ThreadBuffer
     {
-        //Registers on this thread's first record, and nowhere else, so the
-        //mutex is taken twice per thread rather than twice per scope.
+        //A namespace-scope thread_local's initialization order is
+        //implementation-defined; MSVC constructs one eagerly for every thread
+        //that exists — the main thread's before main() runs, a worker's at
+        //thread creation — regardless of whether a session is active. So
+        //every thread registers exactly once over its lifetime, taking
+        //s_Mutex twice in total (register here, flush below) rather than
+        //twice per scope; it is the s_Active gate in Record, not lazy
+        //construction, that keeps an idle session from being appended to.
         //
         //The id is a dense counter rather than a hash of std::thread::id: a
         //viewer draws one lane per id, and 0, 1, 2 are readable where
@@ -83,6 +89,11 @@ namespace
     thread_local ThreadBuffer t_Buffer;
 }
 
+//All recording threads must be quiesced -- joined, not merely idle -- before
+//this is called. It clears every registered buffer, including ones belonging
+//to threads that are still running, with no lock held on the append side: a
+//live thread's concurrent push_back would race a reallocating clear(), which
+//is undefined behaviour rather than a merely stale read.
 void Profiler::BeginSession(const char* name, const std::string& outputPath)
 {
     s_SessionName = name;
@@ -97,9 +108,20 @@ void Profiler::BeginSession(const char* name, const std::string& outputPath)
     }
 
     s_SessionStart = std::chrono::steady_clock::now();
-    s_Active.store(true, std::memory_order_relaxed);
+
+    //Release pairs with Record's acquire load: it publishes both the
+    //s_SessionStart write above and the buffer clears above it, so a thread
+    //that observes s_Active == true also observes a session start it can
+    //correctly measure against. Relaxed would give atomicity on the flag
+    //alone with no such guarantee, leaving StartMicroseconds free to read a
+    //stale s_SessionStart.
+    s_Active.store(true, std::memory_order_release);
 }
 
+//Same precondition as BeginSession: every recording thread must already be
+//joined. This walks and clears every registered buffer, live or not, with no
+//lock on the append side, so a buffer still being written to by a running
+//thread is a data race, not just a chance of missing its last few samples.
 std::vector<ProfileResult> Profiler::EndSession()
 {
     if (!s_Active.exchange(false, std::memory_order_relaxed))
@@ -111,8 +133,12 @@ std::vector<ProfileResult> Profiler::EndSession()
 
         merged.swap(s_Merged);
 
-        //Cleared but left registered: a second session on the same threads
-        //costs no re-registration and starts empty.
+        //Cleared but left registered: a thread that is joined and later
+        //replaced by a new one on the same session, or a still-live thread
+        //profiled across two sessions after this call returns, re-uses its
+        //slot for free. It is not an invitation to keep a worker alive across
+        //BeginSession/EndSession itself -- that thread's buffer is being
+        //cleared here while it may still be appending to it.
         for (ThreadBuffer* buffer : s_Registered)
         {
             merged.insert(merged.end(),
@@ -130,9 +156,13 @@ void Profiler::Record(const char* name,
     std::chrono::steady_clock::time_point start,
     std::chrono::steady_clock::time_point end)
 {
-    //Checked before t_Buffer is named, so no session means no thread ever
-    //registers and no buffer is ever constructed.
-    if (!s_Active.load(std::memory_order_relaxed))
+    //t_Buffer is already constructed by the time this runs — MSVC registers
+    //every thread's buffer eagerly, session or no session — so this gate is
+    //what actually keeps an idle session free of appends, not the buffer's
+    //construction. Acquire pairs with BeginSession's release store to
+    //s_Active, so a thread that observes true here also observes the
+    //s_SessionStart write that preceded it.
+    if (!s_Active.load(std::memory_order_acquire))
         return;
 
     t_Buffer.Results.push_back(ProfileResult{

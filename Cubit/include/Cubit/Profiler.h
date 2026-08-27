@@ -37,6 +37,10 @@ public:
     //Returns the data as well as writing it so tests can assert on values
     //rather than scraping JSON, which is what keeps a JSON parser out of this
     //project.
+    //
+    //All recording threads must be quiesced -- joined, not merely idle --
+    //before this is called: it touches every registered buffer, including
+    //live ones, and the append side is deliberately lock-free.
     static std::vector<ProfileResult> EndSession();
 
 private:
