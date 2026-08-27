@@ -282,6 +282,25 @@ TEST_CASE("LoadFile throws when the file is missing")
         std::runtime_error);
 }
 
+//A regression guard rather than a test of new behaviour: it passed before
+//LoadFile was rewritten to size the buffer from the file's length and fill it
+//in one read, and it passes after. Zero is the length that rewrite is most
+//likely to get wrong — a seek-to-end, a tellg and a read all have a degenerate
+//case there — and nothing else in this file exercises it. An empty file is
+//still rejected for the same reason it always was: it carries no VOX magic.
+TEST_CASE("LoadFile rejects an empty file")
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "cubit_loadfile_empty.vox";
+    {
+        std::ofstream out(path, std::ios::binary);
+    }
+
+    CHECK_THROWS_AS(VoxLoader::LoadFile(path.string()), std::runtime_error);
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("The starter map parses into a single chunk")
 {
     const std::filesystem::path path = "Sandbox/assets/maps/starter.vox";

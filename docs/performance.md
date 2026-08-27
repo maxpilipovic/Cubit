@@ -353,7 +353,8 @@ in Debug (78.7% in Release) is spent reading the bytes off disk, not interpretin
 them** — reading costs 5.4x what parsing does in Debug and 3.5x in Release. The
 cause is visible in `Cubit/src/Voxel/VoxLoader.cpp`: `LoadFile` builds its buffer
 with `std::istreambuf_iterator<char>`, byte at a time, over a 23.8 MB file. That
-is a five-line fix, and nobody could see it while "parse `.vox`" was one row.
+is a five-line fix, and nobody could see it while "parse `.vox`" was one row. It
+was made the same day — see P9 below.
 
 Two caveats, not to be dropped:
 
@@ -381,6 +382,55 @@ through `World`'s bounds check and three divides and three modulos. Flat indexin
 plausibly take 3,736 ms to roughly 1 s, worth ~2.7 s of Debug load.
 
 `parse` + `BuildWorld` is worth 8.5 s. Do that first. Option C stays on the table.
+
+---
+
+## P9 — Reading the map file one byte at a time
+
+**Where:** `Cubit/src/Voxel/VoxLoader.cpp` — `VoxLoader::LoadFile`.
+
+**What happened:** the byte buffer was built from a pair of
+`std::istreambuf_iterator<char>`, which appends one byte at a time and regrows
+the vector as it goes. Over the shipped 23.8 MB map that was the single largest
+thing inside the old "parse `.vox`" row, and none of it was parsing.
+
+**Fix:** open with `std::ios::ate`, take the length from `tellg`, size the buffer
+once, and fill it with one `read`. A short read is now checked rather than
+assumed — the iterator form stopped early and handed `Parse` a truncated buffer,
+which surfaced as a complaint about the file's contents rather than about reading
+it.
+
+**Priority:** was highest of the remaining load cost. **Status:** DONE 2026-08-27.
+
+| file read | before | after | |
+|---|---:|---:|---|
+| Debug, warm cache | 2,112 ms | **30.5 ms** | **69x** |
+| Debug, cold cache | 3,209 ms | 35.1 ms | 91x |
+| Release | 111.4 ms | **24.5 ms** | 4.5x |
+
+Medians of three runs each, captured back to back with `CB_PROFILE_SCOPE` so the
+before and after share a machine state — which matters here, given the cache
+sensitivity recorded above. `Parse` was unchanged across the same runs (~400 ms
+Debug, ~32 ms Release), which is the control: only the read moved.
+
+`LoadFile` as a whole went from 2,508.8 ms to ~439 ms in Debug and from 141.7 ms
+to ~58 ms in Release, taking roughly **17% off total Debug load** for about
+fifteen lines.
+
+**Two things this measurement taught, beyond the number.**
+
+The **cache sensitivity disappeared with the fix**. Before, a cold run was 52%
+slower than a warm one; after, the three runs sit within 20% of each other. The
+byte-at-a-time path turned every cache miss into a per-byte cost, so cache state
+dominated; a single bulk read does not amplify it.
+
+The **Debug/Release multiplier for this phase collapsed from 18.9x to about
+1.2x**. That is the signature of work moving out of our code and into the
+operating system: a per-byte loop is instruction-bound and an unoptimised build
+punishes it, while a bulk read is I/O-bound and barely notices which build asked
+for it. Worth remembering when reading any Debug figure on this page — a large
+Debug/Release ratio marks work *we* are doing, and those are the rows worth
+attacking.
 
 ---
 
@@ -439,3 +489,4 @@ worth making:
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
 | P8 | Load floods light and meshes the whole world on one thread | `SkyLight::PropagateAll`, `WorldRenderer::Update` | High | Flood **done 2026-08-16** — column scan, 19.6 s → 3.7 s debug, load halved. Largest remaining piece is now `parse` + `BuildWorld` at 49% |
+| P9 | Map file read one byte at a time | `VoxLoader::LoadFile` | Was highest of remaining load cost | **Done 2026-08-27** — sized buffer + one `read`, 2,112 ms → 30.5 ms debug (69x), ~17% off total debug load |
