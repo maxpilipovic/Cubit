@@ -187,89 +187,113 @@ namespace
             }
         }
     }
-}
 
-void SkyLight::PropagateAll(World& world)
-{
-    CB_PROFILE_SCOPE("SkyLight::PropagateAll");
-
-    const int width = world.GetWidth();
-    const int height = world.GetHeight();
-    const int depth = world.GetDepth();
-
-    //The lowest cell in each column that sky light reaches directly, or height
-    //when the column is closed at the very top and reaches nothing.
-    std::vector<int> skyBottom(
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(depth),
-        height);
-
-    //One pass down each column writes every cell exactly once: Max for the
-    //open run under the sky, 0 for everything from the first opaque block
-    //down. That covers what a separate blanket clear used to do, which is why
-    //there no longer is one.
+    //Writes the light every column gets straight from the sky, and records in
+    //skyBottom the lowest cell each column reaches that way. Max for the open
+    //run under the sky, 0 for everything from the first opaque block down;
+    //that covers what a separate blanket clear used to do, which is why there
+    //no longer is one.
     //
     //This replaces the bulk of the flood rather than speeding it up. Light
     //falls without dimming, so an open column is a straight run of Max that a
     //breadth-first search discovers one queue entry and six neighbour tests at
     //a time — 89% of the writes it was making, for a result a downward walk
     //already knows.
-    for (int z = 0; z < depth; ++z)
+    void ScanColumns(World& world, std::vector<int>& skyBottom)
     {
-        for (int x = 0; x < width; ++x)
+        CB_PROFILE_SCOPE("PropagateAll/Scan");
+
+        const int width = world.GetWidth();
+        const int height = world.GetHeight();
+        const int depth = world.GetDepth();
+
+        for (int z = 0; z < depth; ++z)
         {
-            int y = height - 1;
+            for (int x = 0; x < width; ++x)
+            {
+                int y = height - 1;
 
-            for (; y >= 0 && !world.IsBlockOpaque(x, y, z); --y)
-                world.SetSkyLight(x, y, z, Max);
+                for (; y >= 0 && !world.IsBlockOpaque(x, y, z); --y)
+                    world.SetSkyLight(x, y, z, SkyLight::Max);
 
-            skyBottom[static_cast<std::size_t>(x) +
-                static_cast<std::size_t>(width) * static_cast<std::size_t>(z)] =
-                y + 1;
+                skyBottom[static_cast<std::size_t>(x) +
+                    static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(z)] = y + 1;
 
-            for (; y >= 0; --y)
-                world.SetSkyLight(x, y, z, 0);
+                for (; y >= 0; --y)
+                    world.SetSkyLight(x, y, z, 0);
+            }
         }
     }
 
-    //Seed only the lit cells that border an unlit one. A lit cell whose every
+    //Seeds only the lit cells that border an unlit one. A lit cell whose every
     //neighbour is lit or opaque can brighten nothing, so queueing it would
     //cost six neighbour tests to discover it has nothing to do.
-    std::deque<glm::ivec3> queue;
-
-    for (int z = 0; z < depth; ++z)
+    void SeedBoundaries(const World& world, const std::vector<int>& skyBottom,
+        std::deque<glm::ivec3>& queue)
     {
-        for (int x = 0; x < width; ++x)
+        CB_PROFILE_SCOPE("PropagateAll/Seed");
+
+        const int width = world.GetWidth();
+        const int depth = world.GetDepth();
+
+        for (int z = 0; z < depth; ++z)
         {
-            const int lit = skyBottom[static_cast<std::size_t>(x) +
-                static_cast<std::size_t>(width) * static_cast<std::size_t>(z)];
-
-            //How far down a neighbouring column stays dark. Taking the deepest
-            //of the four gives the union of their ranges in one span: every
-            //range starts at this column's own lit floor, so they nest.
-            int deepest = lit;
-
-            for (const glm::ivec2& step : HorizontalSteps)
+            for (int x = 0; x < width; ++x)
             {
-                const int nx = x + step.x;
-                const int nz = z + step.y;
+                const int lit = skyBottom[static_cast<std::size_t>(x) +
+                    static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(z)];
 
-                //Outside the world contributes no darkness, matching the
-                //bounds check the flood itself makes.
-                if (nx < 0 || nz < 0 || nx >= width || nz >= depth)
-                    continue;
+                //How far down a neighbouring column stays dark. Taking the
+                //deepest of the four gives the union of their ranges in one
+                //span: every range starts at this column's own lit floor, so
+                //they nest.
+                int deepest = lit;
 
-                deepest = std::max(deepest,
-                    skyBottom[static_cast<std::size_t>(nx) +
-                        static_cast<std::size_t>(width) *
-                        static_cast<std::size_t>(nz)]);
+                for (const glm::ivec2& step : HorizontalSteps)
+                {
+                    const int nx = x + step.x;
+                    const int nz = z + step.y;
+
+                    //Outside the world contributes no darkness, matching the
+                    //bounds check the flood itself makes.
+                    if (nx < 0 || nz < 0 || nx >= width || nz >= depth)
+                        continue;
+
+                    deepest = std::max(deepest,
+                        skyBottom[static_cast<std::size_t>(nx) +
+                            static_cast<std::size_t>(width) *
+                            static_cast<std::size_t>(nz)]);
+                }
+
+                for (int y = lit; y < deepest; ++y)
+                    queue.push_back(glm::ivec3(x, y, z));
             }
-
-            for (int y = lit; y < deepest; ++y)
-                queue.push_back(glm::ivec3(x, y, z));
         }
     }
+}
 
-    Flood(world, queue, nullptr);
+void SkyLight::PropagateAll(World& world)
+{
+    CB_PROFILE_SCOPE("SkyLight::PropagateAll");
+
+    //The lowest cell in each column that sky light reaches directly, or height
+    //when the column is closed at the very top and reaches nothing.
+    std::vector<int> skyBottom(
+        static_cast<std::size_t>(world.GetWidth()) *
+        static_cast<std::size_t>(world.GetDepth()),
+        world.GetHeight());
+
+    ScanColumns(world, skyBottom);
+
+    std::deque<glm::ivec3> queue;
+    SeedBoundaries(world, skyBottom, queue);
+
+    {
+        CB_PROFILE_SCOPE("PropagateAll/Flood");
+        Flood(world, queue, nullptr);
+    }
 }
 
 void SkyLight::Repropagate(World& world, int x, int y, int z)
