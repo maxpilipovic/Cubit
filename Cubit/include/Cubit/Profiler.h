@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4251)
+#endif
+
 //One timed scope, as it will be written out. Name is a string literal owned by
 //the caller's translation unit, so recording copies no strings and allocates
 //nothing per scope beyond the buffer's own amortised growth.
@@ -88,4 +93,8 @@ private:
     //__FUNCSIG__ is MSVC. The project is CB_PLATFORM_WINDOWS-only, so it is
     //used directly rather than wrapped in a shim with no second case to serve.
     #define CB_PROFILE_FUNCTION() CB_PROFILE_SCOPE(__FUNCSIG__)
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(pop)
 #endif

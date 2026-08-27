@@ -5,10 +5,10 @@
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/World.h"
+#include "Cubit/Profiler.h"
 
 #include "Core/CoreLogger.h"
 #include "Voxel/Neighbourhood.h"
-#include "Cubit/Profiler.h"
 
 #include <array>
 
