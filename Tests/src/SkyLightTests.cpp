@@ -757,3 +757,52 @@ TEST_CASE("Column scan matches the reference on generated terrain")
         return BuildWorld(TerrainGen::Generate(config));
     });
 }
+
+TEST_CASE("Column scan matches the reference under a roof in a middle chunk")
+{
+    //Three chunks tall, with the roof in the middle one, so the darkness it
+    //casts starts in one chunk and has to carry down through the next. A scan
+    //that walks a chunk at a time rather than a world column has to hand that
+    //"already closed" state across the boundary itself; one that forgets
+    //relights the bottom chunk as though it were open sky, which no
+    //single-chunk-tall world would catch.
+    CheckMatchesReference([]
+    {
+        World world(2, 3, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{1});
+
+        for (int z = 4; z < 28; ++z)
+            for (int x = 4; x < 28; ++x)
+                world.SetBlock(x, 20, z, BlockId{1});
+
+        return world;
+    });
+}
+
+TEST_CASE("Column scan matches the reference with a roof on a chunk boundary")
+{
+    //The roof sits at y=16 and y=32 — local y=0 of the middle and top chunks,
+    //the first cell a downward chunk-major sweep looks at after crossing into
+    //a new chunk. An off-by-one in where the boundary is handled shows up here
+    //and nowhere else: the closing block is either double-counted or missed
+    //entirely, depending on which side of the seam the sweep thinks it is on.
+    CheckMatchesReference([]
+    {
+        World world(2, 3, 2);
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{1});
+
+        for (int z = 2; z < 14; ++z)
+            for (int x = 2; x < 14; ++x)
+                world.SetBlock(x, 16, z, BlockId{1});
+
+        for (int z = 18; z < 30; ++z)
+            for (int x = 18; x < 30; ++x)
+                world.SetBlock(x, 32, z, BlockId{1});
+
+        return world;
+    });
+}
