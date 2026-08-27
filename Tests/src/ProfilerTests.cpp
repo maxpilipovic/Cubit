@@ -3,7 +3,9 @@
 #include "Cubit/Profiler.h"
 
 #include <filesystem>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -86,4 +88,36 @@ TEST_CASE("A scope entered with no session active is dropped")
     //Recording is gated before the buffer is touched, so a stray macro in
     //engine code costs nothing when nobody is measuring.
     CHECK(results.empty());
+}
+
+TEST_CASE("Scopes from two threads merge with distinct thread ids")
+{
+    Profiler::BeginSession("test", TempTracePath("cubit_profiler_threads.json"));
+
+    {
+        CB_PROFILE_SCOPE("Main");
+    }
+
+    std::thread worker(
+        []()
+        {
+            CB_PROFILE_SCOPE("Worker");
+        });
+
+    //Joined before EndSession, so the worker's buffer is gone by the time the
+    //merge runs. That is the path ~ThreadBuffer's flush exists for, and the
+    //samples it rescues — from short-lived workers — are the ones a threading
+    //investigation most wants. The main thread's own scope covers the other
+    //path, where the buffer is still registered at EndSession.
+    worker.join();
+
+    const std::vector<ProfileResult> results = Profiler::EndSession();
+
+    REQUIRE(results.size() == 2);
+
+    std::set<std::uint32_t> ids;
+    for (const ProfileResult& result : results)
+        ids.insert(result.ThreadId);
+
+    CHECK(ids.size() == 2);
 }
