@@ -2,8 +2,11 @@
 
 #include "Cubit/Profiler.h"
 
+#include "Core/CoreLogger.h"
+
 #include <algorithm>
 #include <atomic>
+#include <fstream>
 #include <mutex>
 
 namespace
@@ -36,6 +39,55 @@ namespace
             return a.StartMicroseconds < b.StartMicroseconds;
 
         return a.DurationMicroseconds > b.DurationMicroseconds;
+    }
+
+    //Escapes the two characters a JSON string may not contain.
+    std::string Escape(const char* text)
+    {
+        std::string escaped;
+        for (const char* c = text; *c != '\0'; ++c)
+        {
+            if (*c == '"' || *c == '\\')
+                escaped.push_back('\\');
+
+            escaped.push_back(*c);
+        }
+        return escaped;
+    }
+
+    //Chrome trace format: an array of complete events, microseconds throughout.
+    //Nesting needs no representation — events on one tid nest by containment,
+    //so the viewer derives the flame graph from ts and dur alone.
+    void WriteTrace(const std::vector<ProfileResult>& results,
+        const std::string& path)
+    {
+        std::ofstream file(path);
+        if (!file)
+        {
+            CB_CORE_ERROR("Profiler: cannot open trace file: " + path);
+            return;
+        }
+
+        file << "{\"otherData\":{},\"traceEvents\":[";
+
+        for (std::size_t i = 0; i < results.size(); ++i)
+        {
+            const ProfileResult& result = results[i];
+
+            if (i != 0)
+                file << ',';
+
+            file << "\n{\"cat\":\"function\""
+                 << ",\"dur\":" << result.DurationMicroseconds
+                 << ",\"name\":\"" << Escape(result.Name) << '"'
+                 << ",\"ph\":\"X\""
+                 << ",\"pid\":0"
+                 << ",\"tid\":" << result.ThreadId
+                 << ",\"ts\":" << result.StartMicroseconds
+                 << '}';
+        }
+
+        file << "\n]}";
     }
 
     //Each thread appends to its own buffer with no lock, so recording never
@@ -96,6 +148,18 @@ namespace
 //is undefined behaviour rather than a merely stale read.
 void Profiler::BeginSession(const char* name, const std::string& outputPath)
 {
+    //Ends the abandoned session rather than discarding it or throwing: a
+    //misuse with an honest answer gets the answer, the way ApplyBlockEdit
+    //returns nullopt rather than throwing on a bad coordinate.
+    if (s_Active.load(std::memory_order_relaxed))
+    {
+        CB_CORE_WARN("Profiler: session '" + s_SessionName +
+            "' was still recording; ending it before starting '" +
+            std::string(name) + "'");
+
+        EndSession();
+    }
+
     s_SessionName = name;
     s_OutputPath = outputPath;
 
@@ -148,6 +212,8 @@ std::vector<ProfileResult> Profiler::EndSession()
     }
 
     std::sort(merged.begin(), merged.end(), Earlier);
+
+    WriteTrace(merged, s_OutputPath);
 
     return merged;
 }

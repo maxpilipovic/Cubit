@@ -8,7 +8,8 @@
 #include <vector>
 
 //One timed scope, as it will be written out. Name is a string literal owned by
-//the caller's translation unit, so recording allocates nothing.
+//the caller's translation unit, so recording copies no strings and allocates
+//nothing per scope beyond the buffer's own amortised growth.
 struct ProfileResult
 {
     const char* Name = nullptr;
@@ -73,9 +74,11 @@ private:
 #define CB_PROFILE_JOIN(a, b) CB_PROFILE_JOIN_INNER(a, b)
 
 #ifdef CB_DIST
-    //The shipping configuration pays nothing: the scope leaves no object
-    //behind, and BeginSession/EndSession are empty. The API still exists, so
-    //call sites compile in every configuration.
+    //The shipping configuration pays nothing per scope: the macros expand to
+    //nothing, so no scope is ever timed and Record is never called.
+    //BeginSession/EndSession still exist and run in this configuration -- they
+    //are not guarded on CB_DIST -- they simply have nothing to record. The API
+    //still exists, so call sites compile in every configuration.
     #define CB_PROFILE_SCOPE(name)
     #define CB_PROFILE_FUNCTION()
 #else

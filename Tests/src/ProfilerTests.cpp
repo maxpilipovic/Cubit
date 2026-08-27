@@ -3,7 +3,9 @@
 #include "Cubit/Profiler.h"
 
 #include <filesystem>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -120,4 +122,100 @@ TEST_CASE("Scopes from two threads merge with distinct thread ids")
         ids.insert(result.ThreadId);
 
     CHECK(ids.size() == 2);
+}
+
+namespace
+{
+    //Reads a whole file back. The suite deliberately contains no JSON parser:
+    //values are asserted through EndSession's return, and the file is checked
+    //only for the structure a viewer needs to open it.
+    std::string ReadWholeFile(const std::string& path)
+    {
+        std::ifstream file(path);
+        std::ostringstream contents;
+        contents << file.rdbuf();
+        return contents.str();
+    }
+}
+
+TEST_CASE("A session writes a trace holding the scopes it recorded")
+{
+    const std::string path = TempTracePath("cubit_profiler_written.json");
+
+    Profiler::BeginSession("test", path);
+    {
+        CB_PROFILE_SCOPE("Written");
+    }
+    Profiler::EndSession();
+
+    const std::string trace = ReadWholeFile(path);
+    std::filesystem::remove(path);
+
+    CHECK(trace.find("\"traceEvents\"") != std::string::npos);
+    CHECK(trace.find("\"name\":\"Written\"") != std::string::npos);
+    CHECK(trace.find("\"ph\":\"X\"") != std::string::npos);
+    CHECK(trace.rfind("]}") != std::string::npos);
+}
+
+TEST_CASE("A session with no scopes writes a valid empty trace")
+{
+    const std::string path = TempTracePath("cubit_profiler_empty.json");
+
+    Profiler::BeginSession("test", path);
+    Profiler::EndSession();
+
+    const std::string trace = ReadWholeFile(path);
+    std::filesystem::remove(path);
+
+    //An empty capture must still open in a viewer rather than producing a
+    //truncated file that reads as a crash.
+    CHECK(trace.find("\"traceEvents\"") != std::string::npos);
+    CHECK(trace.find("\"name\"") == std::string::npos);
+    CHECK(trace.rfind("]}") != std::string::npos);
+}
+
+TEST_CASE("A name containing a quote is escaped rather than breaking the file")
+{
+    const std::string path = TempTracePath("cubit_profiler_escaped.json");
+
+    Profiler::BeginSession("test", path);
+    {
+        //__FUNCSIG__ is unsanitised compiler output pasted into JSON, so the
+        //two characters JSON forbids are escaped rather than trusted.
+        CB_PROFILE_SCOPE("Quo\"te");
+    }
+    Profiler::EndSession();
+
+    const std::string trace = ReadWholeFile(path);
+    std::filesystem::remove(path);
+
+    CHECK(trace.find("Quo\\\"te") != std::string::npos);
+}
+
+TEST_CASE("Beginning a session while one is active writes the first one out")
+{
+    const std::string first = TempTracePath("cubit_profiler_first.json");
+    const std::string second = TempTracePath("cubit_profiler_second.json");
+
+    Profiler::BeginSession("first", first);
+    {
+        CB_PROFILE_SCOPE("Early");
+    }
+
+    //Nothing is lost: the abandoned session is ended properly rather than
+    //discarded, and the warning names the mistake.
+    Profiler::BeginSession("second", second);
+    {
+        CB_PROFILE_SCOPE("Late");
+    }
+    const std::vector<ProfileResult> results = Profiler::EndSession();
+
+    const std::string firstTrace = ReadWholeFile(first);
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+
+    CHECK(firstTrace.find("\"name\":\"Early\"") != std::string::npos);
+
+    REQUIRE(results.size() == 1);
+    CHECK(std::string(results[0].Name) == "Late");
 }
