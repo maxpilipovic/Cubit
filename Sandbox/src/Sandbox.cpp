@@ -7,7 +7,6 @@
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -31,9 +30,6 @@ namespace
     //How far the player can reach to edit terrain, in blocks.
     constexpr float ReachDistance = 12.0f;
 
-    //Half extents of the player's 0.6 x 1.8 x 0.6 collision box.
-    const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
-
     //Near-black, so the outline reads against both lit terrain and sky.
     const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
 
@@ -43,20 +39,6 @@ namespace
     //rather than burying the camera in terrain — which used to render as a
     //black screen and read as a rendering bug.
     const glm::ivec2 SpawnHintXZ{ 240, 300 };
-
-    //Eye height above the centre of the player box.
-    constexpr float EyeOffset = 0.7f;
-
-    constexpr float WalkSpeed = 5.0f;
-    constexpr float JumpSpeed = 9.0f;
-    constexpr float Gravity = 24.0f;
-
-    //Water physics. Gravity is weakened rather than cancelled, so doing nothing
-    //settles the player onto the riverbed instead of leaving them hanging.
-    constexpr float WaterGravity = 6.0f;
-    constexpr float SinkSpeed = 1.5f;
-    constexpr float SwimUpSpeed = 3.5f;
-    constexpr float WaterDrag = 0.6f;
 
     //Underwater haze. Roughly half strength at the 12-block reach distance and
     //83% at 30, which reads as murk without hiding what you are aiming at.
@@ -129,11 +111,11 @@ public:
         // LoadWorld resolves the spawn but deliberately does not teleport to
         // it: F9 reloads mid-session and should leave the player where they
         // were working. Starting fresh is the one time it should.
-        TeleportPlayer(m_Spawn);
+        m_Player.Teleport(m_Spawn);
 
         // Face the middle of the map, level with the eye. Aiming at the literal
         // centre of the world box would tilt the view into the ground.
-        const glm::vec3 eye = m_PlayerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
+        const glm::vec3 eye = m_Player.InterpolatedEye(1.0f);
         const glm::vec3 target(
             static_cast<float>(m_World.GetWidth()) * 0.5f,
             eye.y,
@@ -187,73 +169,30 @@ public:
     //eye between steps in OnRender.
     void OnFixedUpdate(Timestep timestep) override
     {
-        // The step is about to overwrite the position rendering interpolates
-        // from, so keep it first.
-        m_PreviousPlayerPosition = m_PlayerPosition;
         ++m_StepsThisFrame;
 
-        const float seconds = static_cast<float>(timestep.GetSeconds());
-        const bool inFluid = VoxelCollision::OverlapsFluid(
-            m_World, m_PlayerPosition, PlayerHalfExtents);
+        // Reading the keyboard is this layer's job, not the controller's: the
+        // controller is handed what the player asked for, which is what lets it
+        // be stepped by a test with no window and no focus.
+        CharacterInput input;
+        input.Move = ReadWalkInput();
+        input.Jump = Input::IsKeyPressed(KeyCode::Space);
 
-        glm::vec3 walk = ReadWalkInput() * WalkSpeed;
+        m_Player.Step(
+            m_World, input, static_cast<float>(timestep.GetSeconds()));
 
-        // Space has to be tested here rather than after the jump: standing on
-        // the riverbed is grounded and submerged at once, so a dry jump would
-        // otherwise fire instead of a swim stroke.
-        if (inFluid)
+        m_HudState->PlayerPosition = m_Player.Position();
+        m_HudState->Grounded = m_Player.Grounded();
+        m_HudState->BodyInFluid = m_Player.BodyInFluid();
+        m_HudState->EyeInFluid = m_Player.EyeInFluid();
+
+        // Falling off the edge of the map is a Sandbox rule rather than
+        // character physics, so it stays here. The velocity is cleared
+        // separately because Teleport deliberately leaves it alone.
+        if (m_Player.Position().y < FallResetHeight)
         {
-            walk *= WaterDrag;
-
-            // Only while the head is under. The box still counts as wet with
-            // the whole body clear of the surface, so stroking on that alone
-            // thrusts the player out of the river and buzzes them above it.
-            if (IsEyeInFluid(m_PlayerPosition) &&
-                Input::IsKeyPressed(KeyCode::Space))
-                m_VerticalVelocity = SwimUpSpeed;
-
-            m_VerticalVelocity -= WaterGravity * seconds;
-            m_VerticalVelocity = glm::max(m_VerticalVelocity, -SinkSpeed);
-        }
-        else
-        {
-            if (m_Grounded && Input::IsKeyPressed(KeyCode::Space))
-                m_VerticalVelocity = JumpSpeed;
-
-            m_VerticalVelocity -= Gravity * seconds;
-        }
-
-        //The player position is in world coordinates, so collision runs against
-        //the whole world and the box can cross chunk boundaries.
-        const VoxelMoveResult move = VoxelCollision::MoveBox(
-            m_World,
-            m_PlayerPosition,
-            PlayerHalfExtents,
-            glm::vec3(walk.x, m_VerticalVelocity, walk.z) * seconds);
-
-        m_PlayerPosition = move.Position;
-        m_Grounded = move.Grounded;
-        m_HudState->PlayerPosition = m_PlayerPosition;
-        m_HudState->Grounded = m_Grounded;
-        m_HudState->BodyInFluid = inFluid;
-
-        // The eye, not the box: the tint and the fog should come on when the
-        // camera goes under, which happens later than the feet getting wet.
-        // Taken after the move so rendering is not a frame stale. Kept on the
-        // layer rather than read back from HudState, so the render fog does
-        // not depend on the HUD struct.
-        m_EyeInFluid = IsEyeInFluid(m_PlayerPosition);
-        m_HudState->EyeInFluid = m_EyeInFluid;
-
-        // Landing or hitting a ceiling ends vertical motion.
-        if (move.BlockedY)
-            m_VerticalVelocity = 0.0f;
-
-        // The chunk is not a closed world, so a player can walk off its edge.
-        if (m_PlayerPosition.y < FallResetHeight)
-        {
-            TeleportPlayer(m_Spawn);
-            m_VerticalVelocity = 0.0f;
+            m_Player.Teleport(m_Spawn);
+            m_Player.SetVerticalVelocity(0.0f);
         }
     }
 
@@ -279,7 +218,8 @@ public:
         // on — so the two can be subtracted directly.
         m_Shader->SetFloat3("u_FogColor", FogColor);
         m_Shader->SetFloat3("u_CameraPos", m_CameraController.GetCamera().GetPosition());
-        m_Shader->SetFloat("u_FogDensity", m_EyeInFluid ? FogDensity : 0.0f);
+        m_Shader->SetFloat(
+            "u_FogDensity", m_Player.EyeInFluid() ? FogDensity : 0.0f);
         m_WorldRenderer.Render(
             *m_Shader,
             m_CameraController.GetCamera().GetViewProjectionMatrix(),
@@ -318,23 +258,11 @@ public:
     }
 
 private:
-    //Reports whether the camera sits in a fluid block for a given player
-    //position. Taken at the eye rather than the box because a body that still
-    //counts as wet can have its head well clear of the surface.
-    bool IsEyeInFluid(const glm::vec3& playerPosition) const
-    {
-        const glm::vec3 eye =
-            playerPosition + glm::vec3(0.0f, EyeOffset, 0.0f);
-
-        return m_World.IsBlockFluid(
-            static_cast<int>(std::floor(eye.x)),
-            static_cast<int>(std::floor(eye.y)),
-            static_cast<int>(std::floor(eye.z)));
-    }
-
     //Returns a unit direction for held movement keys, flattened so that looking
-    //up or down does not change walking speed.
-    glm::vec3 ReadWalkInput() const
+    //up or down does not change walking speed. Returned as an x/z pair because
+    //that is what a character is asked to do; the vertical axis is gravity's
+    //and jump's, never the walk's.
+    glm::vec2 ReadWalkInput() const
     {
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
 
@@ -361,33 +289,15 @@ private:
         if (glm::length(direction) > 0.0f)
             direction = glm::normalize(direction);
 
-        return direction;
+        return glm::vec2(direction.x, direction.z);
     }
 
     //Places the camera at eye height above the player, in world space, at the
     //point the player occupied `alpha` of the way through the current step.
     void UpdateCameraPosition(float alpha)
     {
-        const glm::vec3 position =
-            glm::mix(m_PreviousPlayerPosition, m_PlayerPosition, alpha);
-
         m_CameraController.SetPosition(
-            position + WorldOffset + glm::vec3(0.0f, EyeOffset, 0.0f));
-    }
-
-    //Moves the player without interpolating through the space in between.
-    //
-    //Interpolating a respawn or a reload would smear the camera across the map
-    //for a frame, so both positions are written together and the lerp that
-    //follows is a no-op.
-    //
-    //Deliberately does not reset m_VerticalVelocity — that stays the caller's
-    //business, and all current callers zero it themselves. A future teleport
-    //site that forgets inherits whatever fall velocity the player had.
-    void TeleportPlayer(const glm::vec3& position)
-    {
-        m_PlayerPosition = position;
-        m_PreviousPlayerPosition = position;
+            m_Player.InterpolatedEye(alpha) + WorldOffset);
     }
 
     //Outlines the block a click would break, using the same ray the edit uses so
@@ -515,7 +425,7 @@ private:
         ResolveSpawn();
 
         LiftPlayerClearOfTerrain();
-        m_VerticalVelocity = 0.0f;
+        m_Player.SetVerticalVelocity(0.0f);
         UpdateCameraPosition(1.0f);
     }
 
@@ -532,25 +442,26 @@ private:
     void LiftPlayerClearOfTerrain()
     {
         const float top = static_cast<float>(m_World.GetHeight());
+        const glm::vec3& halfExtents = m_Player.Config().HalfExtents;
 
-        glm::vec3 lifted = m_PlayerPosition;
+        glm::vec3 lifted = m_Player.Position();
         while (lifted.y < top &&
-            VoxelCollision::Overlaps(m_World, lifted, PlayerHalfExtents))
+            VoxelCollision::Overlaps(m_World, lifted, halfExtents))
             lifted.y += 1.0f;
 
         // A column solid to the sky has nowhere to stand.
-        if (VoxelCollision::Overlaps(m_World, lifted, PlayerHalfExtents))
+        if (VoxelCollision::Overlaps(m_World, lifted, halfExtents))
             lifted = m_Spawn;
 
         // A lift is a discontinuity, so it must not be interpolated through.
-        TeleportPlayer(lifted);
+        m_Player.Teleport(lifted);
     }
 
     //Resolves the spawn hint against the loaded map.
     void ResolveSpawn()
     {
         const std::optional<glm::vec3> found =
-            FindSpawn(m_World, SpawnHintXZ, PlayerHalfExtents);
+            FindSpawn(m_World, SpawnHintXZ, m_Player.Config().HalfExtents);
 
         if (found)
         {
@@ -568,7 +479,8 @@ private:
 
         m_Spawn = glm::vec3(
             static_cast<float>(SpawnHintXZ.x) + 0.5f,
-            static_cast<float>(m_World.GetHeight()) - PlayerHalfExtents.y,
+            static_cast<float>(m_World.GetHeight()) -
+                m_Player.Config().HalfExtents.y,
             static_cast<float>(SpawnHintXZ.y) + 0.5f);
     }
 
@@ -651,20 +563,16 @@ private:
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
-    glm::vec3 m_PlayerPosition{ 0.0f };
-    //Where the player stood at the end of the previous fixed step. Rendering
-    //interpolates between this and the current position, so motion stays smooth
-    //when frames and steps do not line up.
-    glm::vec3 m_PreviousPlayerPosition{ 0.0f };
+    //The player: position, velocity, and everything gravity and collision do to
+    //them. Holds both the current and previous step's position, so rendering
+    //can interpolate between them and a teleport cannot leave one stale.
+    CharacterController m_Player;
     //Counted across the current frame's steps and published by OnFrameUpdate.
     int m_StepsThisFrame = 0;
     //Inverses of applied edits, newest last. Capped so a long session cannot
     //creep; the oldest entries are the least likely to be wanted back.
     static constexpr std::size_t MaxUndoDepth = 256;
     std::vector<BlockEdit> m_Undo;
-    float m_VerticalVelocity = 0.0f;
-    bool m_Grounded = false;
-    bool m_EyeInFluid = false;
     PerspectiveCameraController m_CameraController;
 };
 
