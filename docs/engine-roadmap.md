@@ -283,14 +283,26 @@ Only three, and each for a specific reason rather than general tidiness.
 Real gaps, but building them now means designing against a guess. Each becomes
 obvious, and better shaped, the moment something concretely needs it.
 
-- **An entity or actor concept.** The player is three fields on `SandboxLayer`
-  (`m_PlayerPosition`, `m_VerticalVelocity`, `m_Grounded`) with the character
-  controller inlined in `Sandbox.cpp`. Nothing represents "a thing in the world
-  with a position and a box", which is what other players, projectiles, and
-  replication all need. But there is exactly *one* entity today, and an
-  abstraction over one instance is a guess. Extracting the character controller
-  out of the Sandbox is worth doing on its own; a general entity system is not,
-  yet.
+- **An entity or actor concept.** ~~The player is three fields on
+  `SandboxLayer`~~ **Half done 2026-08-27.** The extraction this bullet called
+  for has happened: `CharacterController` (`Cubit/include/Cubit/Voxel/`) owns the
+  position, velocity, grounded and in-fluid state, with gravity, jumping,
+  swimming and collision behind `Step`. `SandboxLayer` reads the keyboard,
+  resolves the camera, and hands over a `CharacterInput` — so `Step` is a
+  function of state, input and world, and sixteen tests exercise rules that
+  previously could not be reached at all. It lives with the rest of the GL-free
+  simulation core, so it already runs headless.
+
+  **A general entity system is still not done, and still should not be.** There
+  is exactly one character today, and an abstraction over one instance is a
+  guess. What the extraction bought is that the guess is no longer forced: when
+  a second actor appears, the thing to generalise is a type that exists rather
+  than forty lines inlined in a layer.
+
+  The input-as-a-value seam is the part that matters beyond tidiness. A
+  character whose movement is a pure step over an explicit input is what
+  prediction, replay and an authoritative server all need, and it was free to
+  build that way now. See "Networking is not an eighth bullet" below.
 - **A way to draw geometry that is not a chunk.** `Renderer::Submit` is generic,
   but it is the only seam — every caller hand-builds its own `VertexArray`
   (`WorldRenderer`, `HudLayer`). There is no `Mesh` type, no model loading, no
