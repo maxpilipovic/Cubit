@@ -1,6 +1,6 @@
 # Cubit Networking — Design
 
-_Written 2026-08-27. Status: Stage 1 designed, Stages 2 and 3 shaped only._
+_Written 2026-08-27. Status: **Stage 1 shipped 2026-08-30.** Stages 2 and 3 shaped only._
 
 The arc that turns Cubit from a single-player voxel sandbox into a server-authoritative
 multiplayer game. This document is the one to re-read when picking the work back up:
@@ -210,6 +210,27 @@ calls `ReplaceWorld`. Externally nothing changes — same spawn, same feel.
 
 Yesterday's `CharacterInput` was half-right. Migrating those tests is the price of
 finding that out before the shape reached the wire rather than after.
+
+### Shipped 2026-08-30
+
+`MatchState` owns the world, an ordered player registry and the tick;
+`CharacterInput` carries local axes plus yaw and pitch; `SandboxLayer` is a
+caller rather than a simulator. Behaviour is unchanged — same spawn, same face
+count.
+
+Two things this stage added that the design did not call for. Movement is now
+**capped after resolution rather than normalised before it**, which fixes
+diagonal walking being `sqrt(2)` times faster and leaves room for analog input.
+And `Heading.h` exists as a separate GL-free unit pinned against
+`PerspectiveCamera`, rather than the resolution living inline in the
+controller, because the yaw convention is the thing most likely to be
+duplicated wrongly.
+
+**Note on commit attribution.** The commit message for 41efdaa states that
+`ReadWalkInput` stops doing camera maths and reports held keys in the character's
+own frame, but this change actually landed in commit 73e9562. The Task 5 diff for
+41efdaa does not touch `ReadWalkInput`. The history is not being rewritten; this
+note records the misattribution plainly so that a corrected record exists.
 
 ---
 

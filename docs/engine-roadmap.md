@@ -303,6 +303,11 @@ obvious, and better shaped, the moment something concretely needs it.
   character whose movement is a pure step over an explicit input is what
   prediction, replay and an authoritative server all need, and it was free to
   build that way now. See "Networking is not an eighth bullet" below.
+
+  **Stage 1 of the networking arc shipped 2026-08-30**, adding `MatchState` above
+  the controller: it owns the world, the roster and the tick, and both a server
+  and a client will step it. Still not an entity system, and still deliberately
+  so — one kind of actor.
 - **A way to draw geometry that is not a chunk.** `Renderer::Submit` is generic,
   but it is the only seam — every caller hand-builds its own `VertexArray`
   (`WorldRenderer`, `HudLayer`). There is no `Mesh` type, no model loading, no
