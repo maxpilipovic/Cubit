@@ -37,6 +37,7 @@
 #include "Cubit/Voxel/CharacterController.h"
 #include "Cubit/Voxel/Chunk.h"
 #include "Cubit/Voxel/ChunkMesher.h"
+#include "Cubit/Voxel/Heading.h"
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/VoxelRaycast.h"
 #include "Cubit/Voxel/World.h"
