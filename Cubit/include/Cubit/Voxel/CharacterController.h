@@ -20,11 +20,24 @@ class World;
 //buys all three.
 struct CharacterInput
 {
-    //Ground-plane movement, already resolved against whatever the character is
-    //facing. Length is expected to be 0 or 1; anything longer walks faster, so
-    //the caller normalises rather than this clamping and hiding the mistake.
-    //x is right, y is forward.
+    //Movement in the character's own frame: x strafes right, y walks forward.
+    //Local rather than world-space so that a server can resolve the direction
+    //itself from Yaw below, instead of trusting a vector a client computed.
+    //
+    //A length above 1 is capped after resolution rather than rejected, so
+    //holding two keys walks at the same speed as holding one, and a future
+    //analog stick at half deflection still walks at half speed.
     glm::vec2 Move{ 0.0f };
+
+    //Where the character is looking, in degrees, in the same convention as
+    //Heading.h and PerspectiveCamera.
+    float Yaw = 0.0f;
+
+    //Carried but not consumed by movement, deliberately: looking up must not
+    //change walking. Remote-character rendering needs it, and hitscan will
+    //need it, and adding a field to a wire format later is worse than
+    //carrying an unused one now.
+    float Pitch = 0.0f;
 
     //Held, not tapped. Jumping and swimming up are the same request; which one
     //happens depends on whether the character is in water.

@@ -176,6 +176,8 @@ public:
         // be stepped by a test with no window and no focus.
         CharacterInput input;
         input.Move = ReadWalkInput();
+        input.Yaw = m_CameraController.GetYaw();
+        input.Pitch = m_CameraController.GetPitch();
         input.Jump = Input::IsKeyPressed(KeyCode::Space);
 
         m_Player.Step(
@@ -258,38 +260,27 @@ public:
     }
 
 private:
-    //Returns a unit direction for held movement keys, flattened so that looking
-    //up or down does not change walking speed. Returned as an x/z pair because
-    //that is what a character is asked to do; the vertical axis is gravity's
-    //and jump's, never the walk's.
+    //Returns held movement keys in the character's own frame: x strafes, y
+    //walks forward. No camera maths here any more - the simulation resolves
+    //the direction from the yaw, which is what lets a server reproduce the
+    //step rather than trust a vector this machine computed.
+    //
+    //Deliberately not normalised: Step caps the resolved vector, so pressing
+    //two keys is capped there rather than scaled here.
     glm::vec2 ReadWalkInput() const
     {
-        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        glm::vec2 move{ 0.0f };
 
-        glm::vec3 forward = camera.GetForwardDirection();
-        glm::vec3 right = camera.GetRightDirection();
-        forward.y = 0.0f;
-        right.y = 0.0f;
-
-        if (glm::length(forward) > 0.0f)
-            forward = glm::normalize(forward);
-        if (glm::length(right) > 0.0f)
-            right = glm::normalize(right);
-
-        glm::vec3 direction{ 0.0f };
         if (Input::IsKeyPressed(KeyCode::W))
-            direction += forward;
+            move.y += 1.0f;
         if (Input::IsKeyPressed(KeyCode::S))
-            direction -= forward;
+            move.y -= 1.0f;
         if (Input::IsKeyPressed(KeyCode::D))
-            direction += right;
+            move.x += 1.0f;
         if (Input::IsKeyPressed(KeyCode::A))
-            direction -= right;
+            move.x -= 1.0f;
 
-        if (glm::length(direction) > 0.0f)
-            direction = glm::normalize(direction);
-
-        return glm::vec2(direction.x, direction.z);
+        return move;
     }
 
     //Places the camera at eye height above the player, in world space, at the

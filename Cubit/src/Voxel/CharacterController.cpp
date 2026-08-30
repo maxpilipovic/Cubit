@@ -2,6 +2,7 @@
 
 #include "Cubit/Voxel/CharacterController.h"
 
+#include "Cubit/Voxel/Heading.h"
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/World.h"
 
@@ -17,7 +18,22 @@ void CharacterController::Step(
     m_BodyInFluid =
         VoxelCollision::OverlapsFluid(world, m_Position, m_Config.HalfExtents);
 
-    glm::vec2 walk = input.Move * m_Config.WalkSpeed;
+    // Resolve the character's own axes into the world here rather than taking
+    // a world-space vector from the caller: this is the step a server has to
+    // be able to reproduce, and reproducing it means deriving the direction
+    // from the yaw rather than trusting a direction it was handed.
+    const glm::vec3 forward = HeadingForward(input.Yaw);
+    const glm::vec3 right = HeadingRight(input.Yaw);
+    const glm::vec3 heading = forward * input.Move.y + right * input.Move.x;
+
+    // Cap rather than normalise, so partial deflection still walks slowly
+    // while two keys at once cannot outrun one.
+    const float headingLength = glm::length(heading);
+    const glm::vec3 direction =
+        headingLength > 1.0f ? heading / headingLength : heading;
+
+    glm::vec2 walk =
+        glm::vec2(direction.x, direction.z) * m_Config.WalkSpeed;
 
     // Jump has to be tested inside this branch rather than after it: standing
     // on the riverbed is grounded and submerged at once, so a dry jump would

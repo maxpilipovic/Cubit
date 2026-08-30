@@ -48,10 +48,14 @@ namespace
         return maxSteps;
     }
 
-    CharacterInput Walking(const glm::vec2& move)
+    //Movement is now in the character's frame, so a test says which way it is
+    //facing. Yaw 0 faces +x with right toward +z (see HeadingTests), which is
+    //what the position assertions below are written against.
+    CharacterInput Walking(const glm::vec2& move, float yaw = 0.0f)
     {
         CharacterInput input;
         input.Move = move;
+        input.Yaw = yaw;
         return input;
     }
 
@@ -158,7 +162,7 @@ TEST_CASE("A walking character is stopped by a wall")
     SettleOnGround(character, world);
 
     for (int i = 0; i < 120; ++i)
-        character.Step(world, Walking(glm::vec2(1.0f, 0.0f)), Step);
+        character.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
 
     //Walked into it, not through it: stopped just short of the block face.
     CHECK(character.Position().x < 20.0f);
@@ -183,6 +187,8 @@ TEST_CASE("A character blocked on one axis still slides along the other")
 
     for (int i = 0; i < 120; ++i)
     {
+        // {1,1} at yaw 0 is strafe +z and forward +x, the same diagonal into
+        // the wall the world-space version described.
         character.Step(world,
             Walking(glm::normalize(glm::vec2(1.0f, 1.0f))), Step);
     }
@@ -266,8 +272,8 @@ TEST_CASE("Water drags a swimmer's walking speed down")
 
     for (int i = 0; i < 30; ++i)
     {
-        wet.Step(world, Walking(glm::vec2(1.0f, 0.0f)), Step);
-        dry.Step(air, Walking(glm::vec2(1.0f, 0.0f)), Step);
+        wet.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
+        dry.Step(air, Walking(glm::vec2(0.0f, 1.0f)), Step);
     }
 
     CHECK(wet.Position().x < dry.Position().x);
@@ -403,4 +409,90 @@ TEST_CASE("A heavier configuration falls faster")
     }
 
     CHECK(fast.Position().y < light.Position().y);
+}
+
+TEST_CASE("Yaw turns which way forward is")
+{
+    //The same input walks a different way when the character faces a
+    //different way. This is the property that lets a server resolve movement
+    //from yaw instead of trusting a direction a client sent.
+    World world = FlatWorld();
+
+    CharacterController east;
+    east.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(east, world);
+
+    CharacterController south;
+    south.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(south, world);
+
+    for (int i = 0; i < 30; ++i)
+    {
+        east.Step(world, Walking(glm::vec2(0.0f, 1.0f), 0.0f), Step);
+        south.Step(world, Walking(glm::vec2(0.0f, 1.0f), 90.0f), Step);
+    }
+
+    //Yaw 0 walks +x; yaw 90 walks +z.
+    CHECK(east.Position().x > 16.5f);
+    CHECK(east.Position().z == doctest::Approx(16.0f).epsilon(0.01));
+    CHECK(south.Position().z > 16.5f);
+    CHECK(south.Position().x == doctest::Approx(16.0f).epsilon(0.01));
+}
+
+TEST_CASE("Two keys at once do not walk faster than one")
+{
+    //The cap. Without it, holding forward and strafe walks sqrt(2) times
+    //faster, which is the oldest speed exploit there is.
+    World world = FlatWorld();
+
+    CharacterController straight;
+    straight.Teleport(glm::vec3(8.0f, 20.0f, 16.0f));
+    SettleOnGround(straight, world);
+
+    CharacterController diagonal;
+    diagonal.Teleport(glm::vec3(8.0f, 20.0f, 16.0f));
+    SettleOnGround(diagonal, world);
+
+    const glm::vec3 start = straight.Position();
+
+    for (int i = 0; i < 30; ++i)
+    {
+        straight.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
+        diagonal.Step(world, Walking(glm::vec2(1.0f, 1.0f)), Step);
+    }
+
+    const float straightDistance =
+        glm::length(straight.Position() - start);
+    const float diagonalDistance =
+        glm::length(diagonal.Position() - start);
+
+    CHECK(diagonalDistance == doctest::Approx(straightDistance).epsilon(0.01));
+}
+
+TEST_CASE("Half deflection walks at half speed")
+{
+    //The reason movement is capped rather than normalised: an analog stick
+    //pushed halfway should walk slowly, not snap to full speed.
+    World world = FlatWorld();
+
+    CharacterController full;
+    full.Teleport(glm::vec3(8.0f, 20.0f, 16.0f));
+    SettleOnGround(full, world);
+
+    CharacterController half;
+    half.Teleport(glm::vec3(8.0f, 20.0f, 16.0f));
+    SettleOnGround(half, world);
+
+    const glm::vec3 start = full.Position();
+
+    for (int i = 0; i < 30; ++i)
+    {
+        full.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
+        half.Step(world, Walking(glm::vec2(0.0f, 0.5f)), Step);
+    }
+
+    const float fullDistance = glm::length(full.Position() - start);
+    const float halfDistance = glm::length(half.Position() - start);
+
+    CHECK(halfDistance == doctest::Approx(fullDistance * 0.5f).epsilon(0.02));
 }
