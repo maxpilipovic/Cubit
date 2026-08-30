@@ -55,6 +55,16 @@ void MatchState::TeleportPlayer(PlayerId player, const glm::vec3& position)
     found->second.Teleport(position);
 }
 
+CharacterController& MatchState::PlayerForWrite(PlayerId player)
+{
+    const auto found = m_Players.find(player);
+
+    if (found == m_Players.end())
+        throw std::out_of_range("No such player in this match");
+
+    return found->second;
+}
+
 void MatchState::ReplaceWorld(World world)
 {
     m_World = std::move(world);

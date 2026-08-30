@@ -111,15 +111,15 @@ public:
         // LoadWorld resolves the spawn but deliberately does not teleport to
         // it: F9 reloads mid-session and should leave the player where they
         // were working. Starting fresh is the one time it should.
-        m_Player.Teleport(m_Spawn);
+        m_LocalPlayer = m_Match.AddPlayer(m_Spawn);
 
         // Face the middle of the map, level with the eye. Aiming at the literal
         // centre of the world box would tilt the view into the ground.
-        const glm::vec3 eye = m_Player.InterpolatedEye(1.0f);
+        const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
         const glm::vec3 target(
-            static_cast<float>(m_World.GetWidth()) * 0.5f,
+            static_cast<float>(World_().GetWidth()) * 0.5f,
             eye.y,
-            static_cast<float>(m_World.GetDepth()) * 0.5f);
+            static_cast<float>(World_().GetDepth()) * 0.5f);
 
         const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
         m_CameraController.SetRotation(rotation.x, rotation.y);
@@ -180,21 +180,21 @@ public:
         input.Pitch = m_CameraController.GetPitch();
         input.Jump = Input::IsKeyPressed(KeyCode::Space);
 
-        m_Player.Step(
-            m_World, input, static_cast<float>(timestep.GetSeconds()));
+        const PlayerCommand commands[] = { { m_LocalPlayer, input } };
+        m_Match.Step(commands, static_cast<float>(timestep.GetSeconds()));
 
-        m_HudState->PlayerPosition = m_Player.Position();
-        m_HudState->Grounded = m_Player.Grounded();
-        m_HudState->BodyInFluid = m_Player.BodyInFluid();
-        m_HudState->EyeInFluid = m_Player.EyeInFluid();
+        m_HudState->PlayerPosition = Player_().Position();
+        m_HudState->Grounded = Player_().Grounded();
+        m_HudState->BodyInFluid = Player_().BodyInFluid();
+        m_HudState->EyeInFluid = Player_().EyeInFluid();
 
         // Falling off the edge of the map is a Sandbox rule rather than
         // character physics, so it stays here. The velocity is cleared
         // separately because Teleport deliberately leaves it alone.
-        if (m_Player.Position().y < FallResetHeight)
+        if (Player_().Position().y < FallResetHeight)
         {
-            m_Player.Teleport(m_Spawn);
-            m_Player.SetVerticalVelocity(0.0f);
+            m_Match.TeleportPlayer(m_LocalPlayer, m_Spawn);
+            m_Match.PlayerForWrite(m_LocalPlayer).SetVerticalVelocity(0.0f);
         }
     }
 
@@ -212,7 +212,7 @@ public:
     {
         UpdateCameraPosition(alpha);
 
-        m_WorldRenderer.Update(m_World);
+        m_WorldRenderer.Update(World_());
 
         Renderer::BeginScene(m_CameraController.GetCamera());
         // u_Transform already carries WorldOffset and the camera position is in
@@ -221,7 +221,7 @@ public:
         m_Shader->SetFloat3("u_FogColor", FogColor);
         m_Shader->SetFloat3("u_CameraPos", m_CameraController.GetCamera().GetPosition());
         m_Shader->SetFloat(
-            "u_FogDensity", m_Player.EyeInFluid() ? FogDensity : 0.0f);
+            "u_FogDensity", Player_().EyeInFluid() ? FogDensity : 0.0f);
         m_WorldRenderer.Render(
             *m_Shader,
             m_CameraController.GetCamera().GetViewProjectionMatrix(),
@@ -260,6 +260,15 @@ public:
     }
 
 private:
+    //Shorthands, because the layer reads the world and its own character on
+    //nearly every line and m_Match.GetWorld() everywhere obscures them.
+    World& World_() { return m_Match.GetWorld(); }
+    const World& World_() const { return m_Match.GetWorld(); }
+    const CharacterController& Player_() const
+    {
+        return m_Match.Player(m_LocalPlayer);
+    }
+
     //Returns held movement keys in the character's own frame: x strafes, y
     //walks forward. No camera maths here any more - the simulation resolves
     //the direction from the yaw, which is what lets a server reproduce the
@@ -288,7 +297,7 @@ private:
     void UpdateCameraPosition(float alpha)
     {
         m_CameraController.SetPosition(
-            m_Player.InterpolatedEye(alpha) + WorldOffset);
+            Player_().InterpolatedEye(alpha) + WorldOffset);
     }
 
     //Outlines the block a click would break, using the same ray the edit uses so
@@ -298,7 +307,7 @@ private:
     {
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
         const VoxelRayHit hit = VoxelRaycast::Cast(
-            m_World,
+            World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
             ReachDistance,
@@ -330,7 +339,7 @@ private:
         // to the bed rather than targeting the surface — or, when the player is
         // standing in it, the cell their own head occupies.
         const VoxelRayHit hit = VoxelRaycast::Cast(
-            m_World,
+            World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
             ReachDistance,
@@ -354,7 +363,7 @@ private:
 
         // Bounds and relighting both belong to ApplyBlockEdit now: an edit is
         // one operation, not a sequence a caller has to remember the rest of.
-        const std::optional<BlockEdit> inverse = ApplyBlockEdit(m_World, edit);
+        const std::optional<BlockEdit> inverse = ApplyBlockEdit(World_(), edit);
         if (!inverse)
             return false;
 
@@ -385,7 +394,7 @@ private:
 
         const BlockEdit inverse = m_Undo.back();
         m_Undo.pop_back();
-        ApplyBlockEdit(m_World, inverse);
+        ApplyBlockEdit(World_(), inverse);
     }
 
     //Logs a player-death notification received from the gameplay event bus.
@@ -400,24 +409,33 @@ private:
     //Throws when the file cannot be read or parsed.
     void LoadWorld(const char* path)
     {
-        // Assigning only after LoadFile returns means a bad file leaves the
-        // current world untouched, rather than half-replaced.
-        m_World = BuildWorld(VoxLoader::LoadFile(path));
+        // Building locally before handing it to the match means a bad file
+        // leaves the current world untouched, rather than half-replaced.
+        m_Match.ReplaceWorld(BuildWorld(VoxLoader::LoadFile(path)));
 
         // The stack describes a world that no longer exists.
         m_Undo.clear();
 
         // Light has to exist before anything meshes, or the first frames bake
         // a fully dark world into their vertex colours.
-        SkyLight::PropagateAll(m_World);
+        SkyLight::PropagateAll(World_());
 
         // Before the lift, not after: the lift's last-resort fallback is the
         // spawn, so it has to be valid for the world just loaded.
         ResolveSpawn();
 
-        LiftPlayerClearOfTerrain();
-        m_Player.SetVerticalVelocity(0.0f);
-        UpdateCameraPosition(1.0f);
+        // The constructor runs LoadWorld before AddPlayer, so on the very
+        // first load there is no player yet to lift clear of terrain or
+        // centre the camera on - it is about to be placed straight at
+        // m_Spawn once AddPlayer runs. Every later call (F9) has a player,
+        // and preserving its position clear of the reloaded terrain is the
+        // whole reason this tail exists.
+        if (m_Match.HasPlayer(m_LocalPlayer))
+        {
+            LiftPlayerClearOfTerrain();
+            m_Match.PlayerForWrite(m_LocalPlayer).SetVerticalVelocity(0.0f);
+            UpdateCameraPosition(1.0f);
+        }
     }
 
     //Steps the player up until their box is clear of solid blocks.
@@ -432,27 +450,34 @@ private:
     //the player in the water rather than lifting them onto its surface.
     void LiftPlayerClearOfTerrain()
     {
-        const float top = static_cast<float>(m_World.GetHeight());
-        const glm::vec3& halfExtents = m_Player.Config().HalfExtents;
+        const float top = static_cast<float>(World_().GetHeight());
+        const glm::vec3& halfExtents = Player_().Config().HalfExtents;
 
-        glm::vec3 lifted = m_Player.Position();
+        glm::vec3 lifted = Player_().Position();
         while (lifted.y < top &&
-            VoxelCollision::Overlaps(m_World, lifted, halfExtents))
+            VoxelCollision::Overlaps(World_(), lifted, halfExtents))
             lifted.y += 1.0f;
 
         // A column solid to the sky has nowhere to stand.
-        if (VoxelCollision::Overlaps(m_World, lifted, halfExtents))
+        if (VoxelCollision::Overlaps(World_(), lifted, halfExtents))
             lifted = m_Spawn;
 
         // A lift is a discontinuity, so it must not be interpolated through.
-        m_Player.Teleport(lifted);
+        m_Match.TeleportPlayer(m_LocalPlayer, lifted);
     }
 
     //Resolves the spawn hint against the loaded map.
     void ResolveSpawn()
     {
+        // Half extents come from a default config rather than the live
+        // player: this can run before the player exists (the constructor
+        // calls LoadWorld, which calls this, before AddPlayer), and every
+        // player the Sandbox ever creates uses the default configuration
+        // anyway, so the value is the same either way.
+        const glm::vec3 halfExtents = CharacterConfig{}.HalfExtents;
+
         const std::optional<glm::vec3> found =
-            FindSpawn(m_World, SpawnHintXZ, m_Player.Config().HalfExtents);
+            FindSpawn(World_(), SpawnHintXZ, halfExtents);
 
         if (found)
         {
@@ -470,8 +495,7 @@ private:
 
         m_Spawn = glm::vec3(
             static_cast<float>(SpawnHintXZ.x) + 0.5f,
-            static_cast<float>(m_World.GetHeight()) -
-                m_Player.Config().HalfExtents.y,
+            static_cast<float>(World_().GetHeight()) - halfExtents.y,
             static_cast<float>(SpawnHintXZ.y) + 0.5f);
     }
 
@@ -483,7 +507,7 @@ private:
         // line rather than a crash.
         try
         {
-            VoxWriter::WriteFile(ToVoxModel(m_World), SavePath);
+            VoxWriter::WriteFile(ToVoxModel(World_()), SavePath);
 
             CB_INFO("Saved world to " +
                 std::filesystem::absolute(SavePath).string());
@@ -550,14 +574,14 @@ private:
 
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
-    World m_World{ 1, 1, 1 };
+    //The simulation. One player today; the type is the seam a server will
+    //step identically, which is why the Sandbox goes through it rather than
+    //owning a world and a character directly.
+    MatchState m_Match{ World(1, 1, 1) };
+    PlayerId m_LocalPlayer = InvalidPlayer;
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
-    //The player: position, velocity, and everything gravity and collision do to
-    //them. Holds both the current and previous step's position, so rendering
-    //can interpolate between them and a teleport cannot leave one stale.
-    CharacterController m_Player;
     //Counted across the current frame's steps and published by OnFrameUpdate.
     int m_StepsThisFrame = 0;
     //Inverses of applied edits, newest last. Capped so a long session cannot

@@ -72,6 +72,10 @@ public:
     //Moves a player without interpolating through the space in between.
     void TeleportPlayer(PlayerId player, const glm::vec3& position);
 
+    //Non-const access to a player, for callers that own game rules the match
+    //itself does not - respawning, and clearing fall speed with it.
+    CharacterController& PlayerForWrite(PlayerId player);
+
     //Swaps the terrain, keeping every player and the tick. What reloading a
     //map mid-session does.
     void ReplaceWorld(World world);
