@@ -253,6 +253,34 @@ flakiness. Without it, netcode is verified by two people on a call saying "feels
 fine." This codebase's entire quality story is a reference oracle proving something
 cell for cell; a deterministic bad network is netcode's version of that oracle.
 
+**What Stage 2 must add to `MatchState` first.** The final review of Stage 1 found four
+gaps in the `MatchState` API. None of these are defects in Stage 1 - they are API that
+Stage 1 correctly did not build, because nothing needed it yet. A single process with
+one `MatchState` never had to mint a specific id, enumerate a roster, replay a step, or
+let anything but itself advance the tick. A server and a client talking over a wire do,
+so Stage 2 needs to add:
+
+1. **`AddPlayer` cannot mint a chosen id.** It only hands out `m_NextPlayer++`. A client
+   must be able to create *the server's* player 7 locally; today it cannot without
+   creating six throwaway players first. Needs an `AddPlayer(PlayerId, const glm::vec3&)`
+   overload. Cheapest while there is one call site.
+2. **No roster enumeration.** Only `HasPlayer` / `Player(id)` exist. A server
+   broadcasting snapshots and a client rendering remote players both need to ask "who is
+   in this match". The server can hoard the ids `AddPlayer` returned; a client cannot.
+3. **`m_Grounded` is cross-step state with no setter.** `CharacterController::Step` reads
+   the *previous* step's `m_Grounded` when deciding whether a jump fires. Stage 3 resets
+   a player to an authoritative state and replays inputs, but `PlayerForWrite` exposes
+   only `Teleport` and `SetVerticalVelocity` - so a replayed jump on the first tick after
+   a correction can diverge. Worse, `Teleport` deliberately flattens `PreviousPosition`,
+   destroying exactly the interpolation a correction is supposed to hide. The missing
+   piece is a single `SetState(position, previousPosition, velocity, grounded)`.
+4. **`Tick()` is read-only.** A client cannot align its match to the server's tick
+   number.
+
+Items 1-2 bite on day one of the server; items 3-4 bite on day one of reconciliation.
+Both pairs belong in Stage 2's first commits, not as retrofits after the transport
+exists.
+
 **Still to decide in Stage 2's own design pass:**
 
 - Snapshot rate (60 Hz is wasteful; 20 Hz is conventional) and whether it is a tick

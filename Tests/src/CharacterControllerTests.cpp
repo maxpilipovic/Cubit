@@ -187,8 +187,10 @@ TEST_CASE("A character blocked on one axis still slides along the other")
 
     for (int i = 0; i < 120; ++i)
     {
-        // {1,1} at yaw 0 is strafe +z and forward +x, the same diagonal into
-        // the wall the world-space version described.
+        // normalize(1,1) at yaw 0 is strafe +z and forward +x, the same
+        // diagonal into the wall the world-space version described. The
+        // normalize is redundant now that Step caps the resolved vector,
+        // but it stays to keep the test's intent explicit.
         character.Step(world,
             Walking(glm::normalize(glm::vec2(1.0f, 1.0f))), Step);
     }
