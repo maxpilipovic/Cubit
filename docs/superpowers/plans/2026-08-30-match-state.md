@@ -999,7 +999,7 @@ In `Cubit/include/Cubit/Cubit.h`, add after `Cubit/Voxel/Heading.h`:
 MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
 "$MSB" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
 ```
-Expected: `SUCCESS!`, 308 test cases.
+Expected: `SUCCESS!`, 312 test cases.
 
 - [ ] **Step 7: Commit**
 
@@ -1135,7 +1135,7 @@ MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/M
 "$MSB" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
 ```
 
-Expected: `SUCCESS!`, 313 test cases — a **PASS**, not a fail. These tests describe a property `Step` should already have, so green here is the intended outcome rather than a sign the tests are vacuous. Step 3 is what proves they are not.
+Expected: `SUCCESS!`, 314 test cases — a **PASS**, not a fail. These tests describe a property `Step` should already have, so green here is the intended outcome rather than a sign the tests are vacuous. Step 3 is what proves they are not.
 
 - [ ] **Step 3: Prove the determinism test can fail**
 
@@ -1337,7 +1337,7 @@ The constructor path runs `LoadWorld` **before** `AddPlayer`, so on first constr
 MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
 "$MSB" Cubit.slnx -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
 ```
-Expected: `SUCCESS!`, 313 test cases, and `Sandbox.exe` links.
+Expected: `SUCCESS!`, 314 test cases, and `Sandbox.exe` links.
 
 - [ ] **Step 9: Verify behaviour is unchanged on screen**
 
@@ -1450,6 +1450,6 @@ git push origin master
 
 **Type consistency.** `PlayerId`, `InvalidPlayer`, `PlayerCommand`, `MatchState::Step`, `Player`, `PlayerForWrite`, `TeleportPlayer`, `ReplaceWorld`, `GetWorld`, `Tick`, `HeadingForward`, `HeadingRight`, `CharacterInput::{Move,Yaw,Pitch,Jump}` are spelled identically everywhere they appear.
 
-**Test-count arithmetic.** 294 before → 297 after Task 1 (+3) → 300 after Task 2 (+3) → 308 after Task 3 (+8) → 313 after Task 4 (+5).
+**Test-count arithmetic.** 294 before → 297 after Task 1 (+3) → 300 after Task 2 (+3) → 312 after Task 3 (+12) → 314 after Task 4 (+2). (Corrected 2026-08-30: the pre-flight rebalance moved four tests from Task 4 into Task 3 and this line was not updated with them.)
 
 **Known risk.** Task 5 Step 3 uses `sed` for a bulk rename. Read the diff before committing; `Player_().` will not match `m_Player{` style uses if any remain.
