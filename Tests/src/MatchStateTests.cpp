@@ -195,3 +195,122 @@ TEST_CASE("A command naming an absent player is ignored")
     CHECK_FALSE(match.HasPlayer(999));
     CHECK(match.Tick() == 1);
 }
+
+TEST_CASE("Identical inputs produce bit-exact identical state")
+{
+    //Honest scope: this proves the absence of true nondeterminism -
+    //uninitialised memory, address-dependent iteration, an actual random
+    //number - because left and right are built and stepped identically and
+    //compared against each other. It does NOT constrain what Step actually
+    //computes: any fault that is a deterministic function of a player's id
+    //(or of the order m_Players iterates in, since players never interact)
+    //corrupts both sides the same way and this comparison cannot see it. The
+    //oracle test below, which compares against a bare CharacterController
+    //instead of against a second MatchState, is what carries that weight.
+    //
+    //Bit-exact rather than approximate on purpose. Within one binary, float
+    //operations are reproducible, so any drift at all is a real defect -
+    //an epsilon here would hide exactly what this test exists to catch.
+    MatchState left(FlatWorld());
+    MatchState right(FlatWorld());
+
+    const PlayerId leftA = left.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId leftB = left.AddPlayer(glm::vec3(20.0f, 14.0f, 9.0f));
+    const PlayerId rightA = right.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId rightB = right.AddPlayer(glm::vec3(20.0f, 14.0f, 9.0f));
+
+    REQUIRE(leftA == rightA);
+    REQUIRE(leftB == rightB);
+
+    for (int i = 0; i < 240; ++i)
+    {
+        //Varying, so this exercises turning, jumping and idling rather than
+        //one straight line where a whole class of drift would not show.
+        CharacterInput a;
+        a.Move = glm::vec2(0.0f, 1.0f);
+        a.Yaw = static_cast<float>(i) * 3.0f;
+        a.Jump = (i % 17) == 0;
+
+        CharacterInput b;
+        b.Move = glm::vec2(1.0f, static_cast<float>(i % 5) * 0.25f);
+        b.Yaw = 45.0f - static_cast<float>(i);
+        b.Jump = (i % 23) == 0;
+
+        const PlayerCommand commands[] = { { leftA, a }, { leftB, b } };
+
+        left.Step(commands, StepSeconds);
+        right.Step(commands, StepSeconds);
+    }
+
+    CHECK(left.Tick() == right.Tick());
+    CHECK(left.Player(leftA).Position() == right.Player(rightA).Position());
+    CHECK(left.Player(leftB).Position() == right.Player(rightB).Position());
+    CHECK(left.Player(leftA).VerticalVelocity()
+        == right.Player(rightA).VerticalVelocity());
+    CHECK(left.Player(leftB).VerticalVelocity()
+        == right.Player(rightB).VerticalVelocity());
+}
+
+TEST_CASE("Command order does not change the result")
+{
+    //Characters do not collide with each other, so a step must not depend on
+    //which order the server happened to read packets in. If this ever fails,
+    //players have started interacting and the fix is an explicit ordering
+    //rule, not a reshuffle.
+    MatchState forward(FlatWorld());
+    MatchState reversed(FlatWorld());
+
+    const PlayerId fa = forward.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId fb = forward.AddPlayer(glm::vec3(9.0f, 12.0f, 8.0f));
+    const PlayerId ra = reversed.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId rb = reversed.AddPlayer(glm::vec3(9.0f, 12.0f, 8.0f));
+
+    for (int i = 0; i < 60; ++i)
+    {
+        const PlayerCommand ordered[] = {
+            { fa, WalkForward() }, { fb, WalkForward() } };
+        const PlayerCommand backward[] = {
+            { rb, WalkForward() }, { ra, WalkForward() } };
+
+        forward.Step(ordered, StepSeconds);
+        reversed.Step(backward, StepSeconds);
+    }
+
+    CHECK(forward.Player(fa).Position() == reversed.Player(ra).Position());
+    CHECK(forward.Player(fb).Position() == reversed.Player(rb).Position());
+}
+
+TEST_CASE("Stepping a match matches stepping the character directly")
+{
+    //The oracle. The test above compares MatchState against itself, which no
+    //deterministic fault can fail; this compares it against the thing it is
+    //supposed to be a thin wrapper over, so anything MatchState does to a
+    //player beyond dispatching the step shows up here as a divergence.
+    //
+    //Same shape as the SkyLight tests' naive reference implementation, and for
+    //the same reason: an oracle you did not derive from the code under test.
+    World matchWorld = FlatWorld();
+    World directWorld = FlatWorld();
+
+    MatchState match(std::move(matchWorld));
+    const PlayerId player = match.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+
+    CharacterController direct;
+    direct.Teleport(glm::vec3(8.0f, 12.0f, 8.0f));
+
+    for (int i = 0; i < 240; ++i)
+    {
+        CharacterInput input;
+        input.Move = glm::vec2(0.0f, 1.0f);
+        input.Yaw = static_cast<float>(i) * 3.0f;
+        input.Jump = (i % 17) == 0;
+
+        const PlayerCommand commands[] = { { player, input } };
+        match.Step(commands, StepSeconds);
+        direct.Step(directWorld, input, StepSeconds);
+    }
+
+    CHECK(match.Player(player).Position() == direct.Position());
+    CHECK(match.Player(player).VerticalVelocity() == direct.VerticalVelocity());
+    CHECK(match.Player(player).Grounded() == direct.Grounded());
+}
