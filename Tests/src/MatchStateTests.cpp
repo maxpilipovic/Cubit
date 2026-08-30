@@ -224,15 +224,19 @@ TEST_CASE("Identical inputs produce bit-exact identical state")
 
     for (int i = 0; i < 240; ++i)
     {
-        //Varying, so this exercises turning, jumping and idling rather than
-        //one straight line where a whole class of drift would not show.
+        //Varying, and genuinely idle on some steps (Move left at its
+        //zero default), so this exercises turning, jumping and standing
+        //still rather than one straight line where a whole class of drift
+        //would not show.
         CharacterInput a;
-        a.Move = glm::vec2(0.0f, 1.0f);
+        if (i % 10 != 0)
+            a.Move = glm::vec2(0.0f, 1.0f);
         a.Yaw = static_cast<float>(i) * 3.0f;
         a.Jump = (i % 17) == 0;
 
         CharacterInput b;
-        b.Move = glm::vec2(1.0f, static_cast<float>(i % 5) * 0.25f);
+        if (i % 8 != 0)
+            b.Move = glm::vec2(1.0f, static_cast<float>(i % 5) * 0.25f);
         b.Yaw = 45.0f - static_cast<float>(i);
         b.Jump = (i % 23) == 0;
 
@@ -253,10 +257,13 @@ TEST_CASE("Identical inputs produce bit-exact identical state")
 
 TEST_CASE("Command order does not change the result")
 {
-    //Characters do not collide with each other, so a step must not depend on
-    //which order the server happened to read packets in. If this ever fails,
-    //players have started interacting and the fix is an explicit ordering
-    //rule, not a reshuffle.
+    //Honest scope, same caveat as the determinism test above: characters do
+    //not collide with each other today, so no order of applying commands can
+    //currently produce a different result - this pins a property that is
+    //presently free rather than guarding a live failure mode, for the same
+    //reason the unordered_map mutation could not break the test above either.
+    //It is here to start failing the day players do start interacting, at
+    //which point the fix is an explicit ordering rule, not a reshuffle.
     MatchState forward(FlatWorld());
     MatchState reversed(FlatWorld());
 
@@ -282,35 +289,61 @@ TEST_CASE("Command order does not change the result")
 
 TEST_CASE("Stepping a match matches stepping the character directly")
 {
-    //The oracle. The test above compares MatchState against itself, which no
+    //The oracle. The tests above compare MatchState against itself, which no
     //deterministic fault can fail; this compares it against the thing it is
     //supposed to be a thin wrapper over, so anything MatchState does to a
     //player beyond dispatching the step shows up here as a divergence.
     //
+    //Two players, not one, deliberately: with a single player, input-to-
+    //player misrouting and per-player state crosstalk stay uncatchable - a
+    //Step that applied one player's input to the other would still pass a
+    //single-player oracle, since there is only one input and one player to
+    //compare. Two players with two different inputs closes that gap.
+    //
     //Same shape as the SkyLight tests' naive reference implementation, and for
     //the same reason: an oracle you did not derive from the code under test.
-    World matchWorld = FlatWorld();
-    World directWorld = FlatWorld();
+    MatchState match(FlatWorld());
+    World directWorldA = FlatWorld();
+    World directWorldB = FlatWorld();
 
-    MatchState match(std::move(matchWorld));
-    const PlayerId player = match.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId playerA = match.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    const PlayerId playerB = match.AddPlayer(glm::vec3(20.0f, 14.0f, 9.0f));
 
-    CharacterController direct;
-    direct.Teleport(glm::vec3(8.0f, 12.0f, 8.0f));
+    CharacterController directA;
+    directA.Teleport(glm::vec3(8.0f, 12.0f, 8.0f));
+
+    CharacterController directB;
+    directB.Teleport(glm::vec3(20.0f, 14.0f, 9.0f));
 
     for (int i = 0; i < 240; ++i)
     {
-        CharacterInput input;
-        input.Move = glm::vec2(0.0f, 1.0f);
-        input.Yaw = static_cast<float>(i) * 3.0f;
-        input.Jump = (i % 17) == 0;
+        //Different yaw, different jump cadence, and A genuinely idle on some
+        //steps, so the two players are never stepping on parallel tracks
+        //that a misrouted input could sneak through unnoticed.
+        CharacterInput inputA;
+        if (i % 10 != 0)
+            inputA.Move = glm::vec2(0.0f, 1.0f);
+        inputA.Yaw = static_cast<float>(i) * 3.0f;
+        inputA.Jump = (i % 17) == 0;
 
-        const PlayerCommand commands[] = { { player, input } };
+        CharacterInput inputB;
+        inputB.Move = glm::vec2(1.0f, static_cast<float>(i % 5) * 0.25f);
+        inputB.Yaw = 45.0f - static_cast<float>(i);
+        inputB.Jump = (i % 23) == 0;
+
+        const PlayerCommand commands[] = { { playerA, inputA }, { playerB, inputB } };
         match.Step(commands, StepSeconds);
-        direct.Step(directWorld, input, StepSeconds);
+        directA.Step(directWorldA, inputA, StepSeconds);
+        directB.Step(directWorldB, inputB, StepSeconds);
     }
 
-    CHECK(match.Player(player).Position() == direct.Position());
-    CHECK(match.Player(player).VerticalVelocity() == direct.VerticalVelocity());
-    CHECK(match.Player(player).Grounded() == direct.Grounded());
+    CHECK(match.Player(playerA).Position() == directA.Position());
+    CHECK(match.Player(playerA).PreviousPosition() == directA.PreviousPosition());
+    CHECK(match.Player(playerA).VerticalVelocity() == directA.VerticalVelocity());
+    CHECK(match.Player(playerA).Grounded() == directA.Grounded());
+
+    CHECK(match.Player(playerB).Position() == directB.Position());
+    CHECK(match.Player(playerB).PreviousPosition() == directB.PreviousPosition());
+    CHECK(match.Player(playerB).VerticalVelocity() == directB.VerticalVelocity());
+    CHECK(match.Player(playerB).Grounded() == directB.Grounded());
 }
