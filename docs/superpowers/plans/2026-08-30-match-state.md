@@ -49,9 +49,9 @@
 | `Tests/src/CharacterControllerTests.cpp` | **Modify.** Migrate 16 tests to the new input shape. |
 | `Cubit/include/Cubit/Voxel/MatchState.h` | **Create.** Owns world, players, tick. |
 | `Cubit/src/Voxel/MatchState.cpp` | **Create.** |
-| `Tests/src/MatchStateTests.cpp` | **Create.** Registry, tick, independence, determinism. |
+| `Tests/src/MatchStateTests.cpp` | **Create.** Registry, tick, independence (Task 3), determinism (Task 4). |
 | `Cubit/include/Cubit/Cubit.h` | **Modify.** Export the two new headers. |
-| `Sandbox/src/Sandbox.cpp` | **Modify.** Becomes a client of `MatchState`. |
+| `Sandbox/src/Sandbox.cpp` | **Modify, twice.** Task 2: `ReadWalkInput` returns local axes, so the tree builds at every commit. Task 5: becomes a client of `MatchState`. |
 | `docs/engine-roadmap.md`, `docs/superpowers/specs/2026-08-27-networking-design.md` | **Modify.** Record Stage 1 done. |
 
 ---
@@ -93,7 +93,7 @@ TEST_CASE("Heading matches the camera's flattened forward and right")
     //only) is to replace that, it has to agree at every pitch. It does,
     //because PerspectiveCameraController clamps pitch to +/-89 degrees, so
     //cos(pitch) is always positive and drops out of the normalise.
-    PerspectiveCamera camera(16.0f / 9.0f);
+    PerspectiveCamera camera(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
 
     for (float yaw = -360.0f; yaw <= 360.0f; yaw += 7.5f)
     {
@@ -467,23 +467,59 @@ TEST_CASE("Half deflection walks at half speed")
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 7: Keep the Sandbox compiling and behaving identically**
+
+`CharacterInput` has changed shape, so `Sandbox.cpp` no longer compiles. Every commit on master must build — the suite runs as a build step — so this task repairs it rather than leaving it for Task 5.
+
+In `Sandbox/src/Sandbox.cpp`, replace the whole of `ReadWalkInput` with:
+
+```cpp
+    //Returns held movement keys in the character's own frame: x strafes, y
+    //walks forward. No camera maths here any more - the simulation resolves
+    //the direction from the yaw, which is what lets a server reproduce the
+    //step rather than trust a vector this machine computed.
+    //
+    //Deliberately not normalised: Step caps the resolved vector, so pressing
+    //two keys is capped there rather than scaled here.
+    glm::vec2 ReadWalkInput() const
+    {
+        glm::vec2 move{ 0.0f };
+
+        if (Input::IsKeyPressed(KeyCode::W))
+            move.y += 1.0f;
+        if (Input::IsKeyPressed(KeyCode::S))
+            move.y -= 1.0f;
+        if (Input::IsKeyPressed(KeyCode::D))
+            move.x += 1.0f;
+        if (Input::IsKeyPressed(KeyCode::A))
+            move.x -= 1.0f;
+
+        return move;
+    }
+```
+
+Then in `OnFixedUpdate`, replace the three lines that build the input with:
+
+```cpp
+        CharacterInput input;
+        input.Move = ReadWalkInput();
+        input.Yaw = m_CameraController.GetYaw();
+        input.Pitch = m_CameraController.GetPitch();
+        input.Jump = Input::IsKeyPressed(KeyCode::Space);
+```
+
+- [ ] **Step 8: Run the full build and tests**
 
 ```bash
 MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
 "$MSB" Cubit.slnx -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
 ```
-Expected: `SUCCESS!`, 300 test cases.
+Expected: `SUCCESS!`, 300 test cases, and `Sandbox.exe` links.
 
-Note: the Sandbox will fail to compile at this point because `ReadWalkInput` still returns a world-space vector. That is expected and is fixed in Task 5. If the build stops before running tests, build only the Tests project:
-```bash
-"$MSB" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
-```
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add Cubit/include/Cubit/Voxel/CharacterController.h Cubit/src/Voxel/CharacterController.cpp Tests/src/CharacterControllerTests.cpp
+git add Cubit/include/Cubit/Voxel/CharacterController.h Cubit/src/Voxel/CharacterController.cpp Tests/src/CharacterControllerTests.cpp Sandbox/src/Sandbox.cpp
 git commit -F - <<'MSG'
 Move character input into the character's own frame
 
@@ -504,13 +540,17 @@ no longer walks sqrt(2) times faster, and a half-deflected analog stick
 still walks at half speed instead of snapping to full.
 
 Three call sites in the tests swapped components: at yaw 0 forward is +x
-and right is +z, so an old world {x,z} is a local {z,x}.
+and right is +z, so an old world {x,z} is a local {z,x}. The Sandbox
+stops doing camera maths in the same commit rather than a later one, so
+the tree builds at every point.
 MSG
 ```
 
 ---
 
-### Task 3: `MatchState` — world and player registry
+### Task 3: `MatchState` — world, player registry, and stepping
+
+> **Note on scope.** `CB_API` is `__declspec(dllexport)`, and an exported class must define every member it declares or `Cubit.dll` fails to link. So `Step` is declared *and* defined here rather than deferred — a task that cannot link is not a task. Task 4 then adds the two property tests that guard it, with no production change.
 
 **Files:**
 - Create: `Cubit/include/Cubit/Voxel/MatchState.h`
@@ -649,6 +689,80 @@ TEST_CASE("Replacing the world keeps the players and the tick")
     CHECK(match.HasPlayer(player));
     CHECK(match.Player(player).Position() == glm::vec3(4.0f, 10.0f, 5.0f));
     CHECK(match.GetWorld().GetBlock(1, 1, 1) == BlockId{ 3 });
+}
+
+namespace
+{
+    constexpr float StepSeconds = 1.0f / 60.0f;
+
+    CharacterInput WalkForward()
+    {
+        CharacterInput input;
+        input.Move = glm::vec2(0.0f, 1.0f);
+        input.Yaw = 0.0f;
+        return input;
+    }
+}
+
+TEST_CASE("The tick advances once per step regardless of commands")
+{
+    MatchState match(FlatWorld());
+
+    match.Step({}, StepSeconds);
+    CHECK(match.Tick() == 1);
+
+    const PlayerId player = match.AddPlayer(glm::vec3(16.0f, 10.0f, 16.0f));
+    const PlayerCommand commands[] = { { player, WalkForward() } };
+
+    match.Step(commands, StepSeconds);
+    CHECK(match.Tick() == 2);
+}
+
+TEST_CASE("Players step independently")
+{
+    MatchState match(FlatWorld());
+
+    const PlayerId walker = match.AddPlayer(glm::vec3(8.0f, 10.0f, 8.0f));
+    const PlayerId idler = match.AddPlayer(glm::vec3(20.0f, 10.0f, 20.0f));
+
+    const glm::vec3 idlerStart = match.Player(idler).Position();
+    const PlayerCommand commands[] = { { walker, WalkForward() } };
+
+    for (int i = 0; i < 60; ++i)
+        match.Step(commands, StepSeconds);
+
+    //The walker moved along x; the idler only fell.
+    CHECK(match.Player(walker).Position().x > 8.5f);
+    CHECK(match.Player(idler).Position().x == doctest::Approx(idlerStart.x));
+    CHECK(match.Player(idler).Position().z == doctest::Approx(idlerStart.z));
+}
+
+TEST_CASE("A player with no command still falls")
+{
+    //The normal case on a real connection, not an edge one: a dropped or late
+    //packet must leave a character under gravity rather than frozen mid-air.
+    MatchState match(FlatWorld());
+    const PlayerId player = match.AddPlayer(glm::vec3(16.0f, 20.0f, 16.0f));
+
+    const float start = match.Player(player).Position().y;
+
+    for (int i = 0; i < 30; ++i)
+        match.Step({}, StepSeconds);
+
+    CHECK(match.Player(player).Position().y < start - 0.5f);
+}
+
+TEST_CASE("A command naming an absent player is ignored")
+{
+    //Once commands arrive off a socket, a stale id is malformed input rather
+    //than a caller bug, so this must not throw and must not invent a player.
+    MatchState match(FlatWorld());
+
+    const PlayerCommand commands[] = { { 999, WalkForward() } };
+
+    CHECK_NOTHROW(match.Step(commands, StepSeconds));
+    CHECK_FALSE(match.HasPlayer(999));
+    CHECK(match.Tick() == 1);
 }
 ```
 
@@ -832,7 +946,43 @@ void MatchState::ReplaceWorld(World world)
 }
 ```
 
-`Step` is deliberately not implemented yet — Task 4 adds it. Comment out or omit its declaration if the linker complains; it is only referenced from Task 4 onward.
+And the step itself:
+
+```cpp
+void MatchState::Step(std::span<const PlayerCommand> commands, float seconds)
+{
+    // Everyone gets a step, including players nobody sent a command for this
+    // tick: a dropped or late packet must leave a character falling under
+    // gravity rather than frozen in the air, and on a real connection that is
+    // the normal case rather than an edge one.
+    for (auto& entry : m_Players)
+    {
+        const PlayerId player = entry.first;
+
+        CharacterInput input;
+
+        for (const PlayerCommand& command : commands)
+        {
+            if (command.Player == player)
+            {
+                input = command.Input;
+                break;
+            }
+        }
+
+        entry.second.Step(m_World, input, seconds);
+    }
+
+    // A command naming a player who is not here is ignored rather than
+    // rejected. Once these arrive off a socket a stale id is malformed input,
+    // not a caller bug - the same reasoning that makes ApplyBlockEdit return
+    // nullopt for an out-of-range position instead of throwing.
+
+    ++m_Tick;
+}
+```
+
+The linear scan over `commands` is deliberate: with two players it beats building a lookup, and the container is a `span` the caller owns. If a match ever holds enough players for that to matter, Task 4's tests pin the behaviour while it changes.
 
 - [ ] **Step 5: Export it**
 
@@ -882,80 +1032,22 @@ MSG
 
 ---
 
-### Task 4: `MatchState::Step` and the determinism guarantee
+### Task 4: The determinism guarantee
+
+The two properties every later networking stage rests on, as tests. **No production change** — `Step` already works after Task 3. This task exists as its own commit because these are the load-bearing guarantees of the whole arc, and a test-only commit that names them is how they stay visible; the repo does this already (`9c98547`).
 
 **Files:**
-- Modify: `Cubit/src/Voxel/MatchState.cpp`
 - Modify: `Tests/src/MatchStateTests.cpp`
 
 **Interfaces:**
-- Consumes: everything from Task 3, plus `CharacterController::Step` from Task 2.
-- Produces: `void MatchState::Step(std::span<const PlayerCommand>, float seconds)`.
+- Consumes: everything from Task 3, plus `CharacterInput::Yaw` from Task 2.
+- Produces: nothing.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `Tests/src/MatchStateTests.cpp`:
+Append to `Tests/src/MatchStateTests.cpp` (the `StepSeconds` constant and `WalkForward` helper already exist from Task 3 — do not redeclare them):
 
 ```cpp
-namespace
-{
-    constexpr float StepSeconds = 1.0f / 60.0f;
-
-    CharacterInput WalkForward()
-    {
-        CharacterInput input;
-        input.Move = glm::vec2(0.0f, 1.0f);
-        input.Yaw = 0.0f;
-        return input;
-    }
-}
-
-TEST_CASE("The tick advances once per step regardless of commands")
-{
-    MatchState match(FlatWorld());
-
-    match.Step({}, StepSeconds);
-    CHECK(match.Tick() == 1);
-
-    const PlayerId player = match.AddPlayer(glm::vec3(16.0f, 10.0f, 16.0f));
-    const PlayerCommand commands[] = { { player, WalkForward() } };
-
-    match.Step(commands, StepSeconds);
-    CHECK(match.Tick() == 2);
-}
-
-TEST_CASE("Players step independently")
-{
-    MatchState match(FlatWorld());
-
-    const PlayerId walker = match.AddPlayer(glm::vec3(8.0f, 10.0f, 8.0f));
-    const PlayerId idler = match.AddPlayer(glm::vec3(20.0f, 10.0f, 20.0f));
-
-    const glm::vec3 idlerStart = match.Player(idler).Position();
-    const PlayerCommand commands[] = { { walker, WalkForward() } };
-
-    for (int i = 0; i < 60; ++i)
-        match.Step(commands, StepSeconds);
-
-    //The walker moved along x; the idler only fell.
-    CHECK(match.Player(walker).Position().x > 8.5f);
-    CHECK(match.Player(idler).Position().x == doctest::Approx(idlerStart.x));
-    CHECK(match.Player(idler).Position().z == doctest::Approx(idlerStart.z));
-}
-
-TEST_CASE("A command naming an absent player is ignored")
-{
-    //Once commands arrive off a socket, a stale id is malformed input rather
-    //than a caller bug, so this must not throw and must not invent a player.
-    MatchState match(FlatWorld());
-
-    const PlayerCommand commands[] = { { 999, WalkForward() } };
-
-    CHECK_NOTHROW(match.Step(commands, StepSeconds));
-    CHECK_FALSE(match.HasPlayer(999));
-    CHECK(match.Tick() == 1);
-}
-
 TEST_CASE("Identical inputs produce bit-exact identical state")
 {
     //The property every later networking stage rests on. Reconciliation means
@@ -1036,62 +1128,16 @@ TEST_CASE("Command order does not change the result")
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run the tests**
 
 ```bash
 MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
 "$MSB" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
 ```
-Expected: unresolved external symbol `MatchState::Step`.
 
-- [ ] **Step 3: Implement `Step`**
+Expected: `SUCCESS!`, 313 test cases — a **PASS**, not a fail. These tests describe a property `Step` should already have, so green here is the intended outcome rather than a sign the tests are vacuous. Step 3 is what proves they are not.
 
-Add to `Cubit/src/Voxel/MatchState.cpp`:
-
-```cpp
-void MatchState::Step(std::span<const PlayerCommand> commands, float seconds)
-{
-    // Everyone gets a step, including players nobody sent a command for this
-    // tick: a dropped or late packet must leave a character falling under
-    // gravity rather than frozen in the air.
-    for (auto& entry : m_Players)
-    {
-        const PlayerId player = entry.first;
-
-        CharacterInput input;
-
-        for (const PlayerCommand& command : commands)
-        {
-            if (command.Player == player)
-            {
-                input = command.Input;
-                break;
-            }
-        }
-
-        entry.second.Step(m_World, input, seconds);
-    }
-
-    // A command naming a player who is not here is ignored rather than
-    // rejected. Once these arrive off a socket a stale id is malformed input,
-    // not a caller bug - the same reasoning that makes ApplyBlockEdit return
-    // nullopt for an out-of-range position instead of throwing.
-
-    ++m_Tick;
-}
-```
-
-Note the linear scan over `commands`: with two players it is faster than building a lookup, and the container is a `span` the caller owns. If a match ever holds enough players for this to matter, that is the moment to change it, and the determinism tests pin the behaviour while it changes.
-
-- [ ] **Step 4: Run the tests to verify they pass**
-
-```bash
-MSB="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
-"$MSB" Tests/Tests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m -v:minimal -nologo
-```
-Expected: `SUCCESS!`, 313 test cases.
-
-- [ ] **Step 5: Prove the determinism test can fail**
+- [ ] **Step 3: Prove the determinism test can fail**
 
 An assertion that cannot fail proves nothing — the `BlockEdit` review caught exactly this once already. Temporarily break reproducibility by making the step order depend on insertion rather than key. In `MatchState.h`, change `std::map` to `std::unordered_map` and add `#include <unordered_map>`, then rebuild and run.
 
@@ -1105,7 +1151,7 @@ Expected: "Identical inputs produce bit-exact identical state" fails on a positi
 
 **Revert the mutation** (restore `std::map` and the unmodified `Step`), rebuild, and confirm `SUCCESS!` before continuing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add Cubit/src/Voxel/MatchState.cpp Tests/src/MatchStateTests.cpp
@@ -1183,11 +1229,15 @@ Add to the `private:` section of `SandboxLayer`:
 
 - [ ] **Step 3: Replace every `m_World` and `m_Player` use**
 
+Do this deliberately, not with a bulk `sed`. `m_World` → `World_()` is a safe mechanical rename, but `m_Player` is not: some uses read and some mutate, and `Player_()` is const, so a blind rewrite produces compile errors at best and silently picks the wrong overload at worst.
+
+Find every use first:
+
 ```bash
-sed -i 's/\bm_World\b/World_()/g; s/\bm_Player\./Player_()./g' Sandbox/src/Sandbox.cpp
+grep -n '\bm_World\b\|\bm_Player\b' Sandbox/src/Sandbox.cpp
 ```
 
-Then fix the four places that need more than a rename:
+Rename the `m_World` uses to `World_()`. Then handle the `m_Player` uses individually — read-only ones become `Player_()`, and these four need more than a rename:
 
 `m_Player.Teleport(m_Spawn)` in the constructor becomes, after `LoadWorld` returns:
 ```cpp
@@ -1238,33 +1288,9 @@ Then in the Sandbox, both respawn sites become:
 
 - [ ] **Step 5: Rewrite `ReadWalkInput` to return local axes**
 
-Replace the whole function with:
+**Nothing to do — Task 2 already rewrote `ReadWalkInput` to return local axes.** Confirm it does (it should have no camera maths in it) and move on. This step is kept as a numbered placeholder so the surrounding step numbers still match any notes taken against an earlier revision of this plan.
 
-```cpp
-    //Returns held movement keys in the character's own frame: x strafes, y
-    //walks forward. No camera maths here any more - the simulation resolves
-    //the direction from the yaw, which is what lets a server reproduce the
-    //step rather than trust a vector this machine computed.
-    glm::vec2 ReadWalkInput() const
-    {
-        glm::vec2 move{ 0.0f };
-
-        if (Input::IsKeyPressed(KeyCode::W))
-            move.y += 1.0f;
-        if (Input::IsKeyPressed(KeyCode::S))
-            move.y -= 1.0f;
-        if (Input::IsKeyPressed(KeyCode::D))
-            move.x += 1.0f;
-        if (Input::IsKeyPressed(KeyCode::A))
-            move.x -= 1.0f;
-
-        return move;
-    }
-```
-
-Note there is no normalisation: `CharacterController::Step` caps the resolved vector, so pressing W and D is capped rather than scaled here.
-
-- [ ] **Step 6: Rewrite `OnFixedUpdate`**
+- [ ] **Step 6: Rewrite `OnFixedUpdate` to go through the match**
 
 ```cpp
     void OnFixedUpdate(Timestep timestep) override
