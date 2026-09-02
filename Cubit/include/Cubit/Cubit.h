@@ -44,3 +44,4 @@
 #include "Cubit/Voxel/World.h"
 #include "Cubit/Net/ByteReader.h"
 #include "Cubit/Net/ByteWriter.h"
+#include "Cubit/Net/Protocol.h"
