@@ -49,6 +49,49 @@ TEST_CASE("Bytes are little-endian regardless of the host")
     CHECK(bytes[3] == 0x01);
 }
 
+TEST_CASE("U16 bytes are little-endian regardless of the host")
+{
+    ByteWriter writer;
+    writer.U16(0x0102);
+
+    const std::vector<std::uint8_t>& bytes = writer.Bytes();
+    REQUIRE(bytes.size() == 2);
+    CHECK(bytes[0] == 0x02);
+    CHECK(bytes[1] == 0x01);
+}
+
+TEST_CASE("U64 bytes are little-endian regardless of the host")
+{
+    ByteWriter writer;
+    writer.U64(0x0102030405060708ull);
+
+    const std::vector<std::uint8_t>& bytes = writer.Bytes();
+    REQUIRE(bytes.size() == 8);
+    CHECK(bytes[0] == 0x08);
+    CHECK(bytes[1] == 0x07);
+    CHECK(bytes[2] == 0x06);
+    CHECK(bytes[3] == 0x05);
+    CHECK(bytes[4] == 0x04);
+    CHECK(bytes[5] == 0x03);
+    CHECK(bytes[6] == 0x02);
+    CHECK(bytes[7] == 0x01);
+}
+
+TEST_CASE("A string's length prefix is a little-endian U16")
+{
+    //The length prefix is itself a U16 on the wire, and a reader decoding it
+    //needs the same byte order guarantee as any other field.
+    ByteWriter writer;
+    writer.String("ab");
+
+    const std::vector<std::uint8_t>& bytes = writer.Bytes();
+    REQUIRE(bytes.size() == 4);
+    CHECK(bytes[0] == 0x02);
+    CHECK(bytes[1] == 0x00);
+    CHECK(bytes[2] == 'a');
+    CHECK(bytes[3] == 'b');
+}
+
 TEST_CASE("Reading past the end fails safe instead of reading rubbish")
 {
     const std::uint8_t bytes[] = { 0x01, 0x02 };
@@ -76,6 +119,46 @@ TEST_CASE("A string length longer than the buffer is refused")
     writer.U8('x');
 
     ByteReader reader(writer.Bytes());
+    CHECK(reader.String().empty());
+    CHECK_FALSE(reader.Ok());
+}
+
+TEST_CASE("A zero-length string round-trips")
+{
+    ByteWriter writer;
+    writer.String("");
+
+    ByteReader reader(writer.Bytes());
+    CHECK(reader.String().empty());
+    CHECK(reader.Ok());
+    CHECK(reader.Remaining() == 0);
+}
+
+TEST_CASE("A string length exactly equal to Remaining() is accepted")
+{
+    //The boundary-allowed case, sitting beside the boundary-refused one above:
+    //a length that exactly exhausts the buffer must still be read, not treated
+    //as one byte too many.
+    ByteWriter writer;
+    writer.String("hi");
+
+    ByteReader reader(writer.Bytes());
+    REQUIRE(reader.Remaining() == 4);
+    CHECK(reader.String() == "hi");
+    CHECK(reader.Ok());
+    CHECK(reader.Remaining() == 0);
+}
+
+TEST_CASE("String() on an already-failed reader returns safely")
+{
+    //A reader that broke earlier in a message must not let a later String()
+    //call resurrect it or read past the point of failure.
+    const std::uint8_t bytes[] = { 0x01 };
+    ByteReader reader(bytes);
+
+    CHECK(reader.U32() == 0);
+    CHECK_FALSE(reader.Ok());
+
     CHECK(reader.String().empty());
     CHECK_FALSE(reader.Ok());
 }
