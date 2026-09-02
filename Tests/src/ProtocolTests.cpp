@@ -220,3 +220,25 @@ TEST_CASE("A snapshot declaring more players than it carries is refused")
     SnapshotMessage received;
     CHECK_FALSE(Decode(writer.Span(), received));
 }
+
+TEST_CASE("A welcome declaring an edit count near its type's limit is refused without throwing")
+{
+    //Unlike the snapshot test above, this one is genuinely falsifiable:
+    //WelcomeMessage's edit count is a u32, not a u16, so nothing bounds how
+    //much Edits.reserve() could be asked for except the guard in
+    //Decode(WelcomeMessage&). Remove that guard and this packet no longer
+    //comes back promptly or safely - see the comment on that guard in
+    //Protocol.cpp for what was actually observed when it was removed.
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::Welcome));
+    writer.U16(0);
+    writer.String("");
+    writer.U64(0);
+    writer.U64(0);
+    writer.U32(0xFFFFFFFFu);
+
+    WelcomeMessage received;
+    bool ok = true;
+    CHECK_NOTHROW(ok = Decode(writer.Span(), received));
+    CHECK_FALSE(ok);
+}

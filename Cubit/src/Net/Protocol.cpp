@@ -135,12 +135,21 @@ bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out)
 
     const std::uint32_t count = reader.U32();
 
-    //A resource guard, not a correctness one: ByteReader's sticky Ok() means
-    //an oversized count is refused by the trailing Ok() check below either
-    //way, once the loop runs out of real bytes. What this line buys is not
-    //catching more hostile input - it is not doing the catching the slow way.
-    //Delete it and a 15-byte packet claiming a few billion edits still comes
-    //back false, just after reserve() and a doomed loop have both run first.
+    //Correctness-critical, unlike the look-alike guard in
+    //Decode(SnapshotMessage&) below. That one is provably safe to delete
+    //because a u16 count tops out at 65535 entries - small enough that the
+    //trailing Ok() check always catches it too, in a blink. This count is a
+    //u32, and a 25-byte packet (id + You + an empty MapName + MapHash + Tick
+    //+ count) can declare one near UINT32_MAX. Verified by mutation, not
+    //assumed: with this line deleted, decoding one such packet did not throw
+    //and did not return - Edits.reserve() accepted a request for roughly
+    //68 GB, and the loop that followed was still running three and a half
+    //minutes later, having driven a 32 GB machine from ~30 GB free to
+    //1.67 GB free, at which point the run was killed to keep the host
+    //alive. That is not the "nothing here throws" contract Protocol.h
+    //documents - it is worse than throwing, because the caller has no way
+    //to know the call will ever return. Deleting this line does not make
+    //Decode wrong on more inputs; it makes Decode not return.
     if (!reader.Ok() || count > reader.Remaining() / BlockEditBytes)
         return false;
 
@@ -195,16 +204,23 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
     const std::uint16_t count = reader.U16();
 
     //Checked against what the buffer can actually hold, before reserving.
-    //Trusting the count and reserving on its word is how a 13-byte packet
-    //becomes a 1.7 MB allocation.
+    //Trusting the count and reserving on its word is how an 11-byte packet
+    //(id + Tick + count, nothing else needed to reach this line) becomes a
+    //1.7 MB allocation - 65535, the largest count a u16 can carry, times
+    //PlayerSnapshotBytes.
     //
     //A resource guard, not a correctness one, and worth keeping straight:
     //ByteReader's sticky Ok() already guarantees the trailing Ok() check
     //below refuses the same packet even without this line, once the loop
     //runs out of real bytes to read. No test's return value tells the two
-    //apart, and none can - they agree on every input. What this line changes
-    //is that an 11-byte packet claiming 60000 players fails in O(1) instead
-    //of after a 65535-iteration loop and a reserve() for it.
+    //apart, and none can - they agree on every input, because a u16 count
+    //can never demand more than that same 1.7 MB, which any real machine
+    //allocates and iterates over instantly either way. What this line
+    //changes is making the rejection instant instead of doing the
+    //65535-iteration loop and the reserve() for it first. Contrast
+    //Decode(WelcomeMessage&) above, where the same-shaped guard is not
+    //optional for exactly this reason: its count is a u32, not a u16, and
+    //the worst case is not 1.7 MB.
     if (!reader.Ok() || count > reader.Remaining() / PlayerSnapshotBytes)
         return false;
 
