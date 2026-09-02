@@ -29,8 +29,11 @@ void SimulatedTransport::Queue(PeerId peer, bool broadcast,
 
     if (m_Sim.Jitter > 0.0)
     {
-        //Uniform across +/- Jitter. Packets can therefore arrive out of order,
-        //which is realistic and is exactly why InputMessage carries a sequence.
+        //Uniform across +/- Jitter. On Channel::Unreliable this can reorder
+        //packets, which is realistic and is exactly why InputMessage carries
+        //a sequence. On Channel::Reliable the clamp below cancels the
+        //reordering back out - jitter still varies WHEN, never WHICH ORDER,
+        //matching ENet's sequenced reliable channel.
         due += (NextUnit() * 2.0 - 1.0) * m_Sim.Jitter;
     }
 
@@ -47,6 +50,16 @@ void SimulatedTransport::Queue(PeerId peer, bool broadcast,
 
     //Never before now, even if jitter pushed it backwards past the send.
     due = std::max(due, m_Now);
+
+    if (channel == Channel::Reliable)
+    {
+        //ENet's reliable channel is sequenced. Clamp to never arrive before
+        //the last reliable packet already scheduled to this destination, so
+        //this packet cannot be delivered ahead of one sent before it.
+        double& lastDue = m_LastReliableDue[peer];
+        due = std::max(due, lastDue);
+        lastDue = due;
+    }
 
     Pending pending;
     pending.Due = due;

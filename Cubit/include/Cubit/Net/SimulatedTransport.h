@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -90,6 +91,19 @@ private:
     double m_Now = 0.0;
     std::uint64_t m_NextSerial = 0;
     std::uint64_t m_RandomState = 1;
+
+    //Real ENet's reliable channel is sequenced: reliable packets to a given
+    //peer are delivered in the order they were sent, never reordered by
+    //network jitter. Queue() enforces that by clamping a reliable packet's
+    //due time to be no earlier than the last one already scheduled to the
+    //same destination - jitter still varies WHEN a reliable packet arrives,
+    //never WHICH ORDER. Keyed on the same `peer` value Pending::Peer stores,
+    //so a broadcast (Peer == InvalidPeer) gets its own ordering stream,
+    //separate from any peer's unicast sends - Transport does not expose the
+    //actual recipient set at send time, so that is the finest granularity
+    //available here. Channel::Unreliable is untouched: real UDP reorders,
+    //which is why InputMessage carries a sequence.
+    std::unordered_map<PeerId, double> m_LastReliableDue;
 
     std::vector<Pending> m_Outbound;
     std::deque<NetEvent> m_Inbox;
