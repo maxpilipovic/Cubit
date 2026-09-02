@@ -46,4 +46,5 @@
 #include "Cubit/Net/ByteWriter.h"
 #include "Cubit/Net/LoopbackTransport.h"
 #include "Cubit/Net/Protocol.h"
+#include "Cubit/Net/SimulatedTransport.h"
 #include "Cubit/Net/Transport.h"
