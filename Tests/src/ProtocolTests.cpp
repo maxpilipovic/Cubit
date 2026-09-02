@@ -203,11 +203,15 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
     }
 }
 
-TEST_CASE("A snapshot claiming more players than it carries is refused")
+TEST_CASE("A snapshot declaring more players than it carries is refused")
 {
-    //The counterpart to the string-length attack: a tiny packet claiming a
-    //huge roster. Refusing on the count alone, before reserving for it, is
-    //what stops this being a denial of service.
+    //Proves only the outcome: a count the buffer cannot back comes back
+    //false. It does not, and cannot, prove this is refused cheaply - a
+    //decoder that ignored the count entirely and just let the read loop run
+    //dry would return the same false, because ByteReader's Ok() latches
+    //false the moment a read comes up short and every later read inherits
+    //that. Whatever makes rejecting this packet cheap instead of merely
+    //correct is proven by reading Protocol.cpp, not by this assertion.
     ByteWriter writer;
     writer.U8(static_cast<std::uint8_t>(MessageId::Snapshot));
     writer.U64(1);

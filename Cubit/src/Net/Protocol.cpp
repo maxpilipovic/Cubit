@@ -134,6 +134,13 @@ bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out)
     message.Tick = reader.U64();
 
     const std::uint32_t count = reader.U32();
+
+    //A resource guard, not a correctness one: ByteReader's sticky Ok() means
+    //an oversized count is refused by the trailing Ok() check below either
+    //way, once the loop runs out of real bytes. What this line buys is not
+    //catching more hostile input - it is not doing the catching the slow way.
+    //Delete it and a 15-byte packet claiming a few billion edits still comes
+    //back false, just after reserve() and a doomed loop have both run first.
     if (!reader.Ok() || count > reader.Remaining() / BlockEditBytes)
         return false;
 
@@ -141,6 +148,13 @@ bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out)
     for (std::uint32_t i = 0; i < count; ++i)
         message.Edits.push_back(ReadEdit(reader));
 
+    //Still earns its keep for You/MapName/MapHash/Tick/count, any of which
+    //can fail on a short buffer before the guard above ever runs. It cannot
+    //fail here in the edit loop itself: the guard above already proved
+    //count * BlockEditBytes <= Remaining(), so the loop can never run short.
+    //That does not make this check redundant to delete - it makes it correct
+    //to leave, because nothing prevents a future change to Edits or the guard
+    //above from making the loop fallible again.
     if (!reader.Ok())
         return false;
 
@@ -183,6 +197,14 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
     //Checked against what the buffer can actually hold, before reserving.
     //Trusting the count and reserving on its word is how a 13-byte packet
     //becomes a 1.7 MB allocation.
+    //
+    //A resource guard, not a correctness one, and worth keeping straight:
+    //ByteReader's sticky Ok() already guarantees the trailing Ok() check
+    //below refuses the same packet even without this line, once the loop
+    //runs out of real bytes to read. No test's return value tells the two
+    //apart, and none can - they agree on every input. What this line changes
+    //is that an 11-byte packet claiming 60000 players fails in O(1) instead
+    //of after a 65535-iteration loop and a reserve() for it.
     if (!reader.Ok() || count > reader.Remaining() / PlayerSnapshotBytes)
         return false;
 
