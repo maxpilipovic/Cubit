@@ -63,8 +63,22 @@ private:
         double Due = 0.0;
 
         //Breaks ties in Due so ordering is total and therefore reproducible.
-        //Without it two packets due on the same tick sort by whatever the sort
-        //happens to do, and "deterministic" quietly stops being true.
+        //std::sort is not stable and the standard makes no promise about the
+        //relative order of elements that compare equal, so two same-Due
+        //packets would otherwise be ordered by whatever a given standard
+        //library's sort happens to do with equal keys - unspecified, and
+        //free to differ across compilers, library versions and optimisation
+        //levels. Serial is what turns that into a total, specified order
+        //instead. It is also what keeps the golden-schedule test's pinned
+        //delivery order portable rather than lucky: without it, that pin
+        //would only be true on whichever toolchain happened to produce it.
+        //
+        //On MSVC today, removing Serial does not fail any test in this
+        //suite, including a same-tick batch of 200 - MSVC's std::sort
+        //happens not to permute an already-ordered range whose keys are all
+        //equal. That is a fact about this one sort implementation, not
+        //evidence that Serial is unnecessary: a green suite here is not
+        //permission to delete it.
         std::uint64_t Serial = 0;
 
         PeerId Peer = InvalidPeer;

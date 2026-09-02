@@ -216,21 +216,21 @@ TEST_CASE("Jitter never reorders Channel::Reliable packets")
 
 TEST_CASE("A same-tick batch of reliable packets arrives in send order")
 {
-    //With no jitter, every send below computes the exact same raw due time,
-    //so this exercises the Serial tie-break rather than the reliable-
-    //ordering clamp (which a single shared due time satisfies trivially
-    //either way). Once reliable delivery is guaranteed ordered, this is the
-    //case the tie-break exists for.
+    //Proves a same-tick batch of reliable packets is delivered in send
+    //order - exactly what a server broadcasting to every peer, or a burst of
+    //terrain edits, actually produces, so this is a real shape rather than a
+    //contrived one. With no jitter, every send below computes the same raw
+    //due time, so this is delivery order guaranteed purely by Queue()'s
+    //Channel::Reliable ordering rule (see SimulatedTransport.h's comment on
+    //Pending::Serial for why that guarantee does not depend on which
+    //std::sort implementation happens to be running it).
     //
-    //200, not 2: a 2-element tie is not a load-bearing test of the
-    //tie-break on this standard library. MSVC's std::sort falls back to
-    //insertion sort well below its introsort threshold for tiny ranges, and
-    //insertion sort never swaps two already-in-order equal-key elements
-    //regardless of whether the comparator breaks the tie - so a 2-packet
-    //version of this test cannot go red no matter what Serial does. 200 is
-    //comfortably past that threshold, and the shape is not contrived: a
-    //server broadcasting to every peer, or a burst of terrain edits, is
-    //exactly a same-tick batch of reliable sends.
+    //Note on what this test does NOT prove: on MSVC today, this passes even
+    //with the Serial tie-break deleted, because MSVC's std::sort happens not
+    //to permute an already-ordered, all-equal-key range at this size. So
+    //this test does not falsify Serial's removal - it asserts the guarantee
+    //holds, not which mechanism is holding it. Do not read a pass here as
+    //grounds to remove Serial.
     LoopbackNetwork network;
     PeerId peer = InvalidPeer;
     Transport& rawClient = network.AddClient(peer);

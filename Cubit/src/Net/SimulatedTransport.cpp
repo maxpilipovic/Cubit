@@ -108,6 +108,17 @@ void SimulatedTransport::Advance(double seconds)
         {
             if (a.Due != b.Due)
                 return a.Due < b.Due;
+
+            //std::sort is not stable and the standard gives equal-Due
+            //packets no defined relative order on its own, so this branch is
+            //what makes delivery order specified rather than incidental to
+            //one sort implementation. It is why the golden-schedule test's
+            //pinned order is portable across standard libraries rather than
+            //true by luck. Deleting it does not fail any test on MSVC today
+            //- MSVC's std::sort happens to leave an already-ordered,
+            //all-equal range untouched, verified up to a 200-packet
+            //same-tick batch - but that is a property of this one sort
+            //implementation, not proof the branch is unnecessary.
             return a.Serial < b.Serial;
         });
 
