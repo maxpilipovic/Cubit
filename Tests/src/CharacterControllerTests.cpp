@@ -498,3 +498,30 @@ TEST_CASE("Half deflection walks at half speed")
 
     CHECK(halfDistance == doctest::Approx(fullDistance * 0.5f).epsilon(0.02));
 }
+
+TEST_CASE("SetState restores every field a step depends on")
+{
+    //Teleport is wrong for this job twice over: it flattens PreviousPosition,
+    //destroying the interpolation a correction is supposed to hide, and it
+    //cannot restore Grounded, which Step reads from the previous step when
+    //deciding whether a jump fires.
+    CharacterController character;
+
+    character.SetState(
+        glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 1.0f, 3.0f), -4.5f, true);
+
+    CHECK(character.Position() == glm::vec3(1.0f, 2.0f, 3.0f));
+    CHECK(character.PreviousPosition() == glm::vec3(1.0f, 1.0f, 3.0f));
+    CHECK(character.VerticalVelocity() == doctest::Approx(-4.5f));
+    CHECK(character.Grounded());
+}
+
+TEST_CASE("SetState preserves the gap Teleport destroys")
+{
+    CharacterController character;
+
+    character.SetState(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 4.0f, 0.0f), 0.0f, false);
+    const glm::vec3 halfway = character.InterpolatedPosition(0.5f);
+
+    CHECK(halfway.y == doctest::Approx(4.5f));
+}

@@ -25,6 +25,27 @@ PlayerId MatchState::AddPlayer(const glm::vec3& spawn)
     return player;
 }
 
+PlayerId MatchState::AddPlayer(PlayerId id, const glm::vec3& spawn)
+{
+    if (id == InvalidPlayer)
+        throw std::invalid_argument("AddPlayer: InvalidPlayer names nobody");
+
+    if (m_Players.contains(id))
+        throw std::invalid_argument("AddPlayer: id already present");
+
+    CharacterController character;
+    character.Teleport(spawn);
+    m_Players.emplace(id, character);
+
+    //Keeps the auto-minting overload from ever handing out an id that arrived
+    //from outside. Without this a server that accepts id 7 and later mints one
+    //itself produces two players sharing an id, and the map keeps one.
+    if (id >= m_NextPlayer)
+        m_NextPlayer = static_cast<PlayerId>(id + 1);
+
+    return id;
+}
+
 void MatchState::RemovePlayer(PlayerId player)
 {
     m_Players.erase(player);

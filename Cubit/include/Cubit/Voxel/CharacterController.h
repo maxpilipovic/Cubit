@@ -97,6 +97,16 @@ public:
     //falling character falling might not.
     void Teleport(const glm::vec3& position);
 
+    //Overwrites everything a step reads from the step before it.
+    //
+    //Unlike Teleport this keeps the two positions independent, because a
+    //correction that collapsed them would erase exactly the interpolation it
+    //is meant to hide. Grounded is included because Step consults the previous
+    //step's value when deciding whether a jump fires, so a replayed jump on
+    //the first tick after a correction diverges without it.
+    void SetState(const glm::vec3& position, const glm::vec3& previousPosition,
+        float verticalVelocity, bool grounded);
+
     //Centre of the collision box at the end of the last step.
     const glm::vec3& Position() const { return m_Position; }
 

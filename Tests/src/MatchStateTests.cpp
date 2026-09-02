@@ -5,6 +5,9 @@
 
 #include <glm/glm.hpp>
 
+#include <stdexcept>
+#include <vector>
+
 namespace
 {
     //A world with a solid floor at y=0 and air above it.
@@ -346,4 +349,63 @@ TEST_CASE("Stepping a match matches stepping the character directly")
     CHECK(match.Player(playerB).PreviousPosition() == directB.PreviousPosition());
     CHECK(match.Player(playerB).VerticalVelocity() == directB.VerticalVelocity());
     CHECK(match.Player(playerB).Grounded() == directB.Grounded());
+}
+
+TEST_CASE("A player can be added under a chosen id")
+{
+    MatchState match(FlatWorld());
+
+    const PlayerId chosen = match.AddPlayer(PlayerId{ 7 }, glm::vec3(4.0f, 10.0f, 5.0f));
+
+    CHECK(chosen == PlayerId{ 7 });
+    CHECK(match.HasPlayer(PlayerId{ 7 }));
+    CHECK(match.Player(PlayerId{ 7 }).Position() == glm::vec3(4.0f, 10.0f, 5.0f));
+}
+
+TEST_CASE("A chosen id is refused when it is taken or invalid")
+{
+    MatchState match(FlatWorld());
+    match.AddPlayer(PlayerId{ 7 }, glm::vec3(0.0f));
+
+    CHECK_THROWS_AS(match.AddPlayer(PlayerId{ 7 }, glm::vec3(0.0f)), std::invalid_argument);
+    CHECK_THROWS_AS(match.AddPlayer(InvalidPlayer, glm::vec3(0.0f)), std::invalid_argument);
+}
+
+TEST_CASE("Auto-minted ids never collide with a chosen one")
+{
+    //The bug this prevents: a server hands a client id 7, then later mints its
+    //own and hands out 7 again. Two players, one id, and the roster silently
+    //loses one of them.
+    MatchState match(FlatWorld());
+
+    match.AddPlayer(PlayerId{ 7 }, glm::vec3(0.0f));
+    const PlayerId minted = match.AddPlayer(glm::vec3(0.0f));
+
+    CHECK(minted > PlayerId{ 7 });
+    CHECK(match.Players().size() == 2);
+}
+
+TEST_CASE("The roster can be enumerated in id order")
+{
+    MatchState match(FlatWorld());
+    match.AddPlayer(PlayerId{ 9 }, glm::vec3(0.0f));
+    match.AddPlayer(PlayerId{ 2 }, glm::vec3(0.0f));
+
+    std::vector<PlayerId> ids;
+    for (const auto& [id, character] : match.Players())
+    {
+        (void)character;
+        ids.push_back(id);
+    }
+
+    CHECK(ids == std::vector<PlayerId>{ PlayerId{ 2 }, PlayerId{ 9 } });
+}
+
+TEST_CASE("The tick can be set, so a client can align to a server")
+{
+    MatchState match(FlatWorld());
+
+    match.SetTick(1234);
+
+    CHECK(match.Tick() == 1234);
 }

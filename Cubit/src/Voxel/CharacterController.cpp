@@ -86,6 +86,15 @@ void CharacterController::Teleport(const glm::vec3& position)
     m_PreviousPosition = position;
 }
 
+void CharacterController::SetState(const glm::vec3& position,
+    const glm::vec3& previousPosition, float verticalVelocity, bool grounded)
+{
+    m_Position = position;
+    m_PreviousPosition = previousPosition;
+    m_VerticalVelocity = verticalVelocity;
+    m_Grounded = grounded;
+}
+
 glm::vec3 CharacterController::InterpolatedPosition(float alpha) const
 {
     return glm::mix(m_PreviousPosition, m_Position, alpha);

@@ -49,6 +49,15 @@ public:
     //Adds a player standing at this position and returns their id.
     PlayerId AddPlayer(const glm::vec3& spawn);
 
+    //Adds a player under an id chosen by someone else - the server, over a
+    //wire. Returns the id it was given.
+    //
+    //Throws when the id is InvalidPlayer or already present: silently
+    //replacing a player would drop whoever held that id, and silently
+    //ignoring the call would leave the caller believing in a player that does
+    //not exist.
+    PlayerId AddPlayer(PlayerId id, const glm::vec3& spawn);
+
     //Removes a player. Removing one who is not present does nothing.
     void RemovePlayer(PlayerId player);
 
@@ -64,10 +73,22 @@ public:
     //it is simulation state, not wall-clock state.
     std::uint64_t Tick() const { return m_Tick; }
 
+    //Aligns this match's clock to somebody else's - a client adopting the
+    //server's tick from a snapshot.
+    void SetTick(std::uint64_t tick) { m_Tick = tick; }
+
     //Throws when the player is not present: there is no honest character to
     //return, and a default-constructed one reads as somebody standing at the
     //origin.
     const CharacterController& Player(PlayerId player) const;
+
+    //Everyone in the match, in id order.
+    //
+    //Returns the ordered container itself rather than a copied list of ids.
+    //MatchState's reproducibility depends on iteration order, and handing back
+    //the ordered map makes that promise visible to callers instead of hiding
+    //it behind a copy.
+    const std::map<PlayerId, CharacterController>& Players() const { return m_Players; }
 
     //Moves a player without interpolating through the space in between.
     void TeleportPlayer(PlayerId player, const glm::vec3& position);
