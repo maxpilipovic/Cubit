@@ -214,13 +214,23 @@ TEST_CASE("Jitter never reorders Channel::Reliable packets")
     CHECK(arrival == expected);
 }
 
-TEST_CASE("Two reliable packets due on the same tick arrive in send order")
+TEST_CASE("A same-tick batch of reliable packets arrives in send order")
 {
-    //With no jitter, both sends below compute the exact same raw due time,
-    //so this specifically exercises the Serial tie-break rather than the
-    //reliable-ordering clamp (which a single shared due time satisfies
-    //trivially either way). Once reliable delivery is guaranteed ordered,
-    //this is the case the tie-break exists for.
+    //With no jitter, every send below computes the exact same raw due time,
+    //so this exercises the Serial tie-break rather than the reliable-
+    //ordering clamp (which a single shared due time satisfies trivially
+    //either way). Once reliable delivery is guaranteed ordered, this is the
+    //case the tie-break exists for.
+    //
+    //200, not 2: a 2-element tie is not a load-bearing test of the
+    //tie-break on this standard library. MSVC's std::sort falls back to
+    //insertion sort well below its introsort threshold for tiny ranges, and
+    //insertion sort never swaps two already-in-order equal-key elements
+    //regardless of whether the comparator breaks the tie - so a 2-packet
+    //version of this test cannot go red no matter what Serial does. 200 is
+    //comfortably past that threshold, and the shape is not contrived: a
+    //server broadcasting to every peer, or a burst of terrain edits, is
+    //exactly a same-tick batch of reliable sends.
     LoopbackNetwork network;
     PeerId peer = InvalidPeer;
     Transport& rawClient = network.AddClient(peer);
@@ -231,17 +241,22 @@ TEST_CASE("Two reliable packets due on the same tick arrive in send order")
     Drain(network.Server());
     Drain(client);
 
-    client.Send(LoopbackNetwork::ServerPeer, Bytes(1), Channel::Reliable);
-    client.Send(LoopbackNetwork::ServerPeer, Bytes(2), Channel::Reliable);
+    constexpr int Count = 200;
+    for (int i = 0; i < Count; ++i)
+        client.Send(LoopbackNetwork::ServerPeer, Bytes(static_cast<std::uint8_t>(i % 256)), Channel::Reliable);
 
     std::vector<std::uint8_t> arrival;
-    for (int tick = 0; tick < 5; ++tick)
+    for (int tick = 0; tick < 10; ++tick)
     {
         client.Advance(FrameClock::FixedStepSeconds);
         DrainPayloads(network.Server(), arrival);
     }
 
-    CHECK(arrival == std::vector<std::uint8_t>{ 1, 2 });
+    std::vector<std::uint8_t> expected;
+    for (int i = 0; i < Count; ++i)
+        expected.push_back(static_cast<std::uint8_t>(i % 256));
+
+    CHECK(arrival == expected);
 }
 
 TEST_CASE("The canonical network's delivery schedule is pinned")
