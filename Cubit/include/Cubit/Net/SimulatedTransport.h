@@ -119,6 +119,23 @@ private:
     //which is why InputMessage carries a sequence.
     std::unordered_map<PeerId, double> m_LastReliableDue;
 
+    //Broadcast's loss and jitter are drawn ONCE for the whole call, not once
+    //per recipient: Queue(InvalidPeer, true, ...) makes a single pair of
+    //draws and, if not lost, delivers through one m_Inner.Broadcast(...), so
+    //every recipient shares the same fate on a given broadcast - all get it
+    //or none do. This is not desirable, just what the interface allows:
+    //Transport gives no way to enumerate a broadcast's actual recipients at
+    //send time (the same limitation m_LastReliableDue's comment above cites
+    //for reliable ordering), so there is no per-recipient state to draw
+    //against. Real ENet does not work this way - an ENet broadcast is a
+    //send to each peer, and each peer's copy is lost independently. A
+    //caller that needs that - a server broadcasting snapshots every tick
+    //under loss, say, where each client's drops should be independent of
+    //every other client's - must send per peer with Send(), not Broadcast().
+    //See "Broadcast draws loss once per call..." in
+    //SimulatedTransportTests.cpp, which pins this as a known, tested
+    //limitation rather than an assumption.
+
     std::vector<Pending> m_Outbound;
     std::deque<NetEvent> m_Inbox;
 };

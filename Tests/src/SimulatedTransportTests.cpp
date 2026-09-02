@@ -329,3 +329,55 @@ TEST_CASE("The canonical network's delivery schedule is pinned")
     CHECK(actualTicks == expectedTicks);
     CHECK(actualPayloads == expectedPayloads);
 }
+
+TEST_CASE("Broadcast draws loss once per call, so all recipients share its fate - a known divergence from ENet")
+{
+    //Documented limitation, not a desired property. Queue(InvalidPeer, true,
+    //...) makes exactly one loss draw and one jitter draw for the whole
+    //Broadcast() call, then - if not lost - delivers through a single
+    //m_Inner.Broadcast(...), so every recipient of one broadcast either gets
+    //it or none of them do. Real ENet does not work this way: a broadcast is
+    //a send to each peer, and each peer's copy is lost independently. This
+    //test pins the ACTUAL behaviour (shared fate) rather than the desired
+    //one, so that if Broadcast is ever changed to draw per recipient, this
+    //goes red and whoever changed it lands on this comment. A caller that
+    //needs independent per-client loss - a server broadcasting snapshots
+    //every tick, say - must send per peer with Send(), not Broadcast().
+    LoopbackNetwork network;
+    PeerId peerA = InvalidPeer;
+    PeerId peerB = InvalidPeer;
+    Transport& clientA = network.AddClient(peerA);
+    Transport& clientB = network.AddClient(peerB);
+    Drain(network.Server());
+    Drain(clientA);
+    Drain(clientB);
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    sim.Loss = 0.5f;
+    sim.Seed = 1;
+    SimulatedTransport server(network.Server(), sim);
+
+    constexpr int Count = 100;
+    for (int i = 0; i < Count; ++i)
+    {
+        server.Broadcast(Bytes(static_cast<std::uint8_t>(i)), Channel::Unreliable);
+        server.Advance(FrameClock::FixedStepSeconds);
+    }
+    for (int tick = 0; tick < 10; ++tick)
+        server.Advance(FrameClock::FixedStepSeconds);
+
+    std::vector<std::uint8_t> receivedA;
+    std::vector<std::uint8_t> receivedB;
+    DrainPayloads(clientA, receivedA);
+    DrainPayloads(clientB, receivedB);
+
+    //Shared fate: whichever broadcasts got through, both clients received
+    //exactly the same set.
+    CHECK(receivedA == receivedB);
+
+    //Not a vacuous agreement between two empty (or two full) vectors - loss
+    //genuinely happened, and genuinely didn't happen every time.
+    CHECK(receivedA.size() > 0);
+    CHECK(receivedA.size() < Count);
+}
