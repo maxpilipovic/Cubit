@@ -110,6 +110,56 @@ project "GLFW"
         runtime "Release"
         optimize "On"
 
+project "ENet"
+    location "vendor/ENet"
+    kind "StaticLib"
+    language "C"
+
+    targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+    objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
+
+    files
+    {
+        "vendor/ENet/include/**.h",
+        "vendor/ENet/callbacks.c",
+        "vendor/ENet/compress.c",
+        "vendor/ENet/host.c",
+        "vendor/ENet/list.c",
+        "vendor/ENet/packet.c",
+        "vendor/ENet/peer.c",
+        "vendor/ENet/protocol.c",
+        "vendor/ENet/win32.c"
+    }
+
+    includedirs
+    {
+        "vendor/ENet/include"
+    }
+
+    defines
+    {
+        --ENet's Windows backend. Without it the unix.c path is selected and
+        --nothing links.
+        "WIN32",
+        "_CRT_SECURE_NO_WARNINGS",
+        "_WINSOCK_DEPRECATED_NO_WARNINGS"
+    }
+
+    filter "system:windows"
+        systemversion "latest"
+
+    filter "configurations:Debug"
+        runtime "Debug"
+        symbols "On"
+
+    filter "configurations:Release"
+        runtime "Release"
+        optimize "On"
+
+    filter "configurations:Dist"
+        runtime "Release"
+        optimize "On"
+
 group "Core"
 
 project "Cubit"
@@ -137,14 +187,18 @@ project "Cubit"
         "Cubit/src",
         "vendor/GLFW/include",
         "vendor/GLAD/include",
-        "vendor/GLM"
+        "vendor/GLM",
+        "vendor/ENet/include"
     }
 
     links
     {
         "GLFW",
         "GLAD",
-        "opengl32"
+        "opengl32",
+        "ENet",
+        "ws2_32",
+        "winmm"
     }
 
     defines
