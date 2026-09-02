@@ -42,3 +42,5 @@
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/VoxelRaycast.h"
 #include "Cubit/Voxel/World.h"
+#include "Cubit/Net/ByteReader.h"
+#include "Cubit/Net/ByteWriter.h"
