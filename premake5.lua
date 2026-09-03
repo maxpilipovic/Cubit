@@ -331,6 +331,66 @@ project "MapGen"
         defines "CB_DIST"
         optimize "On"
 
+project "Server"
+    location "Server"
+    kind "ConsoleApp"
+    language "C++"
+    cppdialect "C++20"
+
+    targetdir ("bin/" .. outputdir .. "/%{prj.name}")
+    objdir ("bin-int/" .. outputdir .. "/%{prj.name}")
+
+    --Run with the target dir as the working directory so the server resolves
+    --"assets/..." next to the exe, exactly as the Sandbox does.
+    debugdir ("bin/" .. outputdir .. "/%{prj.name}")
+
+    files
+    {
+        "Server/src/**.h",
+        "Server/src/**.cpp"
+    }
+
+    includedirs
+    {
+        "Cubit/include",
+        "vendor/GLM"
+    }
+
+    links
+    {
+        "Cubit"
+    }
+
+    defines
+    {
+        "CB_PLATFORM_WINDOWS"
+    }
+
+    filter "system:windows"
+        systemversion "latest"
+
+        postbuildcommands
+        {
+            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Server"),
+
+            -- The Sandbox's assets, not a second copy of a 23.8 MB map. Both
+            -- ends must read byte-identical files or the hash check refuses the
+            -- join - which is the check working, but a confusing first run.
+            ('{COPYDIR} "../Sandbox/assets" "%{cfg.targetdir}/assets"')
+        }
+
+    filter "configurations:Debug"
+        defines "CB_DEBUG"
+        symbols "On"
+
+    filter "configurations:Release"
+        defines "CB_RELEASE"
+        optimize "On"
+
+    filter "configurations:Dist"
+        defines "CB_DIST"
+        optimize "On"
+
 group "Tests"
 
 project "Tests"
