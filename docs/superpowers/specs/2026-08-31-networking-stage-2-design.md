@@ -1,6 +1,6 @@
 # Cubit Networking Stage 2 — The Wire
 
-_Written 2026-08-31. Status: designed, not yet built._
+_Written 2026-08-31. Status: **SHIPPED 2026-09-03**._
 
 Stage 2 of the arc laid out in
 [`2026-08-27-networking-design.md`](2026-08-27-networking-design.md). **Read that
@@ -492,3 +492,96 @@ So that the stage can end:
 - **`Sandbox.cpp` growth.** Already 620 lines. The accessor pattern confines the new mode
   to three branch points; if the implementation finds itself adding a fourth, that is the
   signal to extract rather than to continue.
+
+---
+
+## Shipped 2026-09-03
+
+Thirteen tasks, `adef49a`..`1efe189`. The suite went 315 -> 386.
+
+**A real match runs.** `Server.exe` plus two `Sandbox --connect` clients on
+localhost: they take player ids 1 and 2, each sees the other's roster entry, both
+mesh the same 1,927,774 faces, and one client's movement appears in the other's
+world. Verified with temporary `CB_INFO` probes rather than screen capture, which
+is unreliable against this window - the observing client logged the walker moving
+from z=300.500000 to z=322.699921 across eight distinct positions before it walked
+into terrain.
+
+**Single-player is byte-for-byte unchanged**, which was the acceptance condition
+for the whole plan. `POS 240.500000 26.900099 300.500000`, and `FACES 1927774`
+once amortized meshing settles at `PENDING 0`. Both identical to the values from
+before the wire existed.
+
+### Measured bandwidth
+
+**3,900 B/s down per client, with two players connected.** A snapshot is 65 bytes
+- 1 id + 8 tick + 2 count + 2 x 27 per player - at 60 Hz. That is almost exactly
+the 3.9 KB/s the design predicted, so the estimate needs no correction and Stage 3
+has a real number to optimise against rather than an intuition. Upstream is one
+22-byte `InputMessage` per tick per client, 1,320 B/s.
+
+The per-player cost is 27 bytes, so the snapshot grows by 1,620 B/s per additional
+player. Delta compression stays correctly out of scope: there is still no
+bandwidth problem at this scale.
+
+### What the design got wrong
+
+Eight defects, none of them fatal, all found by scanning the plan against the real
+headers or by running it - never by reading it.
+
+- **The `Broadcast` ruling had already been made and the plan predated it.** Task
+  6 established that `MatchServer` must send per peer; the task 8 brief still said
+  `Broadcast`. The ledger outranks the brief when they disagree.
+- **Two guards that turn a malformed packet into a crash.**
+  `MatchState::AddPlayer` throws on `InvalidPlayer`, and both `PlayerSnapshot::Player`
+  and `WelcomeMessage::You` are raw u16s off the wire that `Decode` has no reason
+  to reject. Same shape as the count-guard finding from task 4.
+- **A packet leak on the normal path.** `enet_peer_send` returns -1 without taking
+  ownership when a peer is not yet connected, and `EnetTransport::Connect`
+  deliberately registers its peer before the handshake, so that window is routine.
+- **The oracle's skew is two values, not one.** See below - this is the finding
+  most worth carrying forward.
+- **The guard-rail test for "the client never steps" did not test that.** It
+  compared ticks, but `HandleSnapshot` calls `SetTick` on every snapshot, so a
+  stepping client is dragged back on the next packet and never overtakes a server
+  it runs behind. Rewritten to stop the server, drain what is in flight, and
+  assert a client driven with walking input does not move.
+- **Two tests in the task 8 brief could not pass**, and one of them was
+  interesting: asserting a joining player stands exactly on the spawn point would
+  assert that a joiner skips a tick, which would leave it permanently a tick
+  behind everyone else.
+- **The plan said `OnAttach`; the Sandbox has none.** Setup is in the
+  `SandboxLayer` constructor, which also builds the shader - so an early return
+  for the connected path would have left `OnRender` with a null shader.
+
+### What Stage 3 inherits
+
+The three claims the plan asked to re-confirm at the end all still stand:
+
+- **The client's tick equals the last snapshot's tick.** `HandleSnapshot` sets it
+  and nothing else does.
+- **`SetState` restores everything a replay needs** - position, previous position,
+  vertical velocity and grounded. `MatchClient` already calls it per snapshot.
+- **The edit log is the only unbounded structure.**
+
+Two things Stage 3 should know that the design did not anticipate:
+
+- **`SimulatedTransport`'s delay is not an exact tick multiple even when you ask
+  for one.** It accumulates `m_Now += seconds` but computes `Due = m_Now + Latency`
+  once, and for about 17% of ticks the accumulated clock lands one ULP (~1e-17)
+  below the due time, so `Due <= m_Now` fails and the packet waits an extra tick.
+  Measured 4-tick skew x280 and 5-tick x59 where the design predicted a constant 3.
+  Verified independently by replaying the same double additions outside the test:
+  67 of 400 slip. **Any Stage 3 test that wants exact tick alignment must fix this
+  first** - an epsilon on the comparison, or an integer tick clock. Not done here
+  because it would re-pin task 6's golden-schedule test.
+- **The +1 that is not a bug.** Separately from the ULP slip, the client always
+  trails by one more tick than the latency, because its `Step` runs before the
+  server's next one. Measurement phase, not delay. Worth knowing before anyone
+  "fixes" it.
+
+### Not reviewed
+
+Tasks 8 through 13 were executed directly rather than subagent-driven, and none of
+them went through the review round that tasks 1-7 each had - every one of which
+found something. `67960db..1efe189` is unreviewed.

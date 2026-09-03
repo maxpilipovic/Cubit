@@ -308,6 +308,19 @@ obvious, and better shaped, the moment something concretely needs it.
   the controller: it owns the world, the roster and the tick, and both a server
   and a client will step it. Still not an entity system, and still deliberately
   so — one kind of actor.
+
+  **Stage 2 shipped 2026-09-03.** The wire is real: a headless `Server.exe`, an
+  ENet transport, six wire messages over a hand-rolled little-endian codec, and
+  `Sandbox --connect`. Two clients share a world, see each other as wireframe
+  boxes, and edit terrain everyone sees. There is deliberately **no prediction** —
+  pressing W does not move the view until the server says so, which is the point:
+  it proves the wire honestly before Stage 3 hides the latency, so any
+  rubber-banding seen then is new rather than inherited. Measured cost is 3.9 KB/s
+  down per client at 60 Hz snapshots. Suite 315 → 386. With no arguments the
+  Sandbox is byte-for-byte the single-player app it was before, verified against
+  the same `POS`/`FACES` values. **Stage 3 — prediction, reconciliation and entity
+  interpolation — is what remains**, and it is the only roadmap item that is
+  genuinely expensive to retrofit.
 - **A way to draw geometry that is not a chunk.** `Renderer::Submit` is generic,
   but it is the only seam — every caller hand-builds its own `VertexArray`
   (`WorldRenderer`, `HudLayer`). There is no `Mesh` type, no model loading, no
