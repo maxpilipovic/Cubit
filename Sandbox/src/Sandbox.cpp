@@ -1,4 +1,8 @@
 #include "Cubit/Cubit.h"
+#include "Cubit/Net/EnetTransport.h"
+#include "Cubit/Net/MapHash.h"
+#include "Cubit/Net/MatchClient.h"
+#include "Cubit/Net/SimulatedTransport.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
@@ -8,13 +12,31 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+//How this Sandbox was launched. Default-constructed means single-player, which
+//must stay byte-for-byte the app it was before networking existed: the
+//project's rendering verification is scripted screenshots and POS/FACES probes
+//run against it, and none of that may start depending on a socket.
+struct SandboxOptions
+{
+    bool Connect = false;
+    std::string Host = "127.0.0.1";
+    std::uint16_t Port = 27015;
+
+    //Round-trip milliseconds. Halved into NetworkSim's one-way latency.
+    double LatencyRtt = 0.0;
+    float Loss = 0.0f;
+};
 
 struct PlayerDiedEvent
 {
@@ -32,6 +54,11 @@ namespace
 
     //Near-black, so the outline reads against both lit terrain and sky.
     const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
+
+    //Remote players, as wireframe boxes at their real half extents. Not a
+    //character model: modelling is gameplay, and a model chosen now would be a
+    //guess. Warm, so it separates from the near-black edit outline.
+    const glm::vec4 RemotePlayerColor{ 0.9f, 0.3f, 0.2f, 1.0f };
 
     //Roughly where to start. Only a column: the height, and whether this exact
     //column is usable at all, are resolved against the loaded map. A hint over
@@ -77,8 +104,10 @@ class SandboxLayer final : public Layer
 {
 public:
     //Subscribes the Sandbox layer to typed gameplay notifications.
-    SandboxLayer(EventBus& eventBus, std::shared_ptr<HudState> hudState)
+    SandboxLayer(EventBus& eventBus, std::shared_ptr<HudState> hudState,
+        const SandboxOptions& options)
         : m_HudState(std::move(hudState)),
+          m_Options(options),
           m_CameraController(16.0f / 9.0f)
     {
         Input::SetCursorCaptured(true);
@@ -103,28 +132,49 @@ public:
 #ifndef CB_DIST
         Profiler::BeginSession("load", "profile-load.json");
 #endif
-        LoadWorld(MapPath);
+        // Connected, the map arrives by name in Welcome and MatchClient's
+        // loader builds it. Loading here as well would pay the whole 23.8 MB
+        // load twice and leave a second world nothing ever reads. A connected
+        // launch therefore records a much shorter load, which is honest.
+        if (!m_Options.Connect)
+        {
+            LoadWorld(MapPath);
+        }
 #ifndef CB_DIST
         Profiler::EndSession();
 #endif
 
-        // LoadWorld resolves the spawn but deliberately does not teleport to
-        // it: F9 reloads mid-session and should leave the player where they
-        // were working. Starting fresh is the one time it should.
-        m_LocalPlayer = m_Match.AddPlayer(m_Spawn);
+        if (m_Options.Connect)
+        {
+            Connect();
+        }
+        else
+        {
+            // LoadWorld resolves the spawn but deliberately does not teleport
+            // to it: F9 reloads mid-session and should leave the player where
+            // they were working. Starting fresh is the one time it should.
+            m_LocalPlayer = m_Match.AddPlayer(m_Spawn);
 
-        // Face the middle of the map, level with the eye. Aiming at the literal
-        // centre of the world box would tilt the view into the ground.
-        const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
-        const glm::vec3 target(
-            static_cast<float>(World_().GetWidth()) * 0.5f,
-            eye.y,
-            static_cast<float>(World_().GetDepth()) * 0.5f);
+            // Face the middle of the map, level with the eye. Aiming at the
+            // literal centre of the world box would tilt the view into the
+            // ground.
+            //
+            // Connected, all of this waits: Player_() throws until Welcome
+            // arrives a round trip from now, so the camera is placed by the
+            // first OnRender after the handshake instead. The shader below is
+            // NOT part of that - it is built either way, because OnRender needs
+            // it before it needs a player.
+            const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
+            const glm::vec3 target(
+                static_cast<float>(World_().GetWidth()) * 0.5f,
+                eye.y,
+                static_cast<float>(World_().GetDepth()) * 0.5f);
 
-        const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
-        m_CameraController.SetRotation(rotation.x, rotation.y);
+            const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
+            m_CameraController.SetRotation(rotation.x, rotation.y);
 
-        UpdateCameraPosition(1.0f);
+            UpdateCameraPosition(1.0f);
+        }
 
         constexpr std::string_view vertexSource = R"(
             #version 330 core
@@ -180,8 +230,32 @@ public:
         input.Pitch = m_CameraController.GetPitch();
         input.Jump = Input::IsKeyPressed(KeyCode::Space);
 
-        const PlayerCommand commands[] = { { m_LocalPlayer, input } };
-        m_Match.Step(commands, static_cast<float>(timestep.GetSeconds()));
+        // BRANCH POINT 2 OF 3.
+        if (m_Client)
+        {
+            // Input goes up; the answer comes back. Nothing is simulated here,
+            // deliberately: pressing W does not move the view until the server
+            // has said so. On 127.0.0.1 that is imperceptible; at --latency 150
+            // it is unpleasant, and that is the point of this whole stage. If
+            // it feels fine, prediction has grown by accident.
+            m_Client->SetInput(input);
+            m_Client->Step(timestep.GetSeconds());
+
+            m_LocalPlayer = m_Client->LocalPlayer();
+
+            m_HudState->Connected = m_Client->Connected();
+            m_HudState->Rejected = m_Client->Rejected();
+            m_HudState->RoundTripMs = m_Client->RoundTripTime() * 1000.0;
+            m_HudState->PlayersInMatch = Match_().Players().size();
+
+            if (!m_Client->Connected())
+                return;
+        }
+        else
+        {
+            const PlayerCommand commands[] = { { m_LocalPlayer, input } };
+            m_Match.Step(commands, static_cast<float>(timestep.GetSeconds()));
+        }
 
         m_HudState->PlayerPosition = Player_().Position();
         m_HudState->Grounded = Player_().Grounded();
@@ -191,7 +265,12 @@ public:
         // Falling off the edge of the map is a Sandbox rule rather than
         // character physics, so it stays here. The velocity is cleared
         // separately because Teleport deliberately leaves it alone.
-        if (Player_().Position().y < FallResetHeight)
+        //
+        // Connected, the rule belongs to whoever owns the simulation - the
+        // server - so the client does not get to teleport itself. Doing it
+        // locally would be a correction the server never made, and the next
+        // snapshot would drag the player straight back off the edge.
+        if (!m_Client && Player_().Position().y < FallResetHeight)
         {
             m_Match.TeleportPlayer(m_LocalPlayer, m_Spawn);
             m_Match.PlayerForWrite(m_LocalPlayer).SetVerticalVelocity(0.0f);
@@ -210,6 +289,12 @@ public:
     //Draws the meshed voxel world through Cubit's scene renderer.
     void OnRender(float alpha) override
     {
+        // Nothing to draw from until the server has said who we are and where.
+        // Player_() would throw, and the world is still the 1x1x1 placeholder
+        // MatchState was constructed with.
+        if (m_Client && !m_Client->Connected())
+            return;
+
         UpdateCameraPosition(alpha);
 
         m_WorldRenderer.Update(World_());
@@ -233,6 +318,7 @@ public:
         // renders after this layer and leaves an orthographic matrix behind, so
         // a later flush would draw these lines in screen space.
         DrawTargetedBlockOutline();
+        DrawRemotePlayers(alpha);
         DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
 
         m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
@@ -260,13 +346,61 @@ public:
     }
 
 private:
+    //BRANCH POINT 1 OF 3. Everything else in this file reads the match through
+    //here, which is what keeps a second mode from spreading across 600 lines.
+    //
+    //If a fourth branch point appears while working in this file, that is the
+    //signal to extract rather than to continue.
+    MatchState& Match_() { return m_Client ? m_Client->MatchForWrite() : m_Match; }
+    const MatchState& Match_() const { return m_Client ? m_Client->Match() : m_Match; }
+
     //Shorthands, because the layer reads the world and its own character on
-    //nearly every line and m_Match.GetWorld() everywhere obscures them.
-    World& World_() { return m_Match.GetWorld(); }
-    const World& World_() const { return m_Match.GetWorld(); }
+    //nearly every line and Match_().GetWorld() everywhere obscures them.
+    World& World_() { return Match_().GetWorld(); }
+    const World& World_() const { return Match_().GetWorld(); }
     const CharacterController& Player_() const
     {
-        return m_Match.Player(m_LocalPlayer);
+        return Match_().Player(m_LocalPlayer);
+    }
+
+    //Opens the socket and builds the client. Throws when the server cannot be
+    //reached, which ends startup with a message rather than a window showing
+    //nothing.
+    void Connect()
+    {
+        m_Socket = EnetTransport::Connect(m_Options.Host, m_Options.Port);
+        if (m_Socket == nullptr)
+            throw std::runtime_error("Could not reach the server");
+
+        Transport* transport = m_Socket.get();
+
+        if (m_Options.LatencyRtt > 0.0 || m_Options.Loss > 0.0f)
+        {
+            NetworkSim sim;
+            sim.Latency = m_Options.LatencyRtt / 2000.0;
+            sim.Loss = m_Options.Loss;
+            m_Simulated = std::make_unique<SimulatedTransport>(*m_Socket, sim);
+            transport = m_Simulated.get();
+        }
+
+        //The world is loaded by a callback rather than inside MatchClient
+        //because this is the only place that knows where the Sandbox keeps its
+        //assets. The server names the map; it never sends it.
+        m_Client = std::make_unique<MatchClient>(*transport,
+            [](const std::string& mapName) -> std::optional<LoadedMap>
+            {
+                const std::string path = "assets/maps/" + mapName;
+                if (!std::filesystem::exists(path))
+                    return std::nullopt;
+
+                World world = BuildWorld(VoxLoader::LoadFile(path));
+
+                //Same order the single-player load uses: light before anything
+                //meshes, or the first frames bake a dark world into their
+                //vertex colours.
+                SkyLight::PropagateAll(world);
+                return LoadedMap{ std::move(world), HashMapFile(path) };
+            });
     }
 
     //Returns held movement keys in the character's own frame: x strafes, y
@@ -325,6 +459,27 @@ private:
         DebugDraw::Box(min, max, OutlineColor);
     }
 
+    //Draws everyone else in the match as a wireframe box.
+    //
+    //Interpolated between the last two snapshots rather than snapped to the
+    //newest, which is what MatchClient's SetState call preserves the previous
+    //position for. Single-player draws nothing here: there is nobody else.
+    void DrawRemotePlayers(float alpha)
+    {
+        if (!m_Client)
+            return;
+
+        for (const auto& [player, character] : Match_().Players())
+        {
+            if (player == m_LocalPlayer)
+                continue;
+
+            const glm::vec3 centre = character.InterpolatedPosition(alpha);
+            const glm::vec3 half = character.Config().HalfExtents;
+            DebugDraw::Box(centre - half, centre + half, RemotePlayerColor);
+        }
+    }
+
     //Breaks or places a block along the camera's view ray.
     bool OnMouseButtonPressed(MouseButtonPressedEvent& event)
     {
@@ -361,6 +516,16 @@ private:
             target,
             button == MouseCode::Left ? BlockId{0} : m_PlaceBlock };
 
+        // BRANCH POINT 3 OF 3.
+        if (m_Client)
+        {
+            // Nothing happens locally. The block disappears when the server
+            // says so, one round trip later - which is the most legible
+            // demonstration of latency this app has.
+            m_Client->RequestEdit(edit);
+            return true;
+        }
+
         // Bounds and relighting both belong to ApplyBlockEdit now: an edit is
         // one operation, not a sequence a caller has to remember the rest of.
         const std::optional<BlockEdit> inverse = ApplyBlockEdit(World_(), edit);
@@ -389,6 +554,13 @@ private:
     //instead of walking back through history.
     void UndoLastEdit()
     {
+        // Single-player only. The stack describes edits THIS machine applied,
+        // and connected it applied none - every edit it sees came back from the
+        // server. Undoing here would mean editing the world behind the server's
+        // back, and the next EditApplied would put it straight back.
+        if (m_Client)
+            return;
+
         if (m_Undo.empty())
             return;
 
@@ -522,6 +694,18 @@ private:
     //there isn't one.
     void ReloadWorld()
     {
+        // Single-player only, and this one is not merely pointless connected -
+        // it is incoherent. LoadWorld replaces m_Match's world, which nothing
+        // reads while m_Client exists, but then relights World_(), which
+        // resolves to the CLIENT's world. The result is half a reload applied
+        // to the wrong one of two worlds. The map a connected session runs is
+        // the server's to change.
+        if (m_Client)
+        {
+            CB_INFO("Connected: the server owns the map, so F9 does nothing");
+            return;
+        }
+
         // Same reason SaveWorld catches: this runs inside a GLFW key callback,
         // which is C code, and throwing across a C frame is undefined.
         try
@@ -574,6 +758,18 @@ private:
 
     std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
+    SandboxOptions m_Options;
+
+    //Present only when connected. The client owns the MatchState everything
+    //reads through Match_(); m_Match below is the single-player one and is left
+    //untouched while these are alive.
+    //
+    //Declaration order is destruction order reversed: the client goes first, so
+    //it cannot service a transport that has already gone.
+    std::unique_ptr<EnetTransport> m_Socket;
+    std::unique_ptr<SimulatedTransport> m_Simulated;
+    std::unique_ptr<MatchClient> m_Client;
+
     //The simulation. One player today; the type is the seam a server will
     //step identically, which is why the Sandbox goes through it rather than
     //owning a world and a character directly.
@@ -595,13 +791,13 @@ class SandboxApplication final : public Application
 {
 public:
     //Creates the Sandbox layer and publishes a gameplay event.
-    SandboxApplication()
+    explicit SandboxApplication(const SandboxOptions& options)
     {
         //Shared so the overlay can read what the gameplay layer writes, without
         //either layer knowing about the other.
         auto hudState = std::make_shared<HudState>();
 
-        PushLayer(std::make_unique<SandboxLayer>(GetEventBus(), hudState));
+        PushLayer(std::make_unique<SandboxLayer>(GetEventBus(), hudState, options));
         PushOverlay(std::make_unique<HudLayer>(
             hudState,
             GetWindow().GetFramebufferWidth(),
@@ -611,9 +807,33 @@ public:
 };
 
 //Starts the Sandbox application and runs the engine loop.
-int main()
+//
+//With no arguments this is the single-player app exactly as it has always
+//been, with no socket anywhere in it. That is load-bearing rather than polite:
+//the project's whole rendering verification story is scripted runs of this
+//executable checking POS and FACES, and none of it may start needing a server.
+int main(int argc, char** argv)
 {
-    SandboxApplication app;
+    SandboxOptions options;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+
+        if (arg == "--connect" && i + 1 < argc)
+        {
+            options.Connect = true;
+            options.Host = argv[++i];
+        }
+        else if (arg == "--port" && i + 1 < argc)
+            options.Port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
+        else if (arg == "--latency" && i + 1 < argc)
+            options.LatencyRtt = std::atof(argv[++i]);
+        else if (arg == "--loss" && i + 1 < argc)
+            options.Loss = static_cast<float>(std::atof(argv[++i])) / 100.0f;
+    }
+
+    SandboxApplication app(options);
     app.Run();
 
     return 0;

@@ -40,6 +40,15 @@ struct HudState
 
     //Edits that can still be undone.
     std::size_t UndoDepth = 0;
+
+    //Networking. All zero and false in single-player, and the overlay draws
+    //none of these lines when Connected and Rejected are both false - so the
+    //single-player readout is byte-for-byte what it was before the wire
+    //existed, which the acceptance check depends on.
+    bool Connected = false;
+    bool Rejected = false;
+    double RoundTripMs = 0.0;
+    std::size_t PlayersInMatch = 0;
 };
 
 //Draws screen-space overlay art on top of the rendered scene.
@@ -254,6 +263,34 @@ private:
 
         y -= lineHeight;
         DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)), TextMargin, y);
+
+        //Single-player draws nothing below this point, which is what keeps the
+        //readout identical to the pre-networking one.
+        if (!m_State->Connected && !m_State->Rejected)
+            return;
+
+        //A refused handshake has to be visible on screen, not only in the log:
+        //the log scrolls past behind a fullscreen window, and "nothing is
+        //happening" is exactly what a silent rejection looks like.
+        //
+        //Every label here is spelled out of the debug font's alphabet, which is
+        //only "0123456789-.: ACDEFGNOPSTU". That rules out the obvious words -
+        //PING, RTT and PLAYERS all contain letters the font cannot draw, and an
+        //unsupported character renders as a blank rather than failing, so a
+        //wrong label would silently show as a gap.
+        y -= lineHeight;
+
+        if (m_State->Rejected)
+        {
+            DrawText("NOT CONNECTED", TextMargin, y);
+            return;
+        }
+
+        DrawText("CONNECTED " + std::to_string(m_State->PlayersInMatch), TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("NET " + std::to_string(static_cast<int>(m_State->RoundTripMs + 0.5)),
+            TextMargin, y);
     }
 
     //Draws one glyph per character, left to right.
