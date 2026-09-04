@@ -35,8 +35,26 @@ void MatchClient::Step(double seconds)
         }
 
         case NetEventType::Disconnected:
+        {
+            //A drop BEFORE the welcome is a refusal, and refusal is the only
+            //thing it can be. MatchServer turns away a wrong protocol version
+            //by calling Transport::Disconnect and sending nothing at all, and
+            //a server that is not there produces the same event when ENet's
+            //connect attempt gives up. Neither carries a message, so clearing
+            //m_Connected on its own would leave Rejected() false and the client
+            //sitting apparently idle for ever - the silent failure the loud one
+            //exists to prevent, and the case the header promises Rejected()
+            //reports.
+            //
+            //A drop AFTER the welcome is a session that ended rather than a
+            //handshake that failed, so it clears Connected and leaves Rejected
+            //alone.
+            if (!m_Connected && !m_Rejected)
+                Reject("the server ended the connection before the welcome");
+
             m_Connected = false;
             break;
+        }
 
         case NetEventType::Message:
         {

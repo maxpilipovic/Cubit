@@ -66,8 +66,11 @@ public:
     //True once Welcome has been accepted and the world is loaded.
     bool Connected() const { return m_Connected; }
 
-    //True when the handshake failed: a protocol mismatch, a missing map, or a
-    //map whose bytes differ from the server's. Terminal.
+    //True when the handshake failed: a missing map, a map whose bytes differ
+    //from the server's, a protocol mismatch, or a server that never answered
+    //at all. The last two are indistinguishable from here - both arrive as a
+    //bare Disconnected with no reply attached - so they share one branch.
+    //Terminal.
     bool Rejected() const { return m_Rejected; }
 
     PlayerId LocalPlayer() const { return m_LocalPlayer; }

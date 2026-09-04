@@ -605,3 +605,68 @@ TEST_CASE("A snapshot naming player zero is dropped rather than thrown on")
     //player would be culled as departed on the next snapshot.
     CHECK(client.Match().Players().size() == 1);
 }
+
+TEST_CASE("A client the server drops at the handshake knows it was refused")
+{
+    //MatchServer refuses a wrong protocol version by calling
+    //Transport::Disconnect and sending NOTHING - see the version-mismatch case
+    //in HandleMessage, and MatchServerTests' "A client speaking the wrong
+    //protocol version is disconnected, not tolerated", which asserts the server
+    //half of it. This is the client half, and it was missing: a bare
+    //Disconnected is all the refused end ever sees, so a client that only
+    //cleared m_Connected would sit unwelcomed for ever with Rejected() false
+    //and nothing on screen to say why.
+    //
+    //Driven through the transport rather than through a mismatched
+    //ProtocolVersion because MatchClient always speaks the current one, and
+    //that costs nothing: the ejection MatchServer performs IS one
+    //Transport::Disconnect and no reply, which is exactly what happens here.
+    //An unreachable server reaches the client identically - ENet's connect
+    //attempt gives up and raises the same event with no reply attached.
+    LoopbackNetwork network;
+
+    PeerId peer = InvalidPeer;
+    Transport& clientNet = network.AddClient(peer);
+    MatchClient client(clientNet, GoodLoader());
+
+    //One step to drain the Connected event and put a Hello on the wire, so the
+    //drop lands on a client that is mid-handshake rather than one that has not
+    //started.
+    client.Step(FrameClock::FixedStepSeconds);
+    REQUIRE_FALSE(client.Connected());
+    REQUIRE_FALSE(client.Rejected());
+
+    network.Server().Disconnect(peer);
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(client.Rejected());
+    CHECK_FALSE(client.Connected());
+}
+
+TEST_CASE("A session that ends after the welcome is not a refused handshake")
+{
+    //The other side of the branch above, and the reason it is a branch at all.
+    //Rejected() is documented as a HANDSHAKE failure and is terminal; a server
+    //going away mid-match is a session ending, and reporting that as a refusal
+    //would tell a player their build or their map is wrong when neither is.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& clientNet = network.AddClient(peer);
+    MatchClient client(clientNet, GoodLoader());
+
+    for (int i = 0; i < 10; ++i)
+    {
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+    REQUIRE_FALSE(client.Rejected());
+
+    network.RemoveClient(peer);
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK_FALSE(client.Connected());
+    CHECK_FALSE(client.Rejected());
+}
