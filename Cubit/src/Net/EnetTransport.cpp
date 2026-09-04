@@ -109,8 +109,28 @@ std::unique_ptr<EnetTransport> EnetTransport::Connect(const std::string& host, s
 
 EnetTransport::~EnetTransport()
 {
-    if (m_Host != nullptr)
-        enet_host_destroy(m_Host);
+    if (m_Host == nullptr)
+        return;
+
+    //enet_host_destroy destroys the SOCKET first and only then resets each
+    //peer, so it cannot tell anybody it is going - read in host.c rather than
+    //assumed. Left to itself, a Sandbox that closes its window leaves a player
+    //standing on the server until ENet's own timeout expires, which is five to
+    //thirty seconds of a ghost that other players can see and walk through.
+    //Quit and rejoin inside that window and there are two of you.
+    //
+    //disconnect_now queues an unsequenced DISCONNECT and flushes it inside the
+    //call, so the packet is on the wire before the socket goes. It is the right
+    //one of the two: a graceful enet_peer_disconnect would need the host
+    //serviced for another round trip afterwards, and nothing services a host
+    //that is being destroyed.
+    for (const PeerSlot& slot : m_Peers)
+    {
+        if (slot.Peer != nullptr)
+            enet_peer_disconnect_now(slot.Peer, 0);
+    }
+
+    enet_host_destroy(m_Host);
 }
 
 void EnetTransport::Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel)

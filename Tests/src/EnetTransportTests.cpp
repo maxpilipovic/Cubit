@@ -123,3 +123,63 @@ TEST_CASE("A server and two clients talk over a real socket")
     CHECK(std::find(connected.begin(), connected.end(), firstSender) != connected.end());
     CHECK(std::find(connected.begin(), connected.end(), secondSender) != connected.end());
 }
+
+TEST_CASE("A transport that closes tells the other end instead of leaving a ghost")
+{
+    //enet_host_destroy destroys the socket BEFORE it resets its peers, so on
+    //its own it cannot say goodbye. Without the destructor's disconnect the
+    //server keeps a departed client - and the player standing in the world -
+    //until ENet's own timeout expires, which is five to thirty seconds. Long
+    //enough to quit, come back, and meet yourself.
+    //
+    //This is the second and last test in the suite that touches the OS network
+    //stack, and it earns that the same way the first does: the ghost is
+    //invisible over LoopbackTransport, which has no lifetime of its own to get
+    //wrong.
+    constexpr std::uint16_t Port = 27961;
+
+    std::unique_ptr<EnetTransport> server = EnetTransport::Listen(Port, 4);
+    REQUIRE(server != nullptr);
+
+    std::unique_ptr<EnetTransport> client = EnetTransport::Connect("127.0.0.1", Port);
+    REQUIRE(client != nullptr);
+
+    PeerId joined = InvalidPeer;
+    for (int attempt = 0; attempt < 600 && joined == InvalidPeer; ++attempt)
+    {
+        server->Advance(FrameClock::FixedStepSeconds);
+        client->Advance(FrameClock::FixedStepSeconds);
+
+        NetEvent event;
+        while (server->Poll(event))
+        {
+            if (event.Type == NetEventType::Connected)
+                joined = event.Peer;
+        }
+    }
+
+    REQUIRE(joined != InvalidPeer);
+
+    //The whole point. Not Disconnect() - a client that quits does not get the
+    //chance to be polite, it just stops existing.
+    client.reset();
+
+    //Bounded, and the bound is what makes the assertion mean anything. These
+    //iterations are a tight loop, not a wall clock, so they run through in
+    //milliseconds - far short of the timeout that would eventually notice a
+    //silent departure. Only a goodbye actually sent can arrive inside this.
+    bool departed = false;
+    for (int attempt = 0; attempt < 600 && !departed; ++attempt)
+    {
+        server->Advance(FrameClock::FixedStepSeconds);
+
+        NetEvent event;
+        while (server->Poll(event))
+        {
+            if (event.Type == NetEventType::Disconnected && event.Peer == joined)
+                departed = true;
+        }
+    }
+
+    CHECK(departed);
+}
