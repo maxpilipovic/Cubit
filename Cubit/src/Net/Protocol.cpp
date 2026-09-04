@@ -233,21 +233,22 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
     //Checked against what the buffer can actually hold, before reserving.
     //Trusting the count and reserving on its word is how an 11-byte packet
     //(id + Tick + count, nothing else needed to reach this line) becomes a
-    //1.7 MB allocation - 65535, the largest count a u16 can carry, times
-    //PlayerSnapshotBytes.
+    //65535 x PlayerSnapshotBytes allocation - 65535 being the largest count
+    //a u16 can carry.
     //
     //A resource guard, not a correctness one, and worth keeping straight:
     //ByteReader's sticky Ok() already guarantees the trailing Ok() check
     //below refuses the same packet even without this line, once the loop
     //runs out of real bytes to read. No test's return value tells the two
     //apart, and none can - they agree on every input, because a u16 count
-    //can never demand more than that same 1.7 MB, which any real machine
+    //can never demand more than that same 65535 x PlayerSnapshotBytes (a
+    //couple of megabytes at today's entry size), which any real machine
     //allocates and iterates over instantly either way. What this line
     //changes is making the rejection instant instead of doing the
     //65535-iteration loop and the reserve() for it first. Contrast
     //Decode(WelcomeMessage&) above, where the same-shaped guard is not
     //optional for exactly this reason: its count is a u32, not a u16, and
-    //the worst case is not 1.7 MB.
+    //the worst case is nowhere near that small.
     if (!reader.Ok() || count > reader.Remaining() / PlayerSnapshotBytes)
         return false;
 
