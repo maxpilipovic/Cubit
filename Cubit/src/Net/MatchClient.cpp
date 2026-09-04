@@ -86,13 +86,38 @@ void MatchClient::Step(double seconds)
     if (!m_Connected || !m_HasInput)
         return;
 
-    InputMessage message;
-    message.FirstTick = ++m_InputTick;
-    message.Inputs = { m_Input };
+    //The tick this step is about to produce. Stamped before the step so an
+    //input's tick names the step it caused, which is the number the server
+    //echoes back and the number replay reinserts against.
+    const std::uint64_t tick = m_Match.Tick() + 1;
 
-    //Unreliable: a lost input costs one step of movement, which is a small
-    //stutter and is honest. Resending it would deliver an intent the player
-    //has already replaced.
+    m_Unacked.push_back(PendingInput{ tick, m_Input });
+
+    //A silent server cannot grow this without limit. Dropping the oldest loses
+    //replay history for an input that is never going to be acknowledged
+    //anyway.
+    if (m_Unacked.size() > MaxUnackedInputs)
+        m_Unacked.pop_front();
+
+    //PREDICTION. This player only: this machine has no idea what anybody else
+    //is about to do, and StepPlayer does nothing at all before the first
+    //snapshot has said where this player stands.
+    m_Match.StepPlayer(m_LocalPlayer, m_Input, static_cast<float>(seconds));
+    m_Match.SetTick(tick);
+
+    //The last three, oldest first. The redundancy is the whole defence against
+    //the server stepping a tick with nothing to apply: one lost or late packet
+    //is covered by the next one.
+    const std::size_t count = std::min<std::size_t>(m_Unacked.size(), InputBundleSize);
+    const std::size_t begin = m_Unacked.size() - count;
+
+    InputMessage message;
+    message.FirstTick = m_Unacked[begin].Tick;
+    for (std::size_t i = begin; i < m_Unacked.size(); ++i)
+        message.Inputs.push_back(m_Unacked[i].Input);
+
+    //Unreliable: a resend would deliver an intent the player has already
+    //replaced, and the bundle already covers the loss.
     m_Transport.Send(m_ServerPeer, Encode(message), Channel::Unreliable);
     m_HasInput = false;
 }
@@ -153,7 +178,12 @@ void MatchClient::HandleWelcome(std::span<const std::uint8_t> data)
     }
 
     m_Match.ReplaceWorld(std::move(loaded->Map));
+
+    //Starts this client's own clock here. From this point m_Match.Tick() is
+    //the client's, free-running and advanced once per predicted Step - not
+    //the server's, which HandleSnapshot tracks separately in m_ServerTick.
     m_Match.SetTick(welcome.Tick);
+    m_ServerTick = welcome.Tick;
     m_LastSnapshotTick = welcome.Tick;
 
     //Replay the edits applied since the map loaded. Without this, a client
@@ -181,7 +211,11 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         return;
 
     m_LastSnapshotTick = snapshot.Tick;
-    m_Match.SetTick(snapshot.Tick);
+
+    //The client's own tick is not the server's any more - it free-runs and is
+    //what an input is stamped with. Adopting the server's number here would
+    //rewind it every snapshot and stamp two different inputs with one tick.
+    m_ServerTick = snapshot.Tick;
 
     std::vector<PlayerId> present;
     present.reserve(snapshot.Players.size());

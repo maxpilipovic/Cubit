@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
@@ -20,6 +21,14 @@
 #pragma warning(disable: 4251)
 #endif
 
+//How many unacknowledged inputs a client keeps for replay.
+//
+//Two seconds at 60 Hz, and far more than the ten or so a healthy connection
+//holds (about RTT / 16.7 ms). A client that reaches this has heard nothing from
+//the server for two seconds and has a bigger problem than replay accuracy; the
+//bound exists so a silent server cannot grow this without limit.
+constexpr std::size_t MaxUnackedInputs = 120;
+
 //A map the client found on its own disk, and the hash of the bytes it came
 //from. The hash is checked against the server's before anything is trusted.
 struct LoadedMap
@@ -28,13 +37,12 @@ struct LoadedMap
     std::uint64_t Hash = 0;
 };
 
-//The client half of a match. It NEVER STEPS.
+//The client half of a match. It predicts its own player and nothing else.
 //
-//That is the defining constraint of Stage 2, not an omission. Input goes up,
-//snapshots come down and are written straight in, so the latency is plainly
-//visible instead of hidden behind a guess. It makes Stage 3's diff one
-//sentence: start calling Step, and replay unacknowledged inputs after each
-//snapshot.
+//Through Stage 2 it never stepped at all, deliberately, so the latency was
+//plainly visible rather than hidden behind a guess. This is the stage that
+//hides it: input is stepped immediately, kept until the server acknowledges
+//it, and replayed on top of every correction.
 //
 //It holds a MatchState anyway, for two reasons: it needs a World to render and
 //a roster to draw, and Stage 3 needs somewhere to start stepping.
@@ -84,6 +92,12 @@ public:
 
     double RoundTripTime() const;
 
+    //The newest tick any snapshot has reported. NOT this client's own tick:
+    //since prediction, Match().Tick() is the client's, free-running from the
+    //one Welcome carried and advanced once per predicted step. The server's is
+    //tracked separately because remote-player interpolation is expressed in it.
+    std::uint64_t ServerTick() const { return m_ServerTick; }
+
 private:
     void HandleWelcome(std::span<const std::uint8_t> data);
     void HandleSnapshot(std::span<const std::uint8_t> data);
@@ -106,9 +120,6 @@ private:
     bool m_Connected = false;
     bool m_Rejected = false;
 
-    //INTERIM: a counter widened to a tick's type, not yet a tick. The client
-    //still does not step in this commit, so it has no simulation tick to name.
-    std::uint64_t m_InputTick = 0;
     CharacterInput m_Input;
     bool m_HasInput = false;
 
@@ -117,6 +128,20 @@ private:
     std::uint64_t m_LastSnapshotTick = 0;
 
     std::map<PlayerId, glm::vec2> m_ViewAngles;
+
+    //One input the server has not yet acknowledged, kept so it can be replayed
+    //on top of a correction.
+    struct PendingInput
+    {
+        std::uint64_t Tick = 0;
+        CharacterInput Input;
+    };
+
+    //Oldest first, and consecutive: one input is produced per tick and they are
+    //dropped from the front as they are acknowledged.
+    std::deque<PendingInput> m_Unacked;
+
+    std::uint64_t m_ServerTick = 0;
 };
 
 #ifdef _MSC_VER

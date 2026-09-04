@@ -75,103 +75,68 @@ namespace
     }
 }
 
-TEST_CASE("A client's state is the server's state, delayed by exactly the one-way latency")
+TEST_CASE("A client's view of a remote player is the server's, delayed by the one-way latency")
 {
-    //THE ORACLE FOR THIS STAGE.
-    //
-    //Stage 1's was "MatchState must agree with bare CharacterControllers fed
-    //the same inputs". This is its successor: a client driven only by
-    //snapshots must equal the server's own history, offset by how long a
-    //snapshot takes to arrive.
-    //
-    //It is written as two separate exact assertions rather than one combined
-    //one, because they fail for different reasons. The first catches a wire
-    //that corrupts or reorders state. The second catches a wire that delivers
-    //the right state at the wrong time.
+    //STAGE 2'S ORACLE, NARROWED TO WHAT IS STILL TRUE. It used to cover every
+    //player, including this client's own. Prediction makes the local player
+    //deliberately ahead of the server, so asserting it here would be asserting
+    //the stage had not happened. Remote players are still written straight from
+    //snapshots and must still match the server exactly, offset by flight time.
     LoopbackNetwork network;
 
     NetworkSim sim;
     sim.Latency = OneWayLatency;
-
     SimulatedTransport serverNet(network.Server(), sim);
 
-    PeerId peer = InvalidPeer;
-    SimulatedTransport clientNet(network.AddClient(peer), sim);
+    PeerId firstPeer = InvalidPeer;
+    PeerId secondPeer = InvalidPeer;
+    SimulatedTransport firstNet(network.AddClient(firstPeer), sim);
+    SimulatedTransport secondNet(network.AddClient(secondPeer), sim);
 
     MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
-    MatchClient client(clientNet, GoodLoader());
+    MatchClient walker(firstNet, GoodLoader());
+    MatchClient watcher(secondNet, GoodLoader());
 
-    //Tick -> the server's own record of where everybody was at that tick.
-    std::map<std::uint64_t, std::vector<std::pair<PlayerId, glm::vec3>>> history;
-
+    //Server tick -> where the walker stood at the end of it.
+    std::map<std::uint64_t, glm::vec3> history;
     std::vector<std::uint64_t> observedSkew;
 
     for (int i = 0; i < 400; ++i)
     {
-        //ORDER MATTERS AND IS PART OF THE ASSERTION. The client sends and
-        //applies first, then the server receives and steps. If the skew below
-        //leaves its bounds, do NOT simply widen them - confirm this loop order
-        //first, because an unexpected offset means a packet is being serviced
-        //in the wrong phase, which is a real bug.
-        client.SetInput(Walking(90.0f));
-        client.Step(FrameClock::FixedStepSeconds);
+        //ORDER MATTERS AND IS PART OF THE ASSERTION. The clients send and
+        //apply first, then the server receives and steps. If the skew below
+        //leaves its bound, do NOT widen it - confirm this loop order first,
+        //because an unexpected offset means a packet is being serviced in the
+        //wrong phase.
+        walker.SetInput(Walking(90.0f));
+        watcher.SetInput(CharacterInput{});
+        walker.Step(FrameClock::FixedStepSeconds);
+        watcher.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
 
-        std::vector<std::pair<PlayerId, glm::vec3>> row;
-        for (const auto& [player, character] : server.Match().Players())
-            row.emplace_back(player, character.Position());
-        history[server.Match().Tick()] = row;
+        if (server.Match().HasPlayer(walker.LocalPlayer()))
+            history[server.Match().Tick()] = server.Match().Player(walker.LocalPlayer()).Position();
 
-        if (!client.Connected())
+        if (!watcher.Connected() || !watcher.Match().HasPlayer(walker.LocalPlayer()))
             continue;
 
-        //ASSERTION ONE: whatever tick the client believes it is at, its state
-        //must be the server's state at that exact tick. Exact equality, not
-        //Approx: these are the same floats, round-tripped through the codec,
-        //not two independent computations that might drift.
-        const auto recorded = history.find(client.Match().Tick());
+        //ASSERTION ONE: at whatever server tick the watcher last heard about,
+        //its picture of the walker must be the server's picture at that exact
+        //tick. Exact equality, not Approx: these are the same floats
+        //round-tripped through the codec, not two computations of one number.
+        const auto recorded = history.find(watcher.ServerTick());
         if (recorded != history.end())
-        {
-            std::vector<std::pair<PlayerId, glm::vec3>> mine;
-            for (const auto& [player, character] : client.Match().Players())
-                mine.emplace_back(player, character.Position());
+            CHECK(watcher.Match().Player(walker.LocalPlayer()).Position() == recorded->second);
 
-            CHECK(mine == recorded->second);
-        }
-
-        //Sampled after warm-up, once the pipeline is full.
         if (i > 60)
-            observedSkew.push_back(server.Match().Tick() - client.Match().Tick());
+            observedSkew.push_back(server.Match().Tick() - watcher.ServerTick());
     }
 
     REQUIRE_FALSE(observedSkew.empty());
 
-    //ASSERTION TWO: the delay is a single EXACT value, the one-way latency
-    //plus one tick:
-    //
-    //  +1 always, and it is where the measurement is taken rather than
-    //  latency. A snapshot describing tick T is queued at the END of the
-    //  server's step, comes due LatencyTicks later, and is picked up by the
-    //  client's next Step - which in this loop runs BEFORE the server steps
-    //  again. So when the skew is read, the server has advanced once beyond
-    //  the snapshot the client is holding.
-    //
-    //  Measuring this used to also find a second value, 5, in a stable
-    //  280:59 split against the 4 above. That was the SimulatedTransport
-    //  accumulation defect - `m_Now += seconds` and a once-computed
-    //  `m_Now + Latency` disagreeing by about one ULP for a latency that is
-    //  an exact tick multiple - fixed by "Deliver a whole-tick latency on a
-    //  whole tick", after which this skew collapsed to the single value 4.
-    //
-    //The property worth protecting is not a magic constant but that the lag
-    //is bounded and does not GROW: a client falling steadily behind - a
-    //queue building up, a snapshot backlog - is what this catches, and it
-    //would blow the bound within a few ticks.
-    //
-    //Your own keypress takes about twice this to show up, because the input
-    //must go up before the snapshot reflecting it can come down. That second
-    //number is what the stage makes you feel, and it is deliberately not
-    //hidden.
+    //ASSERTION TWO: the delay is BOUNDED. See the note where MinSkew and
+    //MaxSkew are defined for where the constant comes from and why it is not
+    //simply the latency.
     for (const std::uint64_t skew : observedSkew)
     {
         CHECK(skew >= MinSkew);
@@ -179,60 +144,69 @@ TEST_CASE("A client's state is the server's state, delayed by exactly the one-wa
     }
 }
 
-TEST_CASE("The client never steps the simulation itself")
+TEST_CASE("The client steps its own player and nobody else's")
 {
-    //The defining constraint of Stage 2. If this fails, prediction has grown
-    //by accident, the latency is being hidden, and Stage 3 will begin from a
-    //half-built reconciliation loop instead of a clean one.
+    //The replacement for Stage 2's "the client never steps the simulation
+    //itself", which this stage deliberately makes false. It is replaced rather
+    //than deleted so the record survives that the old constraint was a choice:
+    //the client now steps, and what must still be true is that it steps only
+    //itself. A client that predicted a remote would simulate them under gravity
+    //between snapshots and then stamp over the result, which is exactly the
+    //stepping artifact 60 Hz snapshots were chosen to avoid.
     LoopbackNetwork network;
 
     NetworkSim sim;
     sim.Latency = OneWayLatency;
     SimulatedTransport serverNet(network.Server(), sim);
 
-    PeerId peer = InvalidPeer;
-    SimulatedTransport clientNet(network.AddClient(peer), sim);
+    PeerId firstPeer = InvalidPeer;
+    PeerId secondPeer = InvalidPeer;
+    SimulatedTransport firstNet(network.AddClient(firstPeer), sim);
+    SimulatedTransport secondNet(network.AddClient(secondPeer), sim);
 
     MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
-    MatchClient client(clientNet, GoodLoader());
+    MatchClient first(firstNet, GoodLoader());
+    MatchClient second(secondNet, GoodLoader());
 
     for (int i = 0; i < 200; ++i)
     {
-        client.SetInput(Walking(90.0f));
-        client.Step(FrameClock::FixedStepSeconds);
+        first.SetInput(Walking(90.0f));
+        second.SetInput(CharacterInput{});
+        first.Step(FrameClock::FixedStepSeconds);
+        second.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
     }
-    REQUIRE(client.Connected());
 
-    //Comparing the two ticks CANNOT prove this, which is worth stating because
-    //it is what this test originally did. HandleSnapshot calls SetTick on every
-    //snapshot, so a client that also stepped would have its tick dragged back
-    //to the server's number on the very next packet - and since the client runs
-    //several ticks BEHIND, one local increment per tick never overtakes it. The
-    //assertion would hold whether or not the client stepped. It is the same
-    //near-tautology the Stage 1 determinism test was, found the same way: by
-    //making the mutation and watching the test stay green.
-    //
-    //What does prove it: stop the server, let everything in flight drain, and
-    //then keep driving the client with walking input. With nothing arriving,
-    //a client that does not step cannot move. A client that steps walks away.
+    REQUIRE(first.Connected());
+    REQUIRE(second.Connected());
+    REQUIRE(first.Match().HasPlayer(second.LocalPlayer()));
+
+    //Stop the server and let everything in flight drain, so nothing arrives
+    //from now on and the only motion left is what this client produces itself.
     for (int i = 0; i < 30; ++i)
     {
-        client.SetInput(Walking(90.0f));
-        client.Step(FrameClock::FixedStepSeconds);
+        first.SetInput(Walking(90.0f));
+        first.Step(FrameClock::FixedStepSeconds);
     }
 
-    const glm::vec3 frozen = client.Match().Player(client.LocalPlayer()).Position();
-    const std::uint64_t frozenTick = client.Match().Tick();
+    const glm::vec3 mineBefore = first.Match().Player(first.LocalPlayer()).Position();
+    const glm::vec3 theirsBefore = first.Match().Player(second.LocalPlayer()).Position();
 
     for (int i = 0; i < 120; ++i)
     {
-        client.SetInput(Walking(90.0f));
-        client.Step(FrameClock::FixedStepSeconds);
+        first.SetInput(Walking(90.0f));
+        first.Step(FrameClock::FixedStepSeconds);
 
-        CHECK(client.Match().Player(client.LocalPlayer()).Position() == frozen);
-        CHECK(client.Match().Tick() == frozenTick);
+        //Not one millimetre. A remote is never predicted and never
+        //extrapolated: with nothing arriving, there is nothing to say about
+        //where they are, and guessing is a wrong answer that has to be taken
+        //back.
+        CHECK(first.Match().Player(second.LocalPlayer()).Position() == theirsBefore);
     }
+
+    //And the local player kept walking with no server at all. This is the half
+    //of the assertion that fails on Stage 2's code.
+    CHECK(first.Match().Player(first.LocalPlayer()).Position() != mineBefore);
 }
 
 TEST_CASE("Two clients see each other move")
@@ -491,7 +465,16 @@ TEST_CASE("The wire survives 5% loss and 150 ms RTT with jitter")
     MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
     MatchClient client(clientNet, GoodLoader());
 
-    for (int i = 0; i < 300; ++i)
+    //200 ticks, not 300: this test predates prediction, when 5% loss quietly
+    //cost a fraction of the walk and happened to leave the character short of
+    //FlatWorld's far edge (32 blocks from a spawn at z=8) by the time it went
+    //idle. Bundled resends (this task) recover most of that lost input, so the
+    //same 300 ticks now walk far enough to leave the 32x32 floor entirely and
+    //free-fall - reproducibly, even against unmodified Stage 2 code with loss
+    //set to 0, so this was never a property of prediction. 200 ticks keeps the
+    //walk (and the loss/jitter it is meant to exercise) comfortably clear of
+    //the edge in every case.
+    for (int i = 0; i < 200; ++i)
     {
         client.SetInput(Walking(90.0f));
         client.Step(FrameClock::FixedStepSeconds);
@@ -530,7 +513,12 @@ TEST_CASE("A stale snapshot never overwrites a newer one")
     }
     REQUIRE(client.Connected());
 
-    const std::uint64_t reached = client.Match().Tick();
+    //ServerTick(), not Match().Tick(): this test never calls SetInput, so
+    //under prediction the client's own tick never leaves the value Welcome
+    //set it to - it only advances inside the predicted-step path, which is
+    //gated on having an input to step with. The staleness this test is
+    //pinning belongs to the snapshot pipeline, which ServerTick() tracks.
+    const std::uint64_t reached = client.ServerTick();
 
     //Hand-deliver a snapshot from the past, straight into the client's inbox.
     SnapshotMessage old;
@@ -543,7 +531,7 @@ TEST_CASE("A stale snapshot never overwrites a newer one")
     network.Server().Send(peer, Encode(old), Channel::Unreliable);
     client.Step(FrameClock::FixedStepSeconds);
 
-    CHECK(client.Match().Tick() >= reached);
+    CHECK(client.ServerTick() >= reached);
     CHECK(client.Match().Player(client.LocalPlayer()).Position()
         != glm::vec3(999.0f, 999.0f, 999.0f));
 }
@@ -570,7 +558,12 @@ TEST_CASE("A snapshot naming player zero is dropped rather than thrown on")
     REQUIRE(client.Connected());
 
     const PlayerId localPlayer = client.LocalPlayer();
-    const std::uint64_t reached = client.Match().Tick();
+
+    //ServerTick(), not Match().Tick(): this test never calls SetInput, so the
+    //client's own predicted tick never leaves Welcome's starting value. "New
+    //enough to be applied" is judged against the snapshot pipeline's own
+    //notion of freshness, which is ServerTick().
+    const std::uint64_t reached = client.ServerTick();
 
     //One valid entry and one naming nobody, in a snapshot new enough to be
     //applied. The valid half must land; the bogus half must not be minted and
