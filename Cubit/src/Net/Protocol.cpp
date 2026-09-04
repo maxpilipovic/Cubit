@@ -9,6 +9,7 @@ namespace
     //huge collection from becoming a denial of service.
     constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1;
     constexpr std::size_t BlockEditBytes = 12 + 2;
+    constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
 
     void WriteEdit(ByteWriter& writer, const BlockEdit& edit)
     {
@@ -60,12 +61,18 @@ std::vector<std::uint8_t> Encode(const InputMessage& message)
 {
     ByteWriter writer;
     writer.U8(static_cast<std::uint8_t>(MessageId::Input));
-    writer.U32(message.Sequence);
-    writer.F32(message.Input.Move.x);
-    writer.F32(message.Input.Move.y);
-    writer.F32(message.Input.Yaw);
-    writer.F32(message.Input.Pitch);
-    writer.Bool(message.Input.Jump);
+    writer.U8(static_cast<std::uint8_t>(message.Inputs.size()));
+    writer.U64(message.FirstTick);
+
+    for (const CharacterInput& input : message.Inputs)
+    {
+        writer.F32(input.Move.x);
+        writer.F32(input.Move.y);
+        writer.F32(input.Yaw);
+        writer.F32(input.Pitch);
+        writer.Bool(input.Jump);
+    }
+
     return writer.Bytes();
 }
 
@@ -178,17 +185,36 @@ bool Decode(std::span<const std::uint8_t> bytes, InputMessage& out)
         return false;
 
     InputMessage message;
-    message.Sequence = reader.U32();
-    message.Input.Move.x = reader.F32();
-    message.Input.Move.y = reader.F32();
-    message.Input.Yaw = reader.F32();
-    message.Input.Pitch = reader.F32();
-    message.Input.Jump = reader.Bool();
+    const std::uint8_t count = reader.U8();
+    message.FirstTick = reader.U64();
+
+    //A resource guard, not a correctness one, and the same class as the
+    //snapshot's: a u8 count tops out at 255 entries, so the trailing Ok() check
+    //below refuses an over-claiming packet on its own once the loop runs out of
+    //real bytes. What this line changes is refusing instantly rather than
+    //reserving for 255 first. Decode(WelcomeMessage&) above is the one where
+    //the same-shaped guard is NOT optional - its count is a u32, and deleting
+    //it does not make Decode wrong, it makes Decode not return. Read that note
+    //before touching any of the three.
+    if (!reader.Ok() || count > reader.Remaining() / CharacterInputBytes)
+        return false;
+
+    message.Inputs.reserve(count);
+    for (std::uint8_t i = 0; i < count; ++i)
+    {
+        CharacterInput input;
+        input.Move.x = reader.F32();
+        input.Move.y = reader.F32();
+        input.Yaw = reader.F32();
+        input.Pitch = reader.F32();
+        input.Jump = reader.Bool();
+        message.Inputs.push_back(input);
+    }
 
     if (!reader.Ok())
         return false;
 
-    out = message;
+    out = std::move(message);
     return true;
 }
 

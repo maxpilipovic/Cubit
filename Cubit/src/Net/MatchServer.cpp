@@ -142,15 +142,23 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         if (!Decode(data, input) || client->Player == InvalidPlayer)
             return;
 
-        //Strictly greater, so a duplicate is dropped alongside a stale one.
-        if (input.Sequence <= client->LastSequence)
+        if (input.Inputs.empty())
             return;
 
-        client->LastSequence = input.Sequence;
+        //INTERIM, replaced in the task that adds the input queue: only the
+        //newest input in the bundle is taken, which is exactly Stage 2's
+        //behaviour with a wider counter. Taking the newest is the wrong answer
+        //once replay exists - it discards intent the client has already
+        //predicted on - and the queue is what fixes it.
+        const std::uint64_t newest = input.FirstTick + input.Inputs.size() - 1;
+        if (newest <= client->LastInputTick)
+            return;
+
+        client->LastInputTick = newest;
         client->HasInput = true;
-        client->Input = input.Input;
-        client->Yaw = input.Input.Yaw;
-        client->Pitch = input.Input.Pitch;
+        client->Input = input.Inputs.back();
+        client->Yaw = client->Input.Yaw;
+        client->Pitch = client->Input.Pitch;
         return;
     }
 

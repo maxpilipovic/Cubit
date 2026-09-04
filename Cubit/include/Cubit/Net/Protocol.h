@@ -35,7 +35,20 @@ enum class MessageId : std::uint8_t
 //a logged reason: two builds of a hand-rolled wire format disagreeing about
 //field widths produce garbage positions, which read as a physics bug and cost
 //a day.
-constexpr std::uint32_t ProtocolVersion = 1;
+//
+//2: inputs became a bundle carrying a real client tick, and PlayerSnapshot
+//gained the ack that makes replay possible. Both are on the per-tick path,
+//which is exactly the case this counter exists for.
+constexpr std::uint32_t ProtocolVersion = 2;
+
+//How many inputs one InputMessage carries at most.
+//
+//The redundancy is the entire defence against a starved server step: the
+//server advances at a fixed rate whether or not an input arrived, so a late
+//input means it steps once without one and its state stops being a prefix of
+//what the client predicted. Sending the last three means a single lost or late
+//packet is covered by the next one, at a cost of 34 bytes per message.
+constexpr std::uint8_t InputBundleSize = 3;
 
 struct HelloMessage
 {
@@ -61,14 +74,18 @@ struct WelcomeMessage
 
 struct InputMessage
 {
-    //A counter, not a tick. In Stage 2 the client never steps, so it has no
-    //simulation tick to name; the server uses this only to drop stale and
-    //duplicate packets on an unordered channel. Stage 3 is where an input
-    //acquires a real tick, because that is when replay needs to know where to
-    //reinsert it.
-    std::uint32_t Sequence = 0;
+    //The tick of the OLDEST input in the bundle, in the CLIENT's own
+    //numbering. The client produces exactly one input per tick, so a bundle's
+    //ticks are consecutive and only the first needs sending.
+    //
+    //A real tick now, not Stage 2's counter: replay has to know where to
+    //reinsert an input, and this is the number the server echoes back in
+    //PlayerSnapshot::LastInputTick.
+    std::uint64_t FirstTick = 0;
 
-    CharacterInput Input;
+    //Oldest first. Never longer than InputBundleSize when this client sent it,
+    //but a decoder must not assume that of a packet off a socket.
+    std::vector<CharacterInput> Inputs;
 };
 
 struct PlayerSnapshot

@@ -66,23 +66,82 @@ TEST_CASE("Welcome round-trips, edit log and all")
     CHECK(received.Edits[1].Block == BlockId{ 9 });
 }
 
-TEST_CASE("Input round-trips a sequence and the character's intent")
+TEST_CASE("Input round-trips a bundle and the tick it starts at")
 {
     InputMessage sent;
-    sent.Sequence = 123456;
-    sent.Input.Move = glm::vec2(-1.0f, 1.0f);
-    sent.Input.Yaw = -135.0f;
-    sent.Input.Pitch = 30.0f;
-    sent.Input.Jump = true;
+    sent.FirstTick = 4294967300ull;   //Past a u32, so a narrowed field shows up.
+
+    for (int i = 0; i < InputBundleSize; ++i)
+    {
+        CharacterInput input;
+        input.Move = glm::vec2(0.25f * i, -1.0f);
+        input.Yaw = 90.0f + i;
+        input.Pitch = -12.5f - i;
+        input.Jump = (i % 2) == 0;
+        sent.Inputs.push_back(input);
+    }
 
     InputMessage received;
     REQUIRE(Decode(Encode(sent), received));
 
-    CHECK(received.Sequence == 123456);
-    CHECK(received.Input.Move == glm::vec2(-1.0f, 1.0f));
-    CHECK(received.Input.Yaw == doctest::Approx(-135.0f));
-    CHECK(received.Input.Pitch == doctest::Approx(30.0f));
-    CHECK(received.Input.Jump);
+    CHECK(received.FirstTick == 4294967300ull);
+    REQUIRE(received.Inputs.size() == static_cast<std::size_t>(InputBundleSize));
+
+    for (int i = 0; i < InputBundleSize; ++i)
+    {
+        CHECK(received.Inputs[i].Move == sent.Inputs[i].Move);
+        CHECK(received.Inputs[i].Yaw == sent.Inputs[i].Yaw);
+        CHECK(received.Inputs[i].Pitch == sent.Inputs[i].Pitch);
+        CHECK(received.Inputs[i].Jump == sent.Inputs[i].Jump);
+    }
+}
+
+TEST_CASE("A three-input bundle is 61 bytes")
+{
+    //Pinned because it is the number the stage's upstream cost is quoted from:
+    //1 id + 1 count + 8 tick + 3 x 17 = 61 bytes, 3,660 B/s per client at
+    //60 Hz. A field silently widening is a bandwidth regression nobody would
+    //otherwise notice until a real network was involved.
+    InputMessage message;
+    message.FirstTick = 1;
+    message.Inputs.assign(InputBundleSize, CharacterInput{});
+
+    CHECK(Encode(message).size() == 61);
+}
+
+TEST_CASE("An input declaring more entries than it carries is refused")
+{
+    //The same shape of guard as the snapshot's, and the same class: a u8 count
+    //cannot demand more than 255 entries, so the trailing Ok() check would
+    //refuse this packet anyway - this makes the refusal instant. Read the note
+    //in Decode(WelcomeMessage&) before touching any of the three; that one is
+    //the guard that is not optional.
+    InputMessage message;
+    message.FirstTick = 7;
+    message.Inputs.assign(3, CharacterInput{});
+
+    std::vector<std::uint8_t> bytes = Encode(message);
+
+    //Claim 200 inputs in a packet carrying three.
+    bytes[1] = 200;
+
+    InputMessage received;
+    CHECK_FALSE(Decode(bytes, received));
+}
+
+TEST_CASE("An empty bundle is legal to decode and carries nothing")
+{
+    //Not something the client sends, but a decoder that threw or half-filled
+    //on it would be a crash reachable from one hostile byte.
+    InputMessage message;
+    message.FirstTick = 99;
+
+    InputMessage received;
+    received.Inputs.assign(2, CharacterInput{});
+
+    REQUIRE(Decode(Encode(message), received));
+    CHECK(received.FirstTick == 99);
+    CHECK(received.Inputs.empty());
 }
 
 TEST_CASE("Snapshot round-trips every player")
@@ -162,7 +221,8 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
         messages.push_back(Encode(welcome));
 
         InputMessage input;
-        input.Sequence = 9;
+        input.FirstTick = 9;
+        input.Inputs.assign(InputBundleSize, CharacterInput{});
         messages.push_back(Encode(input));
 
         messages.push_back(Encode(TwoPlayerSnapshot()));

@@ -260,12 +260,14 @@ TEST_CASE("Input moves the player it came from")
 
     const glm::vec3 before = server.Match().Player(player).Position();
 
-    for (std::uint32_t i = 1; i <= 30; ++i)
+    for (std::uint64_t i = 1; i <= 30; ++i)
     {
         InputMessage input;
-        input.Sequence = i;
-        input.Input.Move = glm::vec2(0.0f, 1.0f);
-        input.Input.Yaw = 0.0f;
+        input.FirstTick = i;
+        CharacterInput held;
+        held.Move = glm::vec2(0.0f, 1.0f);
+        held.Yaw = 0.0f;
+        input.Inputs = { held };
         client.Send(LoopbackNetwork::ServerPeer, Encode(input), Channel::Unreliable);
         server.Step(FrameClock::FixedStepSeconds);
     }
@@ -287,18 +289,22 @@ TEST_CASE("A stale or duplicated input is ignored")
     REQUIRE(player != InvalidPlayer);
 
     InputMessage newer;
-    newer.Sequence = 10;
-    newer.Input.Move = glm::vec2(0.0f, 1.0f);
+    newer.FirstTick = 10;
+    CharacterInput newerInput;
+    newerInput.Move = glm::vec2(0.0f, 1.0f);
+    newer.Inputs = { newerInput };
     client.Send(LoopbackNetwork::ServerPeer, Encode(newer), Channel::Unreliable);
     server.Step(FrameClock::FixedStepSeconds);
 
     const glm::vec3 afterNewer = server.Match().Player(player).Position();
 
-    //Sequence 9 arrives late. It must be dropped, so this step applies no
+    //Tick 9 arrives late. It must be dropped, so this step applies no
     //input at all and the player stands still.
     InputMessage stale;
-    stale.Sequence = 9;
-    stale.Input.Move = glm::vec2(0.0f, -1.0f);
+    stale.FirstTick = 9;
+    CharacterInput staleInput;
+    staleInput.Move = glm::vec2(0.0f, -1.0f);
+    stale.Inputs = { staleInput };
     client.Send(LoopbackNetwork::ServerPeer, Encode(stale), Channel::Unreliable);
     server.Step(FrameClock::FixedStepSeconds);
 

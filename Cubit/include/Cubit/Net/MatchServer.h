@@ -54,9 +54,10 @@ private:
         PeerId Peer = InvalidPeer;
         PlayerId Player = InvalidPlayer;
 
-        //Highest sequence applied. The unreliable channel is unordered, so
-        //anything not strictly greater is stale or duplicated and is dropped.
-        std::uint32_t LastSequence = 0;
+        //Newest input tick this client has had applied. The unreliable channel
+        //is unordered and bundles are redundant, so anything not strictly
+        //greater is stale or a duplicate and is dropped.
+        std::uint64_t LastInputTick = 0;
 
         //This tick's input, if one arrived. Deliberately not carried over from
         //the previous tick: a lost input should cost one step of movement and

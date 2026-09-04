@@ -87,8 +87,8 @@ void MatchClient::Step(double seconds)
         return;
 
     InputMessage message;
-    message.Sequence = ++m_Sequence;
-    message.Input = m_Input;
+    message.FirstTick = ++m_InputTick;
+    message.Inputs = { m_Input };
 
     //Unreliable: a lost input costs one step of movement, which is a small
     //stutter and is honest. Resending it would deliver an intent the player

@@ -106,10 +106,9 @@ private:
     bool m_Connected = false;
     bool m_Rejected = false;
 
-    //Monotonic, and NOT a tick. In this stage the client never steps, so it has
-    //no simulation tick to name; the server uses this only to drop stale and
-    //duplicated packets on an unordered channel.
-    std::uint32_t m_Sequence = 0;
+    //INTERIM: a counter widened to a tick's type, not yet a tick. The client
+    //still does not step in this commit, so it has no simulation tick to name.
+    std::uint64_t m_InputTick = 0;
     CharacterInput m_Input;
     bool m_HasInput = false;
 
