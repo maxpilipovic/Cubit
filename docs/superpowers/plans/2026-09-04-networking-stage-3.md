@@ -241,11 +241,12 @@ void SimulatedTransport::Advance(double seconds)
     //packets arriving one tick late, and as a delivery skew that varied between
     //two values where a constant was predicted.
     //
-    //A nanosecond is six orders of magnitude below the smallest latency this
-    //models and eight above the error it absorbs, so it can neither hide a real
-    //delay nor fail to cover an accumulated one. It does not make the model
-    //approximate - the model is exact, and this is what stops the arithmetic
-    //disagreeing with it.
+    //A nanosecond is about eight orders of magnitude below the smallest
+    //latency this models (OneWayLatency, 3 ticks = 0.05s) and comfortably
+    //above the double-precision rounding error these additions accumulate,
+    //so it can neither hide a real delay nor fail to cover an accumulated
+    //one. It does not make the model approximate - the model is exact, and
+    //this is what stops the arithmetic disagreeing with it.
     constexpr double DueEpsilon = 1e-9;
 
     //Everything now due, in a total order: by time, then by send order. The
