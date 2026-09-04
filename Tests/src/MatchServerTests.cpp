@@ -540,12 +540,19 @@ namespace
     }
 }
 
-TEST_CASE("A bundle's inputs are applied one per tick, oldest first")
+TEST_CASE("A bundle's inputs are applied one per tick, however many arrive")
 {
     //One tick, one input - the contract that makes reconciliation converge at
     //all. If the server applied a whole bundle on one tick, or dropped all but
     //the newest, its state would stop being a prefix of what the client
     //predicted and the difference would never go away.
+    //
+    //This test cannot tell oldest-first from newest-first apart - every tick
+    //in a Bundle() carries the same walking input, so which of the three is
+    //consumed on which step is invisible to position. The order claim belongs
+    //to "A snapshot acknowledges the oldest input of the bundle first" and to
+    //the reordered-bundle test below, both of which assert the ack sequence
+    //directly.
     LoopbackNetwork network;
     MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
 
@@ -665,6 +672,39 @@ TEST_CASE("A snapshot acknowledges the oldest input of the bundle first")
     client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
 
     for (std::uint64_t expected = 1; expected <= 3; ++expected)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(client);
+        REQUIRE(snapshot.has_value());
+        REQUIRE(snapshot->Players.size() == 1);
+        CHECK(snapshot->Players[0].LastInputTick == expected);
+    }
+}
+
+TEST_CASE("A bundle carrying older ticks than are already queued is still applied oldest first")
+{
+    //Every other test in this file sends bundles whose ticks are already
+    //ascending relative to what is queued - the ingest sort is a no-op for
+    //all of them, so deleting it would leave the rest of the suite green.
+    //Sending the higher ticks first and the lower ones after is what actually
+    //forces a re-sort: the unreliable channel this models can and does
+    //deliver a later-sent bundle whose ticks are older than ones the queue
+    //already holds, and the front still has to end up the oldest.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    //Ticks 5,6,7 arrive first; ticks 2,3,4 arrive second, entirely before the
+    //server ever steps. A queue that trusted arrival order would apply 5
+    //first; the front has to be 2.
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(5, 3)), Channel::Unreliable);
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(2, 3)), Channel::Unreliable);
+
+    for (std::uint64_t expected = 2; expected <= 7; ++expected)
     {
         server.Step(FrameClock::FixedStepSeconds);
 
