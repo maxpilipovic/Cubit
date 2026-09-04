@@ -68,6 +68,25 @@ public:
     //MatchState.cpp for why that is not an error.
     void Step(std::span<const PlayerCommand> commands, float seconds);
 
+    //Advances exactly one player by one fixed step. Leaves the tick and every
+    //other player alone.
+    //
+    //The server uses Step; a client uses this. A client predicts only itself,
+    //because it has no idea what anybody else is about to do - and a client
+    //that stepped a remote under gravity between snapshots, then stamped over
+    //it when one arrived, would produce exactly the stutter that choosing 60 Hz
+    //snapshots was meant to avoid.
+    //
+    //Does nothing when the player is absent, for the same reason Step ignores a
+    //command naming somebody who has left: a client predicts from the moment it
+    //is connected, which is before the first snapshot has told it where it
+    //stands.
+    //
+    //The tick is deliberately not touched. On a client it is that client's own
+    //clock and is advanced once per predicted step by the caller, so an input's
+    //tick cannot depend on how many players happened to be stepped.
+    void StepPlayer(PlayerId player, const CharacterInput& input, float seconds);
+
     //How many steps this match has taken. The authoritative clock a server
     //and a client agree on; it lives here rather than on FrameClock because
     //it is simulation state, not wall-clock state.

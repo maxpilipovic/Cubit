@@ -1,10 +1,12 @@
 #include <doctest.h>
 
+#include "Cubit/FrameClock.h"
 #include "Cubit/Voxel/MatchState.h"
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
 
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -408,4 +410,114 @@ TEST_CASE("The tick can be set, so a client can align to a server")
     match.SetTick(1234);
 
     CHECK(match.Tick() == 1234);
+}
+
+TEST_CASE("Stepping one player leaves everyone else exactly where they were")
+{
+    //The constraint that makes client-side prediction possible at all: this
+    //machine may simulate itself, and must not simulate anybody else, because
+    //it has no idea what they are about to do.
+    MatchState match(FlatWorld());
+
+    const PlayerId mine = match.AddPlayer(glm::vec3(4.0f, 10.0f, 4.0f));
+    const PlayerId theirs = match.AddPlayer(glm::vec3(8.0f, 10.0f, 8.0f));
+
+    const glm::vec3 theirsBefore = match.Player(theirs).Position();
+    const glm::vec3 theirsPreviousBefore = match.Player(theirs).PreviousPosition();
+
+    CharacterInput walking;
+    walking.Move = glm::vec2(0.0f, 1.0f);
+    walking.Yaw = 90.0f;
+
+    for (int i = 0; i < 30; ++i)
+        match.StepPlayer(mine, walking, FrameClock::FixedStepSeconds);
+
+    CHECK(match.Player(mine).Position() != glm::vec3(4.0f, 10.0f, 4.0f));
+
+    //Not "approximately still there". A remote player left alone for thirty
+    //steps must not have fallen a millimetre, or prediction is quietly
+    //simulating everybody.
+    CHECK(match.Player(theirs).Position() == theirsBefore);
+    CHECK(match.Player(theirs).PreviousPosition() == theirsPreviousBefore);
+}
+
+TEST_CASE("Stepping one player does not advance the tick")
+{
+    //The tick belongs to the match, and on a client it is the client's own
+    //clock, advanced deliberately once per predicted step. If StepPlayer moved
+    //it, an input's tick would depend on how many players happened to be
+    //stepped, and the server's ack would name the wrong input.
+    MatchState match(FlatWorld());
+    const PlayerId player = match.AddPlayer(glm::vec3(4.0f, 10.0f, 4.0f));
+
+    for (int i = 0; i < 10; ++i)
+        match.StepPlayer(player, CharacterInput{}, FrameClock::FixedStepSeconds);
+
+    CHECK(match.Tick() == 0);
+}
+
+TEST_CASE("Stepping a player who is not there does nothing")
+{
+    //A client predicts from the moment it is connected, which is before its
+    //first snapshot has told it where it stands - so StepPlayer is called with
+    //an id the match does not hold yet. Same treatment as a command naming an
+    //absent player: routine, not an error.
+    MatchState match(FlatWorld());
+
+    match.StepPlayer(PlayerId{ 42 }, CharacterInput{}, FrameClock::FixedStepSeconds);
+
+    CHECK(match.Players().empty());
+    CHECK(match.Tick() == 0);
+}
+
+TEST_CASE("Stepping every player one at a time is stepping the whole match")
+{
+    //THE ORACLE FOR THIS TASK, and the property everything downstream rests on:
+    //the client and the server must be running the same simulation. A client
+    //that predicted through a subtly different code path would diverge from the
+    //server every tick, and reconciliation would spend its life fighting the
+    //difference.
+    //
+    //Same shape as "Stepping a match matches stepping the character directly"
+    //above: a second, independent way of computing the same thing.
+    MatchState viaStep(FlatWorld());
+    MatchState viaStepPlayer(FlatWorld());
+
+    const PlayerId first = viaStep.AddPlayer(glm::vec3(4.0f, 10.0f, 4.0f));
+    const PlayerId second = viaStep.AddPlayer(glm::vec3(8.0f, 12.0f, 8.0f));
+    viaStepPlayer.AddPlayer(first, glm::vec3(4.0f, 10.0f, 4.0f));
+    viaStepPlayer.AddPlayer(second, glm::vec3(8.0f, 12.0f, 8.0f));
+
+    for (int i = 0; i < 120; ++i)
+    {
+        //Varied on purpose: a constant input would let a controller that
+        //ignored the input entirely still agree.
+        CharacterInput firstInput;
+        firstInput.Move = glm::vec2(std::sin(i * 0.1f), std::cos(i * 0.1f));
+        firstInput.Yaw = static_cast<float>(i);
+        firstInput.Jump = (i % 17) == 0;
+
+        CharacterInput secondInput;
+        secondInput.Move = glm::vec2(0.0f, 1.0f);
+        secondInput.Yaw = -static_cast<float>(i) * 2.0f;
+
+        const PlayerCommand commands[] = { { first, firstInput }, { second, secondInput } };
+        viaStep.Step(commands, FrameClock::FixedStepSeconds);
+
+        //In id order, matching the order Step fans commands out in - iteration
+        //order is part of what makes a step reproducible.
+        viaStepPlayer.StepPlayer(first, firstInput, FrameClock::FixedStepSeconds);
+        viaStepPlayer.StepPlayer(second, secondInput, FrameClock::FixedStepSeconds);
+        viaStepPlayer.SetTick(viaStepPlayer.Tick() + 1);
+
+        //Bit-exact, not Approx. These are the same arithmetic twice, not two
+        //estimates of one number.
+        CHECK(viaStepPlayer.Player(first).Position() == viaStep.Player(first).Position());
+        CHECK(viaStepPlayer.Player(first).PreviousPosition() == viaStep.Player(first).PreviousPosition());
+        CHECK(viaStepPlayer.Player(first).VerticalVelocity() == viaStep.Player(first).VerticalVelocity());
+        CHECK(viaStepPlayer.Player(first).Grounded() == viaStep.Player(first).Grounded());
+
+        CHECK(viaStepPlayer.Player(second).Position() == viaStep.Player(second).Position());
+        CHECK(viaStepPlayer.Tick() == viaStep.Tick());
+    }
 }

@@ -122,3 +122,12 @@ void MatchState::Step(std::span<const PlayerCommand> commands, float seconds)
 
     ++m_Tick;
 }
+
+void MatchState::StepPlayer(PlayerId player, const CharacterInput& input, float seconds)
+{
+    const auto found = m_Players.find(player);
+    if (found == m_Players.end())
+        return;
+
+    found->second.Step(m_World, input, seconds);
+}
