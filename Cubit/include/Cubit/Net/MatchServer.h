@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <deque>
 #include <span>
 #include <string>
 #include <vector>
@@ -54,18 +55,29 @@ private:
         PeerId Peer = InvalidPeer;
         PlayerId Player = InvalidPlayer;
 
-        //Newest input tick this client has had applied. The unreliable channel
-        //is unordered and bundles are redundant, so anything not strictly
-        //greater is stale or a duplicate and is dropped.
+        //One input waiting for a tick to consume it, in the client's own tick
+        //numbering.
+        struct QueuedInput
+        {
+            std::uint64_t Tick = 0;
+            CharacterInput Input;
+        };
+
+        //Newest input tick APPLIED, not the newest received. This is what a
+        //snapshot acknowledges and what the client replays on top of: naming
+        //something merely received would have the client discard an input the
+        //server has not stepped yet.
         std::uint64_t LastInputTick = 0;
 
-        //This tick's input, if one arrived. Deliberately not carried over from
-        //the previous tick: a lost input should cost one step of movement and
-        //be visible, because that is what motivates Stage 3 bundling inputs
-        //redundantly. Papering over it here would hide the very thing this
-        //stage exists to show.
-        bool HasInput = false;
-        CharacterInput Input;
+        //Oldest first. Inputs arrive bundled and out of order on an unordered
+        //channel; a step takes the front.
+        //
+        //A queue rather than Stage 2's single slot because the client now
+        //predicts: it has already simulated each of these and is waiting to be
+        //told they were right. Dropping all but the newest, which is what the
+        //single slot did, would throw away intent that has already been shown
+        //on somebody's screen.
+        std::deque<QueuedInput> Queue;
 
         //Last reported view angles, resent in every snapshot so remote
         //characters are drawn facing the right way.

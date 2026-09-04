@@ -485,3 +485,192 @@ TEST_CASE("A snapshot acknowledges the input the server applied")
 
     CHECK(acked == 5);
 }
+
+namespace
+{
+    //Where a character starting at the spawn ends up after `steps` walking
+    //steps, computed with no server involved. The reference every queue test
+    //below is checked against: "moved a bit" would pass under a queue that
+    //dropped half its inputs.
+    glm::vec3 WalkedFromSpawn(int steps)
+    {
+        World world = FlatWorld();
+        CharacterController character;
+        character.Teleport(Spawn);
+
+        CharacterInput walking;
+        walking.Move = glm::vec2(0.0f, 1.0f);
+
+        for (int i = 0; i < steps; ++i)
+            character.Step(world, walking, FrameClock::FixedStepSeconds);
+
+        return character.Position();
+    }
+
+    //Ground-plane equality between a server position and this file's oracle.
+    //
+    //Deliberately x/z only, never y. MatchState::Step gives every player a
+    //physics tick every server tick, including one with no command at all
+    //(that is what leaves a laggy player falling instead of frozen); and Join
+    //mints its player and hands out the Welcome inside the very same
+    //MatchServer::Step call that then runs that tick's physics. So a joined
+    //server character has always taken one more gravity tick than a
+    //WalkedFromSpawn oracle, which is built fresh and only ever stepped with
+    //walking input. Spawn sits a few centimetres above the ground, so that
+    //extra tick is a measurable, real y offset until the character lands -
+    //orthogonal to which input the queue applied and when, which is the only
+    //thing this file is testing. x and z carry no such offset: an idle or
+    //airborne tick moves a character sideways by exactly as much as a
+    //grounded one, so the walking count alone - not the total tick count -
+    //decides them, and that count always matches the oracle's.
+    bool SameGroundPlane(const glm::vec3& actual, const glm::vec3& oracle)
+    {
+        return actual.x == oracle.x && actual.z == oracle.z;
+    }
+
+    InputMessage Bundle(std::uint64_t firstTick, int count)
+    {
+        CharacterInput walking;
+        walking.Move = glm::vec2(0.0f, 1.0f);
+
+        InputMessage message;
+        message.FirstTick = firstTick;
+        message.Inputs.assign(count, walking);
+        return message;
+    }
+}
+
+TEST_CASE("A bundle's inputs are applied one per tick, oldest first")
+{
+    //One tick, one input - the contract that makes reconciliation converge at
+    //all. If the server applied a whole bundle on one tick, or dropped all but
+    //the newest, its state would stop being a prefix of what the client
+    //predicted and the difference would never go away.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    const PlayerId player = server.Match().Players().begin()->first;
+
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
+
+    //One step: exactly one input applied, however many arrived.
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(SameGroundPlane(server.Match().Player(player).Position(), WalkedFromSpawn(1)));
+
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(SameGroundPlane(server.Match().Player(player).Position(), WalkedFromSpawn(2)));
+
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(SameGroundPlane(server.Match().Player(player).Position(), WalkedFromSpawn(3)));
+
+    //Queue empty: this tick has no input at all, exactly as when a packet is
+    //lost. On flat ground a walking character with no input simply stands
+    //still, which is why the oracle is unchanged.
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(SameGroundPlane(server.Match().Player(player).Position(), WalkedFromSpawn(3)));
+}
+
+TEST_CASE("An input repeated by the next bundle is applied once")
+{
+    //The redundancy is only free if duplicates are dropped. Applying tick 2
+    //twice would walk the player a step further than it ever asked to go, and
+    //the client would be corrected for the server's mistake.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    const PlayerId player = server.Match().Players().begin()->first;
+
+    //Ticks 1,2,3 then 2,3,4 - four distinct inputs across two bundles.
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(2, 3)), Channel::Unreliable);
+
+    for (int i = 0; i < 10; ++i)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(SameGroundPlane(server.Match().Player(player).Position(), WalkedFromSpawn(4)));
+}
+
+TEST_CASE("An input already applied is never applied again")
+{
+    //Stage 2's staleness rule, now expressed against the queue. A bundle that
+    //arrives late and repeats what has already been stepped must change
+    //nothing at all.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    const PlayerId player = server.Match().Players().begin()->first;
+
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
+    for (int i = 0; i < 5; ++i)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    const glm::vec3 settled = server.Match().Player(player).Position();
+    REQUIRE(SameGroundPlane(settled, WalkedFromSpawn(3)));
+
+    //The same three inputs arrive again, late.
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
+    for (int i = 0; i < 5; ++i)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().Player(player).Position() == settled);
+}
+
+TEST_CASE("The input queue is capped, and overflow is dropped rather than absorbed")
+{
+    //A client running further ahead than this design assumes is a fault worth
+    //seeing. Silently absorbing its backlog would present as unexplained
+    //corrections much later, on a machine nobody is debugging.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    const PlayerId player = server.Match().Players().begin()->first;
+
+    //Twenty inputs with no step in between: the queue can hold eight.
+    for (std::uint64_t tick = 1; tick <= 20; ++tick)
+        client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(tick, 1)), Channel::Unreliable);
+
+    for (int i = 0; i < 40; ++i)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    //Eight applied, twelve dropped. Not "fewer than twenty": the exact number
+    //is what distinguishes a cap from a leak.
+    CHECK(server.Match().Player(player).Position() == WalkedFromSpawn(8));
+}
+
+TEST_CASE("A snapshot acknowledges the oldest input of the bundle first")
+{
+    //Which end of the queue is consumed, asserted directly. Popping the newest
+    //would ack 3 on the first step; popping the oldest acks 1, then 2, then 3.
+    //This is the one assertion that tells those two implementations apart, and
+    //the difference between them is a correction on every gap.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    client.Send(LoopbackNetwork::ServerPeer, Encode(Bundle(1, 3)), Channel::Unreliable);
+
+    for (std::uint64_t expected = 1; expected <= 3; ++expected)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(client);
+        REQUIRE(snapshot.has_value());
+        REQUIRE(snapshot->Players.size() == 1);
+        CHECK(snapshot->Players[0].LastInputTick == expected);
+    }
+}

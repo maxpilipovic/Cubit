@@ -7,6 +7,18 @@
 #include <algorithm>
 #include <optional>
 
+namespace
+{
+    //How many unapplied inputs one client may have waiting.
+    //
+    //Eight is comfortably more than the two or three a healthy client keeps
+    //there - it sends three at a time and the server takes one per tick - and
+    //small enough that a client running far ahead is refused rather than
+    //buffered. Overflow is dropped and logged: absorbing it silently would
+    //show up as unexplained corrections much later.
+    constexpr std::size_t MaxQueuedInputs = 8;
+}
+
 MatchServer::MatchServer(World world, std::string mapName, std::uint64_t mapHash,
     const glm::vec3& spawn, Transport& transport)
     : m_Match(std::move(world)),
@@ -42,11 +54,26 @@ void MatchServer::Step(double seconds)
 
     for (Client& client : m_Clients)
     {
-        if (client.Player == InvalidPlayer || !client.HasInput)
+        //An empty queue means no input this tick, exactly as in Stage 2 when a
+        //packet was lost. The player simply does not move; the client sees a
+        //correction of one step of walking, 0.083 blocks, which is inside the
+        //threshold and invisible. That is the whole reason bundling exists: it
+        //makes this rare rather than routine.
+        if (client.Player == InvalidPlayer || client.Queue.empty())
             continue;
 
-        commands.push_back(PlayerCommand{ client.Player, client.Input });
-        client.HasInput = false;
+        //THE OLDEST, not the newest. Taking the newest would discard intent the
+        //client has already predicted on and shown on screen, guaranteeing a
+        //correction every time a bundle arrived after a gap - precisely the
+        //case bundling exists to survive.
+        const Client::QueuedInput queued = client.Queue.front();
+        client.Queue.pop_front();
+
+        client.LastInputTick = queued.Tick;
+        client.Yaw = queued.Input.Yaw;
+        client.Pitch = queued.Input.Pitch;
+
+        commands.push_back(PlayerCommand{ client.Player, queued.Input });
     }
 
     //Sorted by player id so the step order does not depend on connection order
@@ -142,23 +169,40 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         if (!Decode(data, input) || client->Player == InvalidPlayer)
             return;
 
-        if (input.Inputs.empty())
-            return;
+        for (std::size_t i = 0; i < input.Inputs.size(); ++i)
+        {
+            const std::uint64_t tick = input.FirstTick + i;
 
-        //INTERIM, replaced in the task that adds the input queue: only the
-        //newest input in the bundle is taken, which is exactly Stage 2's
-        //behaviour with a wider counter. Taking the newest is the wrong answer
-        //once replay exists - it discards intent the client has already
-        //predicted on - and the queue is what fixes it.
-        const std::uint64_t newest = input.FirstTick + input.Inputs.size() - 1;
-        if (newest <= client->LastInputTick)
-            return;
+            //Already applied. Bundles repeat, so this is the common case
+            //rather than an anomaly, and dropping it here is what makes the
+            //redundancy free instead of a rewind.
+            if (tick <= client->LastInputTick)
+                continue;
 
-        client->LastInputTick = newest;
-        client->HasInput = true;
-        client->Input = input.Inputs.back();
-        client->Yaw = client->Input.Yaw;
-        client->Pitch = client->Input.Pitch;
+            const bool waiting = std::any_of(client->Queue.begin(), client->Queue.end(),
+                [tick](const Client::QueuedInput& queued) { return queued.Tick == tick; });
+
+            if (waiting)
+                continue;
+
+            if (client->Queue.size() >= MaxQueuedInputs)
+            {
+                CB_WARN("Dropping an input: this client's queue is full");
+                break;
+            }
+
+            client->Queue.push_back(Client::QueuedInput{ tick, input.Inputs[i] });
+        }
+
+        //The unreliable channel reorders, so a bundle can arrive carrying ticks
+        //older than ones already queued. A step takes the front, so the front
+        //has to be the oldest.
+        std::sort(client->Queue.begin(), client->Queue.end(),
+            [](const Client::QueuedInput& a, const Client::QueuedInput& b)
+            {
+                return a.Tick < b.Tick;
+            });
+
         return;
     }
 
