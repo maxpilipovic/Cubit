@@ -155,23 +155,14 @@ public:
             // they were working. Starting fresh is the one time it should.
             m_LocalPlayer = m_Match.AddPlayer(m_Spawn);
 
-            // Face the middle of the map, level with the eye. Aiming at the
-            // literal centre of the world box would tilt the view into the
-            // ground.
-            //
-            // Connected, all of this waits: Player_() throws until Welcome
-            // arrives a round trip from now, so the camera is placed by the
-            // first OnRender after the handshake instead. The shader below is
-            // NOT part of that - it is built either way, because OnRender needs
-            // it before it needs a player.
-            const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
-            const glm::vec3 target(
-                static_cast<float>(World_().GetWidth()) * 0.5f,
-                eye.y,
-                static_cast<float>(World_().GetDepth()) * 0.5f);
-
-            const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
-            m_CameraController.SetRotation(rotation.x, rotation.y);
+            // Connected, both of these wait: Player_() throws until the server
+            // has said who we are and put us in a snapshot, so the first
+            // OnRender that has a player does them instead - the same two
+            // calls, through the same helper, not just the position half. The
+            // shader below is NOT part of that: it is built either way,
+            // because OnRender needs it before it needs a player.
+            AimAtMapCentre();
+            m_Aimed = true;
 
             UpdateCameraPosition(1.0f);
         }
@@ -295,6 +286,15 @@ public:
         // See HaveLocalPlayer for why the two halves are separate events.
         if (!HaveLocalPlayer())
             return;
+
+        // The connected path's deferred half of the constructor's camera
+        // setup. Single-player has already aimed and set this flag, so this
+        // fires exactly once per session either way.
+        if (!m_Aimed)
+        {
+            AimAtMapCentre();
+            m_Aimed = true;
+        }
 
         UpdateCameraPosition(alpha);
 
@@ -463,6 +463,23 @@ private:
     {
         m_CameraController.SetPosition(
             Player_().InterpolatedEye(alpha) + WorldOffset);
+    }
+
+    //Faces the middle of the map, level with the eye. Aiming at the literal
+    //centre of the world box would tilt the view into the ground.
+    //
+    //Goes through the controller rather than the camera because both hold a
+    //copy of yaw and pitch - the reason SetRotation exists at all.
+    void AimAtMapCentre()
+    {
+        const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
+        const glm::vec3 target(
+            static_cast<float>(World_().GetWidth()) * 0.5f,
+            eye.y,
+            static_cast<float>(World_().GetDepth()) * 0.5f);
+
+        const glm::vec2 rotation = PerspectiveCamera::YawPitchToward(eye, target);
+        m_CameraController.SetRotation(rotation.x, rotation.y);
     }
 
     //Outlines the block a click would break, using the same ray the edit uses so
@@ -806,6 +823,13 @@ private:
     //owning a world and a character directly.
     MatchState m_Match{ World(1, 1, 1) };
     PlayerId m_LocalPlayer = InvalidPlayer;
+
+    //Whether the one-off opening camera aim has happened. Single-player sets it
+    //in the constructor; connected, the first OnRender with a player does. It
+    //is a latch rather than a re-aim because after that the view belongs to the
+    //mouse, and re-running it would yank the player's aim back every frame.
+    bool m_Aimed = false;
+
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
