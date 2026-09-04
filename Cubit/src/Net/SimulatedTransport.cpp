@@ -94,11 +94,27 @@ void SimulatedTransport::Advance(double seconds)
 {
     m_Now += seconds;
 
+    //A packet is due when its due time has arrived, and "arrived" needs a
+    //tolerance. The clock accumulates by repeated `m_Now += seconds` while a
+    //due time was computed once as `m_Now + Latency`, so for a latency that is
+    //an exact multiple of the step those two sums are not the same double: the
+    //accumulated one lands about one ULP (~1e-17) below, `Due <= m_Now` fails,
+    //and the packet waits a whole extra tick. Stage 2 measured that as ~17% of
+    //packets arriving one tick late, and as a delivery skew that varied between
+    //two values where a constant was predicted.
+    //
+    //A nanosecond is six orders of magnitude below the smallest latency this
+    //models and eight above the error it absorbs, so it can neither hide a real
+    //delay nor fail to cover an accumulated one. It does not make the model
+    //approximate - the model is exact, and this is what stops the arithmetic
+    //disagreeing with it.
+    constexpr double DueEpsilon = 1e-9;
+
     //Everything now due, in a total order: by time, then by send order. The
     //partition keeps the not-yet-due entries without rebuilding the vector.
     std::vector<Pending> due;
     const auto split = std::stable_partition(m_Outbound.begin(), m_Outbound.end(),
-        [this](const Pending& pending) { return pending.Due <= m_Now; });
+        [this](const Pending& pending) { return pending.Due <= m_Now + DueEpsilon; });
 
     due.assign(std::make_move_iterator(m_Outbound.begin()), std::make_move_iterator(split));
     m_Outbound.erase(m_Outbound.begin(), split);

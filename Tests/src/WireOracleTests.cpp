@@ -22,10 +22,10 @@ namespace
     constexpr double OneWayLatency = LatencyTicks * FrameClock::FixedStepSeconds;
 
     //How far the client's clock trails the server's, measured after both have
-    //stepped. NOT the same number as LatencyTicks, and neither bound is a
-    //fault - see the comment on the skew assertion for where each comes from.
+    //stepped. NOT the same number as LatencyTicks - see the comment on the
+    //skew assertion for where it comes from.
     constexpr std::uint64_t MinSkew = LatencyTicks + 1;
-    constexpr std::uint64_t MaxSkew = LatencyTicks + 2;
+    constexpr std::uint64_t MaxSkew = LatencyTicks + 1;
 
     constexpr std::uint64_t MapHash = 0xFEEDFACEull;
     const glm::vec3 Spawn{ 8.0f, 2.0f, 8.0f };
@@ -146,10 +146,8 @@ TEST_CASE("A client's state is the server's state, delayed by exactly the one-wa
 
     REQUIRE_FALSE(observedSkew.empty());
 
-    //ASSERTION TWO: the delay is BOUNDED, and the bound is the one-way latency
-    //plus one tick, plus at most one more. The plan predicted a single exact
-    //value; measuring it found two, 4 and 5, in a stable 280:59 split. Both
-    //bounds are accounted for, and neither is a phase bug:
+    //ASSERTION TWO: the delay is a single EXACT value, the one-way latency
+    //plus one tick:
     //
     //  +1 always, and it is where the measurement is taken rather than
     //  latency. A snapshot describing tick T is queued at the END of the
@@ -158,20 +156,17 @@ TEST_CASE("A client's state is the server's state, delayed by exactly the one-wa
     //  again. So when the skew is read, the server has advanced once beyond
     //  the snapshot the client is holding.
     //
-    //  +1 more, sometimes, and it is floating point. SimulatedTransport's
-    //  clock accumulates by repeated `m_Now += seconds`, while a packet's due
-    //  time is computed once as `m_Now + Latency`. For a latency that is an
-    //  exact tick multiple those two sums are not the same double: for about
-    //  17% of ticks the accumulated clock lands one ULP (~1e-17) BELOW the
-    //  due time, `Due <= m_Now` fails, and the packet waits one more tick.
-    //  Verified independently by replaying the same additions outside the
-    //  test: 67 of 400 slip, against 59 of 339 observed here.
+    //  Measuring this used to also find a second value, 5, in a stable
+    //  280:59 split against the 4 above. That was the SimulatedTransport
+    //  accumulation defect - `m_Now += seconds` and a once-computed
+    //  `m_Now + Latency` disagreeing by about one ULP for a latency that is
+    //  an exact tick multiple - fixed by "Deliver a whole-tick latency on a
+    //  whole tick", after which this skew collapsed to the single value 4.
     //
-    //  So "50 ms at 60 Hz is exactly 3 ticks" is true in arithmetic and false
-    //  in doubles. The property worth protecting is not a magic constant but
-    //  that the lag is bounded and does not GROW: a client falling steadily
-    //  behind - a queue building up, a snapshot backlog - is what this catches,
-    //  and it would blow the upper bound within a few ticks.
+    //The property worth protecting is not a magic constant but that the lag
+    //is bounded and does not GROW: a client falling steadily behind - a
+    //queue building up, a snapshot backlog - is what this catches, and it
+    //would blow the bound within a few ticks.
     //
     //Your own keypress takes about twice this to show up, because the input
     //must go up before the snapshot reflecting it can come down. That second

@@ -272,6 +272,13 @@ TEST_CASE("The canonical network's delivery schedule is pinned")
     //Deliberately pinned: if the RNG, its draw order, or the ordering/loss
     //rules change on purpose, these numbers are EXPECTED to change too -
     //re-observe and re-pin rather than assume the test rotted.
+    //
+    //Re-pinned when the due-time epsilon landed ("Deliver a whole-tick
+    //latency on a whole tick"): the old ticks {2, 3, 5, 6, 7, 7, 8, 9, 11, 12}
+    //included a one-tick float slip on several packets and a coincidental
+    //same-tick collision between a retransmit and the next send (the two 7s).
+    //Fixing the slip moved every affected packet earlier by one tick and
+    //resolved the collision, producing the clean run below.
     LoopbackNetwork network;
     PeerId peer = InvalidPeer;
     Transport& rawClient = network.AddClient(peer);
@@ -315,7 +322,7 @@ TEST_CASE("The canonical network's delivery schedule is pinned")
 
     REQUIRE(arrivals.size() == Count);
 
-    const std::vector<int> expectedTicks{ 2, 3, 5, 6, 7, 7, 8, 9, 11, 12 };
+    const std::vector<int> expectedTicks{ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
     const std::vector<std::uint8_t> expectedPayloads{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
     std::vector<int> actualTicks;
@@ -380,4 +387,80 @@ TEST_CASE("Broadcast draws loss once per call, so all recipients share its fate 
     //genuinely happened, and genuinely didn't happen every time.
     CHECK(receivedA.size() > 0);
     CHECK(receivedA.size() < Count);
+}
+
+TEST_CASE("A latency of a whole number of ticks is delivered after exactly that many ticks")
+{
+    //The prerequisite for every Stage 3 test that reasons about which tick a
+    //packet lands on. Without it, "50 ms at 60 Hz is exactly 3 ticks" is true
+    //in arithmetic and false in doubles: the clock accumulates by repeated
+    //addition while a due time is computed once, so about 17% of packets lose
+    //a one-ULP comparison and wait an extra tick. Measured in Stage 2 as a
+    //delivery skew of 4 ticks x280 and 5 x59 where a constant was predicted.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& rawClient = network.AddClient(peer);
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport client(rawClient, sim);
+    Drain(network.Server());
+    Drain(client);
+
+    //Four bytes carrying the tick the packet was sent on. A one-byte payload
+    //cannot count past 255, and the slip needs a few hundred ticks to show up
+    //as anything other than luck.
+    const auto tickBytes = [](int tick)
+    {
+        std::vector<std::uint8_t> bytes(4);
+        for (int i = 0; i < 4; ++i)
+            bytes[i] = static_cast<std::uint8_t>((tick >> (i * 8)) & 0xFF);
+        return bytes;
+    };
+
+    const auto readTick = [](const std::vector<std::uint8_t>& bytes)
+    {
+        int tick = 0;
+        for (int i = 0; i < 4; ++i)
+            tick |= static_cast<int>(bytes[i]) << (i * 8);
+        return tick;
+    };
+
+    std::vector<int> delays;
+
+    int tick = 0;
+    for (; tick < 400; ++tick)
+    {
+        client.Send(LoopbackNetwork::ServerPeer, tickBytes(tick), Channel::Unreliable);
+        client.Advance(FrameClock::FixedStepSeconds);
+
+        NetEvent event;
+        while (network.Server().Poll(event))
+        {
+            if (event.Type == NetEventType::Message)
+                delays.push_back(tick - readTick(event.Data));
+        }
+    }
+
+    //A positive delay always leaves the last few sends still in flight when
+    //the loop above stops sending - a constant delay of D ticks means the
+    //final D sends are not yet due. A few more ticks of nothing but Advance
+    //lets those stragglers land before the assertions below run.
+    for (; tick < 410; ++tick)
+    {
+        client.Advance(FrameClock::FixedStepSeconds);
+
+        NetEvent event;
+        while (network.Server().Poll(event))
+        {
+            if (event.Type == NetEventType::Message)
+                delays.push_back(tick - readTick(event.Data));
+        }
+    }
+
+    REQUIRE(delays.size() == 400);
+
+    //Every one, not most. A single slipped delivery is the whole defect.
+    for (const int delay : delays)
+        CHECK(delay == delays.front());
 }
