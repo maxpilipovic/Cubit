@@ -385,9 +385,18 @@ private:
         return m_Client->Connected() && Match_().HasPlayer(m_LocalPlayer);
     }
 
-    //Opens the socket and builds the client. Throws when the server cannot be
-    //reached, which ends startup with a message rather than a window showing
-    //nothing.
+    //Opens the socket and builds the client.
+    //
+    //Throws only when no socket can be made at all: ENet failing to start, a
+    //host that cannot be created, a hostname that will not resolve. It does
+    //NOT mean the server answered. enet_host_connect is asynchronous - it
+    //returns a peer immediately and the Connected event arrives from Poll
+    //several Advance calls later - so pointing --connect at a machine with
+    //nothing listening on the port succeeds here and always will.
+    //
+    //What happens then is Rejected(): ENet gives up on the connect attempt and
+    //raises a bare Disconnected, MatchClient latches the refusal, and the HUD
+    //draws NOT CONNECTED. That is the honest failure path, not this throw.
     void Connect()
     {
         m_Socket = EnetTransport::Connect(m_Options.Host, m_Options.Port);
