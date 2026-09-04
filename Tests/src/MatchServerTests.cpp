@@ -436,3 +436,52 @@ TEST_CASE("Snapshot loss is drawn per client, not shared between them")
 
     CHECK(firstTicks != secondTicks);
 }
+
+TEST_CASE("A snapshot acknowledges the input the server applied")
+{
+    //The ack is what makes replay possible: a client keeps every input the
+    //server has not confirmed and replays them on top of each correction. An
+    //ack that named the wrong input would have the client replay something
+    //already applied, which is a permanent divergence rather than a glitch.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    CharacterInput walking;
+    walking.Move = glm::vec2(0.0f, 1.0f);
+
+    //One input per step, ticks 1..5. Driven a step at a time rather than sent
+    //in one burst so this stays true both now and once inputs are queued and
+    //consumed one per tick.
+    for (std::uint64_t tick = 1; tick <= 5; ++tick)
+    {
+        InputMessage input;
+        input.FirstTick = tick;
+        input.Inputs = { walking };
+        client.Send(LoopbackNetwork::ServerPeer, Encode(input), Channel::Unreliable);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //Stepped until the ack catches up rather than checked immediately: how many
+    //ticks the server takes to work through what it has been sent is its own
+    //property, not something this test should pin.
+    std::uint64_t acked = 0;
+    for (int step = 0; step < 16 && acked < 5; ++step)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(client);
+        if (!snapshot.has_value())
+            continue;
+
+        REQUIRE(snapshot->Players.size() == 1);
+        CHECK(snapshot->Players[0].Player == player);
+        acked = snapshot->Players[0].LastInputTick;
+    }
+
+    CHECK(acked == 5);
+}

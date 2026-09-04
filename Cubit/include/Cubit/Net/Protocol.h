@@ -101,6 +101,16 @@ struct PlayerSnapshot
 
     float VerticalVelocity = 0.0f;
     bool Grounded = false;
+
+    //The newest input from this player that the server has applied, in the
+    //CLIENT's own tick numbering, echoed back untouched. The client replays
+    //everything above it on top of the state in this snapshot.
+    //
+    //Per-player rather than per-recipient so the server still encodes one
+    //snapshot and sends identical bytes to everybody. Two clients need not
+    //agree about each other's numbering: each reads only its own entry, and
+    //nobody else's is meaningful to it.
+    std::uint64_t LastInputTick = 0;
 };
 
 struct SnapshotMessage

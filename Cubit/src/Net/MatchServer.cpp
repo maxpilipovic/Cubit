@@ -240,6 +240,7 @@ void MatchServer::SendSnapshots()
         {
             entry.Yaw = owner->Yaw;
             entry.Pitch = owner->Pitch;
+            entry.LastInputTick = owner->LastInputTick;
         }
 
         snapshot.Players.push_back(entry);

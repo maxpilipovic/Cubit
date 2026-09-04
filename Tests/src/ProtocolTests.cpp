@@ -19,6 +19,7 @@ namespace
         first.Pitch = 12.5f;
         first.VerticalVelocity = -3.25f;
         first.Grounded = true;
+        first.LastInputTick = 4294967301ull;
 
         PlayerSnapshot second;
         second.Player = PlayerId{ 2 };
@@ -27,6 +28,7 @@ namespace
         second.Pitch = -45.0f;
         second.VerticalVelocity = 0.0f;
         second.Grounded = false;
+        second.LastInputTick = 0;
 
         snapshot.Players = { first, second };
         return snapshot;
@@ -159,6 +161,16 @@ TEST_CASE("Snapshot round-trips every player")
     CHECK(received.Players[1].Player == PlayerId{ 2 });
     CHECK(received.Players[1].Yaw == doctest::Approx(90.0f));
     CHECK_FALSE(received.Players[1].Grounded);
+    CHECK(received.Players[0].LastInputTick == 4294967301ull);
+    CHECK(received.Players[1].LastInputTick == 0);
+}
+
+TEST_CASE("A two-player snapshot is 81 bytes")
+{
+    //Pinned for the same reason the input bundle's size is: this is where the
+    //stage's 4,860 B/s per client comes from. 1 id + 8 tick + 2 count +
+    //2 x 35 = 81.
+    CHECK(Encode(TwoPlayerSnapshot()).size() == 81);
 }
 
 TEST_CASE("An empty roster is a legal snapshot")

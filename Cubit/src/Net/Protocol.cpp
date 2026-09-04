@@ -7,7 +7,7 @@ namespace
     //Bytes each entry costs on the wire. Used to reject an absurd count before
     //reserving for it, which is what stops a tiny hostile packet claiming a
     //huge collection from becoming a denial of service.
-    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1;
+    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8;
     constexpr std::size_t BlockEditBytes = 12 + 2;
     constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
 
@@ -91,6 +91,7 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
         writer.F32(player.Pitch);
         writer.F32(player.VerticalVelocity);
         writer.Bool(player.Grounded);
+        writer.U64(player.LastInputTick);
     }
 
     return writer.Bytes();
@@ -260,6 +261,7 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
         player.Pitch = reader.F32();
         player.VerticalVelocity = reader.F32();
         player.Grounded = reader.Bool();
+        player.LastInputTick = reader.U64();
         message.Players.push_back(player);
     }
 
