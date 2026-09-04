@@ -670,3 +670,62 @@ TEST_CASE("A session that ends after the welcome is not a refused handshake")
     CHECK_FALSE(client.Connected());
     CHECK_FALSE(client.Rejected());
 }
+
+TEST_CASE("Being welcomed is not the same as being in the roster")
+{
+    //A CHARACTERISATION TEST, and it says so rather than pretending otherwise.
+    //
+    //Connected() goes true when Welcome is accepted, but Welcome carries no
+    //position - the local character comes into existence only when the first
+    //SNAPSHOT naming it is applied. MatchServer sends both inside one Step, so
+    //they normally arrive together and Connected() looks like it implies a
+    //roster entry. It does not: the welcome is reliable and the snapshot is
+    //not, so one drop or one reorder opens a window where the client is
+    //connected and its own player does not exist.
+    //
+    //This is what makes the Sandbox's HaveLocalPlayer guard necessary rather
+    //than defensive: Player_() runs on a fixed-step callback, and MatchState
+    //throws for an absent id. Nothing in this suite could catch that, because
+    //Sandbox.exe is not linked into Tests - so the window itself is pinned
+    //here, where it can be seen, instead of only in a comment over there.
+    //
+    //Hand-delivering the welcome alone IS the lost-snapshot case with the loss
+    //made deterministic; there is nothing else in it.
+    LoopbackNetwork network;
+
+    PeerId peer = InvalidPeer;
+    Transport& clientNet = network.AddClient(peer);
+    MatchClient client(clientNet, GoodLoader());
+
+    client.Step(FrameClock::FixedStepSeconds);
+
+    WelcomeMessage welcome;
+    welcome.You = 7;
+    welcome.MapName = "flat.vox";
+    welcome.MapHash = MapHash;
+    welcome.Tick = 100;
+    network.Server().Send(peer, Encode(welcome), Channel::Reliable);
+
+    client.Step(FrameClock::FixedStepSeconds);
+
+    REQUIRE(client.Connected());
+    REQUIRE(client.LocalPlayer() == PlayerId{ 7 });
+
+    //The window. A caller reading Connected() and then Player_() lands here.
+    CHECK_FALSE(client.Match().HasPlayer(client.LocalPlayer()));
+    CHECK_THROWS(client.Match().Player(client.LocalPlayer()));
+
+    //And it closes on the first snapshot that names the player, not before.
+    SnapshotMessage snapshot;
+    snapshot.Tick = 101;
+    PlayerSnapshot entry;
+    entry.Player = 7;
+    entry.Position = glm::vec3(1.0f, 2.0f, 3.0f);
+    snapshot.Players.push_back(entry);
+
+    network.Server().Send(peer, Encode(snapshot), Channel::Unreliable);
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(client.Match().HasPlayer(client.LocalPlayer()));
+    CHECK(client.Match().Player(client.LocalPlayer()).Position() == glm::vec3(1.0f, 2.0f, 3.0f));
+}

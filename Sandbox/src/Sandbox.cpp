@@ -248,7 +248,7 @@ public:
             m_HudState->RoundTripMs = m_Client->RoundTripTime() * 1000.0;
             m_HudState->PlayersInMatch = Match_().Players().size();
 
-            if (!m_Client->Connected())
+            if (!HaveLocalPlayer())
                 return;
         }
         else
@@ -289,10 +289,11 @@ public:
     //Draws the meshed voxel world through Cubit's scene renderer.
     void OnRender(float alpha) override
     {
-        // Nothing to draw from until the server has said who we are and where.
-        // Player_() would throw, and the world is still the 1x1x1 placeholder
-        // MatchState was constructed with.
-        if (m_Client && !m_Client->Connected())
+        // Nothing to draw from until the server has said who we are AND put us
+        // in a snapshot. Player_() would throw, and until Welcome lands the
+        // world is still the 1x1x1 placeholder MatchState was constructed with.
+        // See HaveLocalPlayer for why the two halves are separate events.
+        if (!HaveLocalPlayer())
             return;
 
         UpdateCameraPosition(alpha);
@@ -361,6 +362,27 @@ private:
     const CharacterController& Player_() const
     {
         return Match_().Player(m_LocalPlayer);
+    }
+
+    //Whether there is a local character to read at all. Every Player_() call on
+    //a per-frame path has to be behind this.
+    //
+    //Connected() is NOT the same question, and mistaking the two is a crash.
+    //It goes true the moment Welcome is accepted, but Welcome carries no
+    //position, so the local character does not exist until the first SNAPSHOT
+    //naming it lands. The server sends both in one Step, which is why they
+    //normally arrive together and why testing Connected() alone looked
+    //sufficient - but the welcome is reliable and the snapshot is not. Drop or
+    //reorder that one packet and the client is connected with an empty roster
+    //for a tick, Player_() throws out of a fixed-step callback, and the process
+    //goes with it. At the 5% loss this executable can be launched with, that is
+    //roughly one join in twenty, not a corner case.
+    bool HaveLocalPlayer() const
+    {
+        if (!m_Client)
+            return true;
+
+        return m_Client->Connected() && Match_().HasPlayer(m_LocalPlayer);
     }
 
     //Opens the socket and builds the client. Throws when the server cannot be
