@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/FrameClock.h"
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/Transport.h"
 #include "Cubit/Voxel/BlockEdit.h"
@@ -28,6 +29,19 @@
 //the server for two seconds and has a bigger problem than replay accuracy; the
 //bound exists so a silent server cannot grow this without limit.
 constexpr std::size_t MaxUnackedInputs = 120;
+
+//How far prediction may disagree with the server before the correction is
+//shown, in blocks, as a full 3D distance.
+//
+//One starved server tick while walking costs WalkSpeed / 60 = 0.083 blocks, so
+//0.15 absorbs a single dropped input and little more.
+//
+//It is a deadzone, which has a known cost: a small persistent error is never
+//corrected, so the client is not exactly the server between snaps. That is
+//bounded by construction - past this it snaps - and deliberate. This is the one
+//number in the stage chosen by reasoning rather than measurement; if the
+//measured correction rate is bad, suspect this first.
+constexpr float CorrectionThreshold = 0.15f;
 
 //A map the client found on its own disk, and the hash of the bytes it came
 //from. The hash is checked against the server's before anything is trusted.
@@ -98,10 +112,36 @@ public:
     //tracked separately because remote-player interpolation is expressed in it.
     std::uint64_t ServerTick() const { return m_ServerTick; }
 
+    //What reconciliation has actually been doing. The stage's acceptance
+    //number: "corrections per 1000 ticks" replaces "it feels smooth" the way
+    //3,900 B/s replaced "bandwidth is fine", and unlike a playtest it can be
+    //re-run to catch a regression.
+    struct CorrectionStats
+    {
+        //Snapshots reconciled - the denominator, and not the same as the number
+        //of ticks: snapshots are lost.
+        std::uint64_t Snapshots = 0;
+
+        //Reconciliations whose disagreement exceeded the threshold and were
+        //therefore shown.
+        std::uint64_t Count = 0;
+
+        //Mean and largest magnitude of those, in blocks. Zero when there have
+        //been none.
+        float Mean = 0.0f;
+        float Max = 0.0f;
+    };
+
+    CorrectionStats Corrections() const;
+
 private:
     void HandleWelcome(std::span<const std::uint8_t> data);
     void HandleSnapshot(std::span<const std::uint8_t> data);
     void HandleEditApplied(std::span<const std::uint8_t> data);
+
+    //Writes the authoritative state in, replays what the server has not
+    //acknowledged, and decides whether the difference is worth showing.
+    void Reconcile(const PlayerSnapshot& entry);
 
     //Ends the connection and latches Rejected.
     void Reject(const char* reason);
@@ -142,6 +182,15 @@ private:
     std::deque<PendingInput> m_Unacked;
 
     std::uint64_t m_ServerTick = 0;
+
+    //The step length prediction used, so replay uses the same one. A replay at
+    //a different step length is a different simulation.
+    float m_StepSeconds = static_cast<float>(FrameClock::FixedStepSeconds);
+
+    std::uint64_t m_SnapshotsReconciled = 0;
+    std::uint64_t m_CorrectionCount = 0;
+    float m_CorrectionTotal = 0.0f;
+    float m_CorrectionMax = 0.0f;
 };
 
 #ifdef _MSC_VER

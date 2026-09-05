@@ -15,6 +15,10 @@ MatchClient::MatchClient(Transport& transport, MapLoader loadMap)
 
 void MatchClient::Step(double seconds)
 {
+    //Recorded before anything is drained, because a snapshot handled below
+    //replays inputs and must replay them at the length prediction used.
+    m_StepSeconds = static_cast<float>(seconds);
+
     m_Transport.Advance(seconds);
 
     NetEvent event;
@@ -243,6 +247,17 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             m_Match.AddPlayer(entry.Player, entry.Position);
         }
 
+        //The local player is predicted, not overwritten: reconcile against
+        //this snapshot and move on before the generic SetState below can
+        //stomp the replayed position with the authoritative one. HasPlayer is
+        //true by construction here (added above if it was ever false), so the
+        //check is belt and braces.
+        if (entry.Player == m_LocalPlayer && m_Match.HasPlayer(entry.Player))
+        {
+            Reconcile(entry);
+            continue;
+        }
+
         //The previous position is the last one this client knew about, so the
         //renderer's existing alpha interpolation smooths between snapshots
         //rather than snapping. At 60 Hz that gap is exactly one fixed step,
@@ -269,6 +284,81 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         m_Match.RemovePlayer(player);
         m_ViewAngles.erase(player);
     }
+}
+
+void MatchClient::Reconcile(const PlayerSnapshot& entry)
+{
+    CharacterController& character = m_Match.PlayerForWrite(m_LocalPlayer);
+
+    //What prediction believes, kept whole. If the correction turns out to be
+    //too small to be worth showing, this is restored in one piece.
+    const glm::vec3 before = character.Position();
+    const glm::vec3 beforePrevious = character.PreviousPosition();
+    const float beforeVelocity = character.VerticalVelocity();
+    const bool beforeGrounded = character.Grounded();
+
+    //All four, through SetState rather than Teleport. Teleport writes both
+    //positions together, which would flatten the previous position and destroy
+    //exactly the interpolation a correction exists to hide.
+    //
+    //The previous position comes from prediction rather than the wire because
+    //the snapshot does not carry one - it is a render-smoothing value, not
+    //simulation state anybody else needs. Whenever there is anything at all to
+    //replay it is overwritten on the first replayed step; it only survives when
+    //the server has caught up completely, and then continuing to interpolate
+    //from where this client was drawing is the right answer anyway.
+    //
+    //NOTE: this argument is currently unpinned by any test in this suite.
+    //Deliberately substituting entry.Position here (collapsing both positions
+    //to the authoritative one) should only be observable when m_Unacked is
+    //empty - the one case where nothing below overwrites PreviousPosition
+    //again - and no test in this file drives the client to that state at the
+    //moment a correction lands. Recorded here per the plan rather than forcing
+    //a contrived test to pin it.
+    character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded);
+
+    //Everything the server has confirmed is history now.
+    while (!m_Unacked.empty() && m_Unacked.front().Tick <= entry.LastInputTick)
+        m_Unacked.pop_front();
+
+    //And everything it has not seen is applied on top. This is reconciliation
+    //entire: the authoritative state plus the inputs it does not know about is
+    //what this machine should be showing.
+    for (const PendingInput& pending : m_Unacked)
+        m_Match.StepPlayer(m_LocalPlayer, pending.Input, m_StepSeconds);
+
+    ++m_SnapshotsReconciled;
+
+    const float error = glm::distance(character.Position(), before);
+
+    if (error <= CorrectionThreshold)
+    {
+        //Thrown away WHOLE - position, previous position, velocity and grounded
+        //together. Keeping the predicted position while accepting the
+        //authoritative velocity would leave the character in a state neither
+        //machine ever simulated, and the next step would compound it.
+        character.SetState(before, beforePrevious, beforeVelocity, beforeGrounded);
+        return;
+    }
+
+    //Over the threshold: the replayed state stands, and the player snaps. There
+    //is no smoothing here on purpose - a snap is the one option with no new
+    //failure mode and the only one that is cleanly testable.
+    ++m_CorrectionCount;
+    m_CorrectionTotal += error;
+    m_CorrectionMax = std::max(m_CorrectionMax, error);
+}
+
+MatchClient::CorrectionStats MatchClient::Corrections() const
+{
+    CorrectionStats stats;
+    stats.Snapshots = m_SnapshotsReconciled;
+    stats.Count = m_CorrectionCount;
+    stats.Max = m_CorrectionMax;
+    stats.Mean = m_CorrectionCount == 0
+        ? 0.0f
+        : m_CorrectionTotal / static_cast<float>(m_CorrectionCount);
+    return stats;
 }
 
 void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)

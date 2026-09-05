@@ -490,8 +490,15 @@ TEST_CASE("The wire survives 5% loss and 150 ms RTT with jitter")
     }
 
     REQUIRE(client.Connected());
-    CHECK(client.Match().Player(client.LocalPlayer()).Position()
-        == server.Match().Player(client.LocalPlayer()).Position());
+
+    //Exact equality was Stage 2's assertion and cannot hold here: the deadzone
+    //deliberately leaves a sub-threshold disagreement uncorrected, because
+    //showing a two-centimetre correction is worse than carrying it. What must
+    //hold is that the disagreement is BOUNDED by that threshold - past it, the
+    //client snaps - which is the property the deadzone is only acceptable
+    //because of.
+    CHECK(glm::distance(client.Match().Player(client.LocalPlayer()).Position(),
+        server.Match().Player(client.LocalPlayer()).Position()) <= CorrectionThreshold);
 }
 
 TEST_CASE("A stale snapshot never overwrites a newer one")
