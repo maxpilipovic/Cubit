@@ -95,9 +95,10 @@ public:
     //is simulation state, not wall-clock state.
     std::uint64_t Tick() const { return m_Tick; }
 
-    //Sets this match's tick directly. The two remaining production callers
-    //both align a client's free-running clock to the server's: once at
-    //Welcome, to start it, and once per predicted Step, to advance it.
+    //Sets this match's tick directly. Two production callers, and they do
+    //different things: HandleWelcome aligns the client's clock to the
+    //server's, once, to start it; the client's own Step merely advances it by
+    //one per predicted step, reading nothing from the server at all.
     //HandleSnapshot deliberately does not call this - see the note there for
     //why adopting the server's tick from a snapshot would break replay.
     void SetTick(std::uint64_t tick) { m_Tick = tick; }
