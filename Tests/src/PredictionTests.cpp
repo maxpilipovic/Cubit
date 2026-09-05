@@ -609,3 +609,91 @@ TEST_CASE("Under heavy loss, corrections stay bounded and do not grow")
     //number above all three, on 2026-09-05.
     CHECK(end.Max < 0.5f);
 }
+
+TEST_CASE("A replay uses the step length prediction used")
+{
+    //Every other test in this file drives MatchClient at
+    //FrameClock::FixedStepSeconds, so m_StepSeconds could be deleted and
+    //hardcoded to that constant and nothing in the suite would go red - even
+    //though its own comment says "a replay at a different step length is a
+    //different simulation." This test is the one that would notice: it drives
+    //the client at 1/50 s, well away from the fixed 1/60 s step, and lets
+    //latency leave a couple dozen inputs unacknowledged before a snapshot
+    //lands and Reconcile replays them.
+    //
+    //`predictedInputs` records, in order, exactly the inputs this client
+    //actually predicted with - so `reference` below is not a second guess at
+    //what the client did, it is a straight re-run of the same input sequence
+    //at the same step length, with no networking at all.
+    constexpr double OddStep = 1.0 / 50.0;
+
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = 12 * OddStep;   //A big enough round trip that several dozen
+                                  //inputs sit unacked at any moment - plenty
+                                  //for a wrong replay length to add up past
+                                  //CorrectionThreshold rather than hide under it.
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    std::optional<MatchState> reference;
+    PlayerId localPlayer = InvalidPlayer;
+    std::uint64_t lastTick = 0;
+    int sequence = 0;
+    std::vector<CharacterInput> predictedInputs;
+
+    for (int i = 0; i < 400; ++i)
+    {
+        ++sequence;
+        const CharacterInput input = InputForTick(sequence);
+        client.SetInput(input);
+        client.Step(OddStep);
+        server.Step(OddStep);
+
+        //Tick only advances on an iteration that actually predicted - see
+        //MatchClient::Step. Skip any iteration before the handshake completes.
+        const std::uint64_t tick = client.Match().Tick();
+        if (tick == lastTick)
+            continue;
+        lastTick = tick;
+
+        if (!reference.has_value())
+        {
+            localPlayer = client.LocalPlayer();
+            reference.emplace(FlatWorld());
+            reference->AddPlayer(localPlayer, Spawn);
+        }
+
+        predictedInputs.push_back(input);
+        reference->StepPlayer(localPlayer, input, static_cast<float>(OddStep));
+    }
+
+    REQUIRE(client.Connected());
+    REQUIRE(reference.has_value());
+
+    //Enough predicted ticks for several snapshots, each with a couple dozen
+    //inputs unacked, to have been reconciled.
+    REQUIRE(predictedInputs.size() > 100u);
+
+    //THE PROPERTY: a client stepped at 1/50 s and reconciled against a server
+    //stepped at 1/50 s ends up exactly where a single straight simulation at
+    //1/50 s does, with no networking or reconciliation involved at all.
+    CHECK(client.Match().Player(localPlayer).Position() == reference->Player(localPlayer).Position());
+
+    //THE MUTATION GUARD. The same input sequence, replayed at
+    //FrameClock::FixedStepSeconds instead of OddStep, must land somewhere
+    //different - otherwise the two step lengths are not different enough for
+    //the CHECK above to prove anything.
+    MatchState atFixedStep(FlatWorld());
+    atFixedStep.AddPlayer(localPlayer, Spawn);
+    for (const CharacterInput& input : predictedInputs)
+        atFixedStep.StepPlayer(localPlayer, input, static_cast<float>(FrameClock::FixedStepSeconds));
+
+    CHECK(client.Match().Player(localPlayer).Position() != atFixedStep.Player(localPlayer).Position());
+}
