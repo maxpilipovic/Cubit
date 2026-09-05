@@ -219,6 +219,16 @@ private:
     //between so a frame that falls between snapshots still has somewhere to
     //interpolate to. Not a clock-synchronisation subsystem and not used by the
     //simulation: nothing that affects state reads it.
+    //
+    //Snap and advance are not mutually exclusive within one Step: Step polls
+    //before it predicts, so a call that processes a snapshot still advances
+    //this by one before returning, leaving it (at least) one tick past the
+    //snapshot it just snapped to. This is deliberate, not an off-by-one: a
+    //snapshot describes a tick the server has already left, so one local step
+    //is a floor on how much time has passed since it was captured, not an
+    //overestimate. A query made later in the same frame, after more snapshots
+    //or more steps, can push it further ahead still - one tick is the minimum,
+    //not the bound.
     double m_RemoteClock = 0.0;
 
     //One input the server has not yet acknowledged, kept so it can be replayed

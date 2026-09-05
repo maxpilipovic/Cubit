@@ -414,6 +414,11 @@ MatchClient::RemotePose MatchClient::PoseOf(PlayerId player, float alpha) const
 
     //Deliberately in the past. Drawing at the newest sample would mean every
     //packet that arrives late is a remote standing still and then jumping.
+    //
+    //Note m_RemoteClock is at least one tick past the newest applied snapshot
+    //whenever this is called in the same Step that processed it - see its
+    //declaration. So "six ticks behind" here means six behind that floor, not
+    //six behind the newest snapshot's own tick number.
     const double target = m_RemoteClock + alpha - InterpolationDelayTicks;
 
     //Newer than anything anybody has said: HOLD, do not guess. Extrapolation
