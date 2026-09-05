@@ -69,6 +69,11 @@ void MatchServer::Step(double seconds)
         const Client::QueuedInput queued = client.Queue.front();
         client.Queue.pop_front();
 
+        //The queue has room again: the next overflow is a new episode and
+        //earns its own warning.
+        if (client.Queue.size() < MaxQueuedInputs)
+            client.QueueOverflowWarned = false;
+
         client.LastInputTick = queued.Tick;
         client.Yaw = queued.Input.Yaw;
         client.Pitch = queued.Input.Pitch;
@@ -187,7 +192,15 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
 
             if (client->Queue.size() >= MaxQueuedInputs)
             {
-                CB_WARN("Dropping an input: this client's queue is full");
+                //Once per overflow episode, not once per dropped input: a
+                //client that stays three ticks ahead drops up to three inputs
+                //a tick, and this loop runs every tick it stays that way.
+                if (!client->QueueOverflowWarned)
+                {
+                    CB_WARN("Dropping an input for player " + std::to_string(client->Player)
+                        + ": its queue is full");
+                    client->QueueOverflowWarned = true;
+                }
                 break;
             }
 

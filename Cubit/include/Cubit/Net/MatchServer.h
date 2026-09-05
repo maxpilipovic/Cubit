@@ -79,6 +79,12 @@ private:
         //on somebody's screen.
         std::deque<QueuedInput> Queue;
 
+        //Set once an input has been dropped for a full queue and cleared once
+        //the queue has room again, so a client that stays ahead for many ticks
+        //logs one warning per overflow episode instead of one per dropped
+        //input.
+        bool QueueOverflowWarned = false;
+
         //Last reported view angles, resent in every snapshot so remote
         //characters are drawn facing the right way.
         float Yaw = 0.0f;
