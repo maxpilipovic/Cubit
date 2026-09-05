@@ -310,17 +310,46 @@ spec's number; the real-app run at `--latency 150` (Task 11) asserts nothing abo
 which tick anything landed on.
 
 - **Clean link, no loss, no jitter (GATE):** 0 corrections, both during the 120-tick
-  warm-up and across the following 1,000 ticks of varied input, jumps included. 1,113
-  snapshots reconciled with no disagreement worth showing — the design's own weakest
-  claim, confirmed rather than assumed.
-- **166.7 ms RTT, 5% loss, 1-tick jitter, seed 1 (BASELINE):** 0 corrections per 1,000
-  ticks, mean 0, max 0, across both halves of a 2,000-tick run. Three-deep input
-  bundling absorbs a single lost packet below the 0.15-block threshold entirely
-  (`CorrectionThreshold`'s own design point); a gap wide enough to clear the threshold
-  needs four consecutive losses, which 5% independent loss essentially never produces
-  in one run. Zero is therefore the expected result of the design at this loss rate,
-  not an untested corner of it — any of these figures becoming nonzero in a future run
-  is the regression this baseline exists to catch.
+  warm-up and across the following 1,000 ticks of varied input, jumps included, over
+  1,113 snapshots reconciled. `Corrections().Count` only counts disagreements over the
+  0.15-block threshold by design, so this by itself proves "no disagreement exceeded
+  0.15 blocks" rather than "no disagreement at all" — a permanent sub-threshold
+  divergence would report the same clean zero. The test closes that gap directly: after
+  the 1,000 ticks it drains both sides to a stop with no input and asserts the two
+  positions agree to within 1 mm. That is the design's own weakest claim, confirmed
+  rather than assumed: with no loss and no jitter, prediction and the authoritative step
+  do not disagree at all, not merely "not enough to show".
+- **166.7 ms RTT, 5% loss, 1-tick jitter, seed 1 (BASELINE, realistic rate):** 0
+  corrections per 1,000 ticks, mean 0, max 0, across both halves of a 2,000-tick run.
+  This is the expected result at this loss rate, not an untested corner of it: a single
+  lost input tick costs about 0.083 blocks (`CorrectionThreshold`'s own design point),
+  under the 0.15 threshold on its own, and a lost tick is never converged back once
+  `Reconcile` discards it below threshold — so what would clear the threshold is either
+  a jump tick going missing outright, or two lost ticks anywhere in the run (not
+  necessarily adjacent) landing within about 51° of each other in direction. Losing all
+  three redundant copies of one tick's input happens with probability 0.05³ ≈ 1.25e-4
+  per tick (not the four-consecutive-losses, 6e-6-per-tick figure this document
+  previously stated, which was wrong by about three orders of magnitude and, separately,
+  wrong to require adjacency at all) — enough that a percent-level chance of at least one
+  correction across 2,000 ticks is expected, and this particular run's seed came back
+  clean. **Caveat:** because this run reports zero, it cannot by itself distinguish
+  "correction accounting works under network loss" from "the counter is stuck at zero" —
+  that machinery is pinned by two other tests in this file that inject a divergence
+  directly (`"A correction smaller than the threshold is not shown"` and `"A correction
+  bigger than the threshold snaps"`), and by the 20%-loss run below, which does exercise
+  it under real network conditions.
+- **166.7 ms RTT, 20% loss, 1-tick jitter (BASELINE, loss-side):** seed 1 (the recorded
+  run) reports 3 corrections per 1,000 ticks, mean 0.193, max 0.291; seeds 2 and 3, run
+  before pinning the bound so the figure would not be one seed's luck, reported max 0.288
+  and 0.227 respectively — all comfortably under 0.5. At 20% loss all three redundant
+  copies of a tick's input are lost together with probability 0.2³ = 8e-3, roughly 16
+  fully-dropped input ticks across the run; those ~0.083-block offsets never converge
+  back and accumulate as a random walk, landing typically around 0.083·√16 ≈ 0.33
+  blocks — several times the threshold, so unlike the 5%-loss run above this one reliably
+  produces corrections from the network condition itself rather than from an injected
+  teleport, and is what actually exercises the counting and snapping machinery end to
+  end. Any of these figures rising in a future run — corrections per 1,000 ticks, mean,
+  or max — is the regression these baselines exist to catch.
 
 ---
 

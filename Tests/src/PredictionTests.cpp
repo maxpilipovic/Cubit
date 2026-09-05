@@ -368,10 +368,19 @@ TEST_CASE("On a clean link, prediction is never corrected")
 {
     //THE GATE THAT CATCHES A REAL DEFECT. With no loss and no jitter the server
     //never steps a tick with an empty queue, so its state stays a prefix of
-    //what this client predicted and replay reproduces it exactly. A single
-    //correction here means prediction and the authoritative step disagree about
-    //the simulation itself - which is not a network condition and must not be
-    //absorbed by widening the threshold.
+    //what this client predicted, and replaying what it has not seen yet
+    //should leave nothing worth showing. A single correction here means
+    //prediction and the authoritative step disagree about the simulation
+    //itself - which is not a network condition and must not be absorbed by
+    //widening the threshold.
+    //
+    //One thing this gate cannot see: Corrections().Count only counts
+    //disagreements over CorrectionThreshold (0.15 blocks), by design - see
+    //MatchClient.h. A permanent divergence smaller than that reports the same
+    //clean zero as no divergence at all. The direct-position check below,
+    //after both sides have had time to settle on the same idle state, is what
+    //closes that gap: it asserts there was nothing to show, not merely that
+    //nothing was shown.
     //
     //If this goes red, the three suspects, in order: the server stepped without
     //an input (look at the queue depth), replay ran at a different step length
@@ -419,15 +428,33 @@ TEST_CASE("On a clean link, prediction is never corrected")
     //entirely would also report no corrections.
     CHECK(client.Corrections().Snapshots > settledSnapshots + 900);
 
+    //Nothing worth showing is not the same claim as nothing to show: drain to
+    //a stop with no input and compare positions directly, so a divergence
+    //under the 0.15 threshold - invisible to Corrections().Count by design -
+    //cannot hide behind the deadzone.
+    for (int tick = 1120; tick < 1150; ++tick)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    CHECK(glm::distance(client.Match().Player(client.LocalPlayer()).Position(),
+        server.Match().Player(client.LocalPlayer()).Position()) < 1e-3f);
+
     MESSAGE("clean link: corrections during warm-up = " << settled);
 }
 
 TEST_CASE("Under loss and jitter, corrections are bounded and do not grow")
 {
-    //THE RECORDED NUMBER. Nothing here is compared against a target invented in
-    //advance - nobody knows the right value yet, and a threshold guessed here
-    //would be a number to argue with rather than evidence. What is asserted is
-    //the shape: bounded, and not growing.
+    //THE RECORDED NUMBER, at a realistic loss rate. Nothing here is compared
+    //against a target invented in advance - nobody knows the right value yet,
+    //and a threshold guessed here would be a number to argue with rather than
+    //evidence. What is asserted is the shape: bounded, and not growing.
+    //
+    //At 5% loss this comes back at zero (see the spec), which the case below
+    //at 20% loss exists to put in context: the counting and snapping
+    //machinery is exercised there instead, since here it mostly is not.
     LoopbackNetwork network;
 
     NetworkSim sim;
@@ -472,22 +499,106 @@ TEST_CASE("Under loss and jitter, corrections are bounded and do not grow")
     const MatchClient::CorrectionStats end = client.Corrections();
 
     MESSAGE("166.7 ms RTT, 5% loss, jitter: corrections per 1000 ticks = "
-        << (end.Count - start.Count) / 2 << ", mean = " << end.Mean
+        << static_cast<float>(end.Count - start.Count) / 2.0f << ", mean = " << end.Mean
         << ", max = " << end.Max);
 
-    //NOT GROWING: the second thousand ticks must not set a new record by more
-    //than one threshold's worth. A maximum that climbs run-on means error is
-    //accumulating between corrections instead of being cleared by them.
+    //NOT GROWING, in principle: Max is cumulative and monotone by
+    //construction (it can only ever be set higher, never lowered), so
+    //end.Max >= half.Max always holds and this can only fail if the second
+    //half sets a new record by more than one threshold's worth above the
+    //first. At the observed 0.0 this reduces to CHECK(0 <= 0.15) and proves
+    //nothing on its own here - it is kept for the shape of the assertion, and
+    //the case below is where a nonzero Max actually puts it to work.
     CHECK(end.Max <= half.Max + CorrectionThreshold);
 
-    //BOUNDED: pin this at a round number above what the run actually reports,
-    //once it has been observed. See the step below - do not leave the number
-    //below as it stands without checking it.
+    //At an observed 0.0, the assertion that actually carries information is
+    //that not one of the 2,000 ticks in this run produced a correction -
+    //Count == 0, not a magnitude bound with nothing to bound. See the 20%
+    //loss case below for a run where a magnitude bound has something to say.
+    CHECK(end.Count == 0);
+}
+
+TEST_CASE("Under heavy loss, corrections stay bounded and do not grow")
+{
+    //THE LOSS-SIDE BASELINE. At 5% loss, above, the run comes back at zero -
+    //not because the counting or snapping machinery is untested (the deadzone
+    //tests earlier in this file pin that directly, by teleporting the
+    //client), but because nothing in the network conditions there disagrees
+    //with the server often enough to clear the threshold. This case exists so
+    //something in the suite has actually watched the server and the client
+    //disagree BECAUSE OF a network condition, and the client snap in
+    //response, rather than because of an injected teleport.
     //
-    //Observed max was 0.0 at 166.7 ms RTT / 5% loss / 1-tick jitter (seed 1)
-    //on 2026-09-05: three-deep input bundling absorbs every single-packet
-    //loss below the correction threshold, and a gap wide enough to clear it
-    //needs four consecutive losses, which this loss rate essentially never
-    //produces in one run. 0.5 is the round number above that observed value.
+    //20% loss means every one of the three copies of a tick's input is lost
+    //together with probability 0.2^3 = 8e-3 - about 16 fully-dropped input
+    //ticks across 2,000. A single dropped tick's ~0.083-block offset never
+    //gets corrected on its own (Reconcile discards anything under threshold
+    //and the server never converges back to it), so these accumulate: with
+    //~16 independent-direction offsets of that size, a random walk puts the
+    //typical accumulated error around 0.083 * sqrt(16) =~ 0.33 blocks,
+    //several times CorrectionThreshold. Corrections here come from the
+    //network, not from a teleport.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = 5 * FrameClock::FixedStepSeconds;   //166.7 ms RTT, a whole tick multiple.
+    sim.Jitter = FrameClock::FixedStepSeconds;
+    sim.Loss = 0.20f;
+    sim.Seed = 1;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    for (int tick = 0; tick < 120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const MatchClient::CorrectionStats start = client.Corrections();
+
+    for (int tick = 120; tick < 1120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    const MatchClient::CorrectionStats half = client.Corrections();
+
+    for (int tick = 1120; tick < 2120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    const MatchClient::CorrectionStats end = client.Corrections();
+
+    MESSAGE("166.7 ms RTT, 20% loss, jitter: corrections per 1000 ticks = "
+        << static_cast<float>(end.Count - start.Count) / 2.0f << ", mean = " << end.Mean
+        << ", max = " << end.Max);
+
+    //THE PROOF OF LIFE: at this loss rate the network itself must produce at
+    //least one visible disagreement, or this case is measuring nothing that
+    //the 5%-loss case does not already measure.
+    CHECK(end.Count > 0);
+
+    //NOT GROWING, doing real work this time: a nonzero half.Max means this
+    //can actually fail if the second half's disagreements run further than
+    //the first half's by more than one threshold's worth.
+    CHECK(end.Max <= half.Max + CorrectionThreshold);
+
+    //BOUNDED: pin this at a round number above what the run actually reports.
+    //Seed 1 (recorded above) reported max 0.291; seeds 2 and 3, tried before
+    //pinning this so the figure is not one seed's luck, reported 0.288 and
+    //0.227 - all comfortably under 0.5, none close to it. 0.5 is the round
+    //number above all three, on 2026-09-05.
     CHECK(end.Max < 0.5f);
 }
