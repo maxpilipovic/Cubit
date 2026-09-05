@@ -346,6 +346,30 @@ public:
             });
     }
 
+    //The stage's acceptance number, from a real run rather than a test.
+    //
+    //Logged rather than drawn on the HUD, and that is not laziness: the debug
+    //font carries only "0123456789-.: ACDEFGNOPSTU", so most of the words this
+    //needs cannot be rendered at all - and an unsupported character draws as a
+    //BLANK rather than failing, so a wrong label reads as a rendering bug. See
+    //the note on the same trap in the HUD's own header.
+    void OnDetach() override
+    {
+        if (!m_Client)
+            return;
+
+        const MatchClient::CorrectionStats stats = m_Client->Corrections();
+        const double perThousand = stats.Snapshots == 0
+            ? 0.0
+            : 1000.0 * static_cast<double>(stats.Count) / static_cast<double>(stats.Snapshots);
+
+        CB_INFO("NETSTATS snapshots=" + std::to_string(stats.Snapshots)
+            + " corrections=" + std::to_string(stats.Count)
+            + " per1000=" + std::to_string(perThousand)
+            + " mean=" + std::to_string(stats.Mean)
+            + " max=" + std::to_string(stats.Max));
+    }
+
 private:
     //BRANCH POINT 1 OF 3. Everything else in this file reads the match through
     //here, which is what keeps a second mode from spreading across 600 lines.
