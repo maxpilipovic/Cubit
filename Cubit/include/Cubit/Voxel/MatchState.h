@@ -87,13 +87,19 @@ public:
     //tick cannot depend on how many players happened to be stepped.
     void StepPlayer(PlayerId player, const CharacterInput& input, float seconds);
 
-    //How many steps this match has taken. The authoritative clock a server
-    //and a client agree on; it lives here rather than on FrameClock because
-    //it is simulation state, not wall-clock state.
+    //How many steps this match has taken. On a server this is the
+    //authoritative tick; on a client it is that client's own clock, aligned
+    //to the server's only once, at Welcome, and advanced once per predicted
+    //step from there on - a server and a client no longer agree on this
+    //number tick-for-tick. It lives here rather than on FrameClock because it
+    //is simulation state, not wall-clock state.
     std::uint64_t Tick() const { return m_Tick; }
 
-    //Aligns this match's clock to somebody else's - a client adopting the
-    //server's tick from a snapshot.
+    //Sets this match's tick directly. The two remaining production callers
+    //both align a client's free-running clock to the server's: once at
+    //Welcome, to start it, and once per predicted Step, to advance it.
+    //HandleSnapshot deliberately does not call this - see the note there for
+    //why adopting the server's tick from a snapshot would break replay.
     void SetTick(std::uint64_t tick) { m_Tick = tick; }
 
     //Throws when the player is not present: there is no honest character to

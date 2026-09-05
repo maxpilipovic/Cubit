@@ -37,10 +37,13 @@ constexpr std::size_t MaxUnackedInputs = 120;
 //0.15 absorbs a single dropped input and little more.
 //
 //It is a deadzone, which has a known cost: a small persistent error is never
-//corrected, so the client is not exactly the server between snaps. That is
-//bounded by construction - past this it snaps - and deliberate. This is the one
-//number in the stage chosen by reasoning rather than measurement; if the
-//measured correction rate is bad, suspect this first.
+//corrected, so the client is not exactly the server between snaps. That
+//residual is bounded by this threshold ONLY when m_Unacked is empty; in
+//general the bound is this threshold plus however far one snapshot interval's
+//worth of replay can diverge, which is why the measured maximum under loss is
+//0.291 - roughly double this number, not equal to it. Deliberate regardless.
+//This is the one number in the stage chosen by reasoning rather than
+//measurement; if the measured correction rate is bad, suspect this first.
 constexpr float CorrectionThreshold = 0.15f;
 
 //A map the client found on its own disk, and the hash of the bytes it came
@@ -69,8 +72,8 @@ constexpr std::size_t MaxRemoteSamples = 32;
 //hides it: input is stepped immediately, kept until the server acknowledges
 //it, and replayed on top of every correction.
 //
-//It holds a MatchState anyway, for two reasons: it needs a World to render and
-//a roster to draw, and Stage 3 needs somewhere to start stepping.
+//It holds a MatchState for two reasons: it needs a World to render and a
+//roster to draw, and it is where prediction and replay do their stepping.
 class CB_API MatchClient
 {
 public:
@@ -84,8 +87,10 @@ public:
     //`transport` must outlive this.
     MatchClient(Transport& transport, MapLoader loadMap);
 
-    //Services the transport, sends this frame's input, and applies whatever
-    //arrived. Deliberately does not advance the simulation.
+    //Records this step's length for replay to use, drains the transport
+    //(applying whatever arrived, which includes reconciling against any
+    //snapshot), then stamps this tick's input, predicts the local player,
+    //advances the clock, and sends a bundle of the last three inputs.
     void Step(double seconds);
 
     //What to send on the next Step. Held rather than sent immediately so the

@@ -344,12 +344,19 @@ which tick anything landed on.
   and 0.227 respectively — all comfortably under 0.5. At 20% loss all three redundant
   copies of a tick's input are lost together with probability 0.2³ = 8e-3, roughly 16
   fully-dropped input ticks across the run; those ~0.083-block offsets never converge
-  back and accumulate as a random walk, landing typically around 0.083·√16 ≈ 0.33
-  blocks — several times the threshold, so unlike the 5%-loss run above this one reliably
-  produces corrections from the network condition itself rather than from an injected
-  teleport, and is what actually exercises the counting and snapping machinery end to
-  end. Any of these figures rising in a future run — corrections per 1,000 ticks, mean,
-  or max — is the regression these baselines exist to catch.
+  back on their own, but they do not accumulate as a random walk across all sixteen
+  either. `Reconcile`'s `error` is the distance between the current predicted position —
+  which still carries every not-yet-corrected drop — and that call's freshly replayed
+  authoritative state, which carries none, so every reconciliation re-measures the
+  running total rather than an increment, and the total is zeroed the moment it first
+  crosses `CorrectionThreshold`. At ~0.083 blocks a drop, that is roughly three or four
+  drops, not sixteen — which is why the run reports 6 corrections (3 per 1,000 ticks)
+  with a mean of 0.193, close to the threshold, rather than the single ~0.33-block
+  correction a √16 random-walk model would predict. Unlike the 5%-loss run above, this
+  one reliably produces corrections from the network condition itself rather than from
+  an injected teleport, and is what actually exercises the counting and snapping
+  machinery end to end. Any of these figures rising in a future run — corrections per
+  1,000 ticks, mean, or max — is the regression these baselines exist to catch.
 
 ---
 
@@ -382,6 +389,19 @@ which tick anything landed on.
   because nothing draws a remote's facing yet; commented at the site
   (`MatchClient::PoseOf`, `Cubit/src/Net/MatchClient.cpp`) so a future caller meets a
   known limit instead of rediscovering it as a bug.
+- **An undiagnosed ~6-second session death under heavy loss (`--loss 80/90`) is still
+  open, but narrowed, not solved, by the final review.** `SimulatedTransport` sits
+  above `EnetTransport`, so modelled loss never touches ENet's own reliable machinery.
+  With `--loss` set and no `--latency`, `sim.Latency` is 0, so the reliable-retransmission
+  branch adds `2.0 * 0.0` — exactly nothing — meaning reliable traffic passes through
+  untouched at any loss rate this flag can produce. `ENET_PEER_TIMEOUT_MINIMUM` fires
+  only on an unacknowledged reliable command, and the only steady reliable traffic is
+  ENet's own ping, which `SimulatedTransport` never sees at all. So the ~5 s coincidence
+  with that timeout constant is either not an ENet timeout, or is driven by something
+  other than the dropped datagrams — most likely host-side stalling of the fixed-step
+  loop. That points the next investigation at wall-clock instrumentation of the loop
+  rather than at packet accounting, which is a much smaller search space than where this
+  was left.
 
 ## Risks
 
@@ -410,8 +430,12 @@ project already knows keyboard input cannot be scripted into a GLFW window any o
 way) plus a per-tick timestamped log showed the character already moving about 10 ms
 after the keydown — inside one 60 Hz step, and far short of the 150 ms round trip a
 server-driven move would need. Pressing `W` moves the view on the same frame. The
-nonzero snapshot counts are what make the paired zero corrections mean something,
-rather than an unwired counter reporting nothing by default.
+nonzero snapshot counts prove `Reconcile` actually ran on both clients; they do not by
+themselves prove `m_CorrectionCount` is wired, since `Snapshots` and `Count` increment
+in different places under different conditions — the same distinction the caveat on the
+5%-loss run above draws correctly. What backs the zero corrections here is the same
+machinery that caveat leans on: the deadzone tests that pin counting and snapping
+directly, and the 20%-loss run that exercises them under real network conditions.
 
 **Single-player is byte-for-byte unchanged.** `POS 240.500000 26.900099 300.500000`,
 `FACES 1927774` — identical to the values from before this stage.

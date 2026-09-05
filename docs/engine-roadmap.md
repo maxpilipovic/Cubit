@@ -329,9 +329,13 @@ obvious, and better shaped, the moment something concretely needs it.
   newest sample rather than guessing forward. Reconciliation converges by keeping the
   server's per-tick stepping uniform and bundling each client's last three inputs
   against loss, rather than by giving the server a variable step count per player.
-  Measured over a clean localhost link: zero corrections. Under 20% packet loss —
-  well past this design's target — 3 corrections per 1,000 ticks, comfortably under
-  half a block. **Predicted terrain edits and their rollback problem are still the
+  The in-process `SimulatedTransport` gate test, with no loss and no jitter, reconciled
+  1,113 snapshots for zero corrections; a separate three-process localhost run
+  (`Server.exe` plus two `Sandbox.exe --connect --latency 150` clients, real sockets, no
+  induced loss) reconciled 3,851 and 3,625 snapshots on its two clients for zero
+  corrections apiece. Under 20% packet loss injected in the gate test — well past this
+  design's target — 3 corrections per 1,000 ticks, comfortably under half a block.
+  **Predicted terrain edits and their rollback problem are still the
   arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
   because the world the character collided against changed underneath it, and that
   is deferred rather than solved.

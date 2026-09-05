@@ -532,11 +532,18 @@ TEST_CASE("Under heavy loss, corrections stay bounded and do not grow")
     //20% loss means every one of the three copies of a tick's input is lost
     //together with probability 0.2^3 = 8e-3 - about 16 fully-dropped input
     //ticks across 2,000. A single dropped tick's ~0.083-block offset never
-    //gets corrected on its own (Reconcile discards anything under threshold
-    //and the server never converges back to it), so these accumulate: with
-    //~16 independent-direction offsets of that size, a random walk puts the
-    //typical accumulated error around 0.083 * sqrt(16) =~ 0.33 blocks,
-    //several times CorrectionThreshold. Corrections here come from the
+    //gets corrected on its own, because Reconcile discards anything under
+    //threshold - but it is NOT a random walk that takes all 16 drops to reach
+    //a correction. `error` is the distance between the CURRENT predicted
+    //position, which still carries every not-yet-corrected drop, and this
+    //call's freshly replayed authoritative state, which carries none - so
+    //every reconciliation re-measures the running TOTAL, not an increment,
+    //and the moment that total first crosses CorrectionThreshold the snap
+    //resets it to zero. At ~0.083 blocks a drop, the total crosses 0.15 after
+    //roughly three or four drops, not after all sixteen - which is why the
+    //run below reports 6 corrections (3 per 1000 ticks) with a mean of 0.193,
+    //close to the threshold, rather than the single ~0.33-block correction a
+    //sqrt(16) random-walk model would predict. Corrections here come from the
     //network, not from a teleport.
     LoopbackNetwork network;
 

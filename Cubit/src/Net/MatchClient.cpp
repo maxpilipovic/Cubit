@@ -260,10 +260,11 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             continue;
         }
 
-        //The previous position is the last one this client knew about, so the
-        //renderer's existing alpha interpolation smooths between snapshots
-        //rather than snapping. At 60 Hz that gap is exactly one fixed step,
-        //which is what the interpolation already assumes.
+        //The previous position is the last one this client knew about. Nothing
+        //currently renders a remote character's PreviousPosition - drawing
+        //uses PoseOf and the sample ring below instead - so this argument's
+        //only remaining job is to keep the two positions independent rather
+        //than collapsed to the same value, for whatever next reads it.
         const glm::vec3 previous = m_Match.Player(entry.Player).Position();
 
         m_Match.PlayerForWrite(entry.Player).SetState(
@@ -321,7 +322,7 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
     //Deliberately substituting entry.Position here (collapsing both positions
     //to the authoritative one) should only be observable when m_Unacked is
     //empty - the one case where nothing below overwrites PreviousPosition
-    //again - and no test in this file drives the client to that state at the
+    //again - and no test in this suite drives the client to that state at the
     //moment a correction lands. Recorded here per the plan rather than forcing
     //a contrived test to pin it.
     character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded);
