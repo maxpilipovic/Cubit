@@ -300,6 +300,28 @@ Keyboard input cannot be scripted into the Cubit window, so the run uses the sam
 temporary walk-override probe Stage 2's verification used. Screen capture of this window
 is unreliable; the probe is the evidence.
 
+**Measured 2026-09-05, `Tests/src/PredictionTests.cpp`.** Both figures come from a
+`MatchServer`/`MatchClient` pair on a `LoopbackNetwork`, 2,120 ticks each, past a
+120-tick warm-up. The spec's round number is 150 ms RTT, but 75 ms one-way is 4.5
+ticks, and this suite's rule is that every test latency is a whole tick multiple — a
+half-tick latency makes every arrival ambiguous by a tick, the exact defect Task 2
+removed. So the tests below use **166.7 ms RTT (5 ticks one-way)**, one tick above the
+spec's number; the real-app run at `--latency 150` (Task 11) asserts nothing about
+which tick anything landed on.
+
+- **Clean link, no loss, no jitter (GATE):** 0 corrections, both during the 120-tick
+  warm-up and across the following 1,000 ticks of varied input, jumps included. 1,113
+  snapshots reconciled with no disagreement worth showing — the design's own weakest
+  claim, confirmed rather than assumed.
+- **166.7 ms RTT, 5% loss, 1-tick jitter, seed 1 (BASELINE):** 0 corrections per 1,000
+  ticks, mean 0, max 0, across both halves of a 2,000-tick run. Three-deep input
+  bundling absorbs a single lost packet below the 0.15-block threshold entirely
+  (`CorrectionThreshold`'s own design point); a gap wide enough to clear the threshold
+  needs four consecutive losses, which 5% independent loss essentially never produces
+  in one run. Zero is therefore the expected result of the design at this loss rate,
+  not an untested corner of it — any of these figures becoming nonzero in a future run
+  is the regression this baseline exists to catch.
+
 ---
 
 ## Explicitly out of scope

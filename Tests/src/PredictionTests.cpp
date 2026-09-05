@@ -363,3 +363,131 @@ TEST_CASE("A remote player is held, never extrapolated, when nothing new arrives
     //oldest or to the origin.
     CHECK(client.PoseOf(remote, 0.0f).Position.x == doctest::Approx(110.0f));
 }
+
+TEST_CASE("On a clean link, prediction is never corrected")
+{
+    //THE GATE THAT CATCHES A REAL DEFECT. With no loss and no jitter the server
+    //never steps a tick with an empty queue, so its state stays a prefix of
+    //what this client predicted and replay reproduces it exactly. A single
+    //correction here means prediction and the authoritative step disagree about
+    //the simulation itself - which is not a network condition and must not be
+    //absorbed by widening the threshold.
+    //
+    //If this goes red, the three suspects, in order: the server stepped without
+    //an input (look at the queue depth), replay ran at a different step length
+    //from prediction, or the ack is off by one and replay is reapplying an
+    //input the server already consumed.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    //Warm-up. Joining is a transient: for the first few ticks this client has
+    //no player yet, then it has one whose inputs the server has not
+    //acknowledged, and the corrections that fall out of that are about the
+    //handshake rather than about prediction.
+    for (int tick = 0; tick < 120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const std::uint64_t settled = client.Corrections().Count;
+    const std::uint64_t settledSnapshots = client.Corrections().Snapshots;
+
+    for (int tick = 120; tick < 1120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //A thousand ticks of varied input, including jumps, and not one
+    //disagreement worth showing.
+    CHECK(client.Corrections().Count == settled);
+
+    //And the denominator is real: a client that stopped receiving snapshots
+    //entirely would also report no corrections.
+    CHECK(client.Corrections().Snapshots > settledSnapshots + 900);
+
+    MESSAGE("clean link: corrections during warm-up = " << settled);
+}
+
+TEST_CASE("Under loss and jitter, corrections are bounded and do not grow")
+{
+    //THE RECORDED NUMBER. Nothing here is compared against a target invented in
+    //advance - nobody knows the right value yet, and a threshold guessed here
+    //would be a number to argue with rather than evidence. What is asserted is
+    //the shape: bounded, and not growing.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = 5 * FrameClock::FixedStepSeconds;   //166.7 ms RTT, a whole tick multiple.
+    sim.Jitter = FrameClock::FixedStepSeconds;
+    sim.Loss = 0.05f;
+    sim.Seed = 1;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    for (int tick = 0; tick < 120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const MatchClient::CorrectionStats start = client.Corrections();
+
+    for (int tick = 120; tick < 1120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    const MatchClient::CorrectionStats half = client.Corrections();
+
+    for (int tick = 1120; tick < 2120; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    const MatchClient::CorrectionStats end = client.Corrections();
+
+    MESSAGE("166.7 ms RTT, 5% loss, jitter: corrections per 1000 ticks = "
+        << (end.Count - start.Count) / 2 << ", mean = " << end.Mean
+        << ", max = " << end.Max);
+
+    //NOT GROWING: the second thousand ticks must not set a new record by more
+    //than one threshold's worth. A maximum that climbs run-on means error is
+    //accumulating between corrections instead of being cleared by them.
+    CHECK(end.Max <= half.Max + CorrectionThreshold);
+
+    //BOUNDED: pin this at a round number above what the run actually reports,
+    //once it has been observed. See the step below - do not leave the number
+    //below as it stands without checking it.
+    //
+    //Observed max was 0.0 at 166.7 ms RTT / 5% loss / 1-tick jitter (seed 1)
+    //on 2026-09-05: three-deep input bundling absorbs every single-packet
+    //loss below the correction threshold, and a gap wide enough to clear it
+    //needs four consecutive losses, which this loss rate essentially never
+    //produces in one run. 0.5 is the round number above that observed value.
+    CHECK(end.Max < 0.5f);
+}
