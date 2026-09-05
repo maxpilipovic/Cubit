@@ -224,11 +224,20 @@ public:
         // BRANCH POINT 2 OF 3.
         if (m_Client)
         {
-            // Input goes up; the answer comes back. Nothing is simulated here,
-            // deliberately: pressing W does not move the view until the server
-            // has said so. On 127.0.0.1 that is imperceptible; at --latency 150
-            // it is unpleasant, and that is the point of this whole stage. If
-            // it feels fine, prediction has grown by accident.
+            // Through Stage 2, nothing was simulated here, deliberately:
+            // pressing W did not move the view until the server had said so,
+            // so the latency was plainly visible rather than hidden behind a
+            // guess. This is the stage that ends that: Step below applies
+            // this input locally and immediately, so W moves the view on the
+            // same frame even at --latency 150.
+            //
+            // The server is still the authority throughout - the local move
+            // is a guess, held until acknowledged and corrected against every
+            // snapshot (CorrectionThreshold's deadzone means "corrected"
+            // still allows a little disagreement to pass unremarked, so the
+            // client is not exactly the server between snapshots even when it
+            // feels like it is). Feeling right is what a correct guess looks
+            // like, not proof there isn't one being made.
             m_Client->SetInput(input);
             m_Client->Step(timestep.GetSeconds());
 
