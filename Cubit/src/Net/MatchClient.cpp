@@ -270,8 +270,6 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         m_Match.PlayerForWrite(entry.Player).SetState(
             entry.Position, previous, entry.VerticalVelocity, entry.Grounded);
 
-        m_ViewAngles[entry.Player] = glm::vec2(entry.Yaw, entry.Pitch);
-
         std::deque<RemoteSample>& samples = m_RemoteSamples[entry.Player];
         samples.push_back(RemoteSample{ snapshot.Tick, entry.Position, entry.Yaw, entry.Pitch });
 
@@ -291,7 +289,6 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
     for (const PlayerId player : departed)
     {
         m_Match.RemovePlayer(player);
-        m_ViewAngles.erase(player);
         m_RemoteSamples.erase(player);
     }
 }
@@ -392,12 +389,6 @@ void MatchClient::Reject(const char* reason)
 
     if (m_ServerPeer != InvalidPeer)
         m_Transport.Disconnect(m_ServerPeer);
-}
-
-glm::vec2 MatchClient::ViewAngles(PlayerId player) const
-{
-    const auto found = m_ViewAngles.find(player);
-    return found == m_ViewAngles.end() ? glm::vec2(0.0f) : found->second;
 }
 
 double MatchClient::RoundTripTime() const

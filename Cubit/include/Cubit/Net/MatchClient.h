@@ -116,10 +116,6 @@ public:
     const MatchState& Match() const { return m_Match; }
     MatchState& MatchForWrite() { return m_Match; }
 
-    //Yaw in x, pitch in y, as last reported for this player. Zero for anyone
-    //not in the last snapshot.
-    glm::vec2 ViewAngles(PlayerId player) const;
-
     double RoundTripTime() const;
 
     //The newest tick any snapshot has reported. NOT this client's own tick:
@@ -205,8 +201,6 @@ private:
     //Highest snapshot tick applied. Jitter reorders packets, and applying an
     //older snapshot after a newer one yanks the world backwards.
     std::uint64_t m_LastSnapshotTick = 0;
-
-    std::map<PlayerId, glm::vec2> m_ViewAngles;
 
     //One remote player's pose as of one server tick.
     struct RemoteSample

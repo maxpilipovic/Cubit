@@ -250,8 +250,9 @@ TEST_CASE("Two clients see each other move")
     CHECK(second.Match().Player(first.LocalPlayer()).Position() != Spawn);
 
     //The angles travelled too, which is what lets a remote character be drawn
-    //facing the right way.
-    CHECK(first.ViewAngles(second.LocalPlayer()).x == doctest::Approx(-90.0f));
+    //facing the right way. Yaw is constant for the whole run, so any alpha
+    //reads the same value regardless of interpolation delay.
+    CHECK(first.PoseOf(second.LocalPlayer(), 0.0f).Yaw == doctest::Approx(-90.0f));
 }
 
 TEST_CASE("An edit takes a round trip and is not applied locally first")
