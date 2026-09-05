@@ -318,9 +318,23 @@ obvious, and better shaped, the moment something concretely needs it.
   rubber-banding seen then is new rather than inherited. Measured cost is 3.9 KB/s
   down per client at 60 Hz snapshots. Suite 315 → 386. With no arguments the
   Sandbox is byte-for-byte the single-player app it was before, verified against
-  the same `POS`/`FACES` values. **Stage 3 — prediction, reconciliation and entity
-  interpolation — is what remains**, and it is the only roadmap item that is
-  genuinely expensive to retrofit.
+  the same `POS`/`FACES` values.
+
+  **Stage 3 shipped 2026-09-05** (`d24c941..fa4599c`, suite 386 → 415). The client
+  now predicts its own movement locally and is corrected against the server without
+  the correction being visible — pressing `W` moves the view on the same frame even
+  at 150 ms latency, measured at 10 ms from keydown to motion in a real three-process
+  run. Remote players are never predicted or extrapolated; they are drawn from a ring
+  of snapshot samples interpolated 100 ms behind the server's clock, holding the
+  newest sample rather than guessing forward. Reconciliation converges by keeping the
+  server's per-tick stepping uniform and bundling each client's last three inputs
+  against loss, rather than by giving the server a variable step count per player.
+  Measured over a clean localhost link: zero corrections. Under 20% packet loss —
+  well past this design's target — 3 corrections per 1,000 ticks, comfortably under
+  half a block. **Predicted terrain edits and their rollback problem are still the
+  arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
+  because the world the character collided against changed underneath it, and that
+  is deferred rather than solved.
 - **A way to draw geometry that is not a chunk.** `Renderer::Submit` is generic,
   but it is the only seam — every caller hand-builds its own `VertexArray`
   (`WorldRenderer`, `HudLayer`). There is no `Mesh` type, no model loading, no

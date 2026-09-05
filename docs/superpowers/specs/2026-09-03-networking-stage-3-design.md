@@ -1,6 +1,6 @@
 # Cubit Networking Stage 3 — The Feel
 
-_Written 2026-09-03. Status: designed, not yet built._
+_Written 2026-09-03. Status: shipped 2026-09-05, `d24c941..fa4599c`._
 
 Stage 3 of the arc laid out in
 [`2026-08-27-networking-design.md`](2026-08-27-networking-design.md), following
@@ -365,12 +365,23 @@ which tick anything landed on.
 ## Known limits, accepted and recorded
 
 - **A starved tick still costs a correction**, absorbed by the threshold rather than
-  prevented. Approach B prevents it; approach B is not built.
+  prevented. Approach B prevents it; approach B is not built. It is also not needed by
+  the measurement: at 20% loss, well past this design's target, the rate is 3
+  corrections per 1,000 ticks with a maximum of 0.291 blocks — see "Whether the escape
+  hatch is still needed" below.
 - **The threshold is a deadzone, so a small persistent error is never corrected.**
   Bounded by construction — once it exceeds 0.15 blocks it snaps — but it means the
   client is not exactly the server between snaps, by design.
 - **The edit log still grows without bound.**
-- **The rolled-back-edit risk is untouched** and still blocks predicted edits.
+- **The rolled-back-edit risk is untouched** and still blocks predicted edits. Rolling
+  back a rejected edit can invalidate predicted *movement*, because the world the
+  character collided against changed underneath it — the risk the design deferred
+  movement-only prediction to avoid facing at the same time as reconciliation, and it
+  is still facing it.
+- **Yaw interpolation takes the long way round across the ±180° seam.** Harmless today
+  because nothing draws a remote's facing yet; commented at the site
+  (`MatchClient::PoseOf`, `Cubit/src/Net/MatchClient.cpp`) so a future caller meets a
+  known limit instead of rediscovering it as a bug.
 
 ## Risks
 
@@ -383,3 +394,113 @@ which tick anything landed on.
 - **The threshold is the one number here chosen by reasoning rather than measurement.**
   0.15 blocks is derived from one starved walking tick; if the measured correction rate
   is bad, the threshold is the first thing to suspect and approach B is the second.
+
+---
+
+## Shipped 2026-09-05
+
+Twelve tasks, `d24c941..fa4599c` (Task 1's review-fix commits onward — `d24c941` is
+where Stage 2's unreviewed tail closed). The suite went 386 -> 415.
+
+**The application, not just the tests.** `Server.exe` plus two `Sandbox.exe --connect
+127.0.0.1 --latency 150` clients ran for about 40 seconds: 3,851 and 3,625 snapshots
+reconciled on the two clients, zero corrections on either side, both clients reaching
+`PLAYERS 2`. A real injected keydown (`keybd_event`, not a posted window message — this
+project already knows keyboard input cannot be scripted into a GLFW window any other
+way) plus a per-tick timestamped log showed the character already moving about 10 ms
+after the keydown — inside one 60 Hz step, and far short of the 150 ms round trip a
+server-driven move would need. Pressing `W` moves the view on the same frame. The
+nonzero snapshot counts are what make the paired zero corrections mean something,
+rather than an unwired counter reporting nothing by default.
+
+**Single-player is byte-for-byte unchanged.** `POS 240.500000 26.900099 300.500000`,
+`FACES 1927774` — identical to the values from before this stage.
+
+### The measured figures, in shape
+
+Recorded in full above in "The acceptance number." What they show, together:
+
+- **Clean link (GATE): zero corrections**, through warm-up and across 1,000 further
+  ticks over 1,113 reconciled snapshots, confirmed further by draining both sides to a
+  stop and finding the two positions agree to under a millimetre. This was the plan's
+  own nominated weakest claim — that reconciliation genuinely produces no disagreement
+  on a clean link followed from the design but had never been observed. It is now
+  observed.
+- **166.7 ms RTT, 5% loss, jitter (BASELINE): zero corrections.** Expected: three-deep
+  bundling absorbs a single lost tick inside the threshold, and clearing it needs either
+  an unlucky jump tick or two lost ticks anywhere in the run landing within about 51° of
+  each other — percent-level per run, not the four-consecutive-drops figure this spec
+  briefly carried before a fix round corrected the arithmetic. **A zero here is weaker
+  evidence than it looks.** This run alone cannot tell "correction accounting works
+  under loss" from "the counter is stuck at zero" — that is exactly what the 20% case
+  below, and the two tests that inject a divergence directly, exist to rule out.
+- **166.7 ms RTT, 20% loss, jitter (BASELINE): 3 corrections per 1,000 ticks, mean
+  0.193, max 0.291 blocks**, seed 1; seeds 2 and 3, run before pinning the bound, gave
+  maxima 0.288 and 0.227. This is the one measurement in the stage where the counting-
+  and-snapping machinery is exercised by an actual network condition rather than an
+  injected teleport.
+
+### What turned out differently from the design
+
+- **The `SimulatedTransport` due-time fix was a genuine prerequisite, and it moved two
+  pinned tests.** Comparing against `m_Now` plus a one-nanosecond epsilon, instead of
+  `m_Now` alone, fixed the float-accumulation slip where an exact-tick latency landed
+  one ULP below its own due time. The golden delivery schedule re-pinned from
+  `{2,3,5,6,7,7,8,9,11,12}` to `{2,3,4,5,6,7,8,9,10,11}` — the irregularities were the
+  slip, not real jitter. The client/server clock skew the state-lag oracle allows
+  collapsed from two values (`LatencyTicks + 1` or `+2`) to the single value 4
+  (`LatencyTicks + 1`); `MinSkew == MaxSkew` now. Stage 2 had measured the old skew as 4
+  ×280, 5 ×59 and left it alone deliberately — Stage 3 could not, because prediction and
+  replay both reason about which tick a packet landed on.
+- **Approach B stays deferred, and now for a measured reason rather than a hopeful
+  one.** See "Whether the escape hatch is still needed" below.
+- **`MatchClient`'s tick advances only on a tick where input was set**, because `Step`
+  returns early without one. Not designed for, but it turns out to be exactly what
+  keeps a bundle's ticks consecutive by construction — the property both the server's
+  duplicate filter and the client's own replay depend on.
+- **The render clock runs at least one tick ahead of the newest applied snapshot**
+  whenever both happen inside the same `Step` call, because `Step` polls — and snaps
+  `m_RemoteClock` to the snapshot — before it predicts, which advances the clock once
+  more. Deliberate once found: a snapshot describes a tick the server has already left,
+  so one local step is a floor on elapsed time, not an overestimate. Its absence is what
+  made this plan's own interpolation test constants wrong by exactly one tick until a
+  fix round corrected them.
+- **A pre-existing test fragility was unmasked, not introduced.** The bad-network
+  prediction test walked a character 25 blocks across a 32-block world from a spawn at
+  x=8; under Stage 2 it only passed because 5% loss shaved the walk to about 31.75
+  blocks, a quarter-block short of falling off the edge. This stage's redundant
+  bundling recovers exactly the inputs that used to be lost, pushing the same test over
+  the edge. Shortened to 200 ticks (16.7 blocks of travel) rather than reworked, since
+  nothing the test exists to prove needed the extra distance — worth recording as a
+  trap for any future test that walks a character a long way.
+- **The queue cap of 8 was reached only in the test built to reach it.** A dedicated
+  test sends twenty inputs to force an overflow (raising the cap to 64 is the mutation
+  that catches it); nothing in the realistic-network acceptance runs — 5% loss, 20%
+  loss, or the three-process application run at 150 ms — came close to it. The
+  overflow-drop path is pinned deliberately, not observed under load.
+- **The correction's `before` (previous-position) argument stayed unpinned.** The
+  design left open where a correction's previous-position value comes from, since the
+  wire carries no such field; the implementation restores the predicted value rather
+  than the authoritative one, reasoning that the first replayed step overwrites it
+  immediately. Collapsing the two arguments to one did not turn any test red. The
+  reasoning stands, but the argument is recorded as currently unpinned by any test
+  rather than claimed as verified.
+- **Clean-link warm-up produced zero corrections**, exactly as the design implied: 120
+  ticks with no loss and no jitter is a link on which the server never starves, so
+  replay reproduces the server's own state exactly.
+
+### Whether the escape hatch is still needed
+
+**Approach B — per-player input-driven stepping — stays deferred, and now for a
+measured reason rather than a hopeful one.** It was named as the answer if the measured
+correction rate came back too high. At a realistic 5% loss the rate is zero; at 20%
+loss — well past what this design targets — it is 3 corrections per 1,000 ticks with a
+maximum (0.291 blocks) comfortably under half a block. The escape hatch was not needed,
+and that is now a number rather than an assumption.
+
+### Not reviewed, then reviewed
+
+Unlike Stage 2's tail, every task here went through the review round: Task 1 was
+itself a review of Stage 2's unreviewed `67960db..1efe189`, and each of Tasks 2–11 had
+either a full review or a scoped re-review before being marked complete. Nothing in
+this stage carries Stage 2's "not reviewed" caveat forward.
