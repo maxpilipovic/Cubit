@@ -51,6 +51,17 @@ struct LoadedMap
     std::uint64_t Hash = 0;
 };
 
+//How far behind the newest snapshot a remote player is drawn, in ticks. Six is
+//100 ms at 60 Hz - six snapshots of cushion, generous on purpose. Being late
+//costs a remote being drawn where they were; being early costs a guess that has
+//to be taken back, which is worse.
+constexpr int InterpolationDelayTicks = 6;
+
+//Samples kept per remote player. Enough for the interpolation delay plus a
+//burst of jitter; older ones can never be drawn, so keeping them is only
+//memory.
+constexpr std::size_t MaxRemoteSamples = 32;
+
 //The client half of a match. It predicts its own player and nothing else.
 //
 //Through Stage 2 it never stepped at all, deliberately, so the latency was
@@ -134,6 +145,29 @@ public:
 
     CorrectionStats Corrections() const;
 
+    //Where a remote player should be DRAWN this frame: interpolated between the
+    //two snapshots bracketing a point InterpolationDelayTicks behind the newest
+    //server tick this client has seen.
+    //
+    //A render-time query, not simulation state: it is deliberately never
+    //written back into the MatchState character, so simulation and rendering
+    //stay separate and nothing else can start depending on an interpolated
+    //position. Nothing needs one - players do not collide with each other.
+    //
+    //Not for the local player. That one is predicted, and drawing it six ticks
+    //in the past is exactly the lag this stage removes; asking for it returns
+    //an empty pose, because no samples are kept for it.
+    struct RemotePose
+    {
+        glm::vec3 Position{ 0.0f };
+        float Yaw = 0.0f;
+        float Pitch = 0.0f;
+    };
+
+    //`alpha` is the renderer's position within the current step - the same
+    //number it hands InterpolatedPosition.
+    RemotePose PoseOf(PlayerId player, float alpha) const;
+
 private:
     void HandleWelcome(std::span<const std::uint8_t> data);
     void HandleSnapshot(std::span<const std::uint8_t> data);
@@ -168,6 +202,24 @@ private:
     std::uint64_t m_LastSnapshotTick = 0;
 
     std::map<PlayerId, glm::vec2> m_ViewAngles;
+
+    //One remote player's pose as of one server tick.
+    struct RemoteSample
+    {
+        std::uint64_t ServerTick = 0;
+        glm::vec3 Position{ 0.0f };
+        float Yaw = 0.0f;
+        float Pitch = 0.0f;
+    };
+
+    std::map<PlayerId, std::deque<RemoteSample>> m_RemoteSamples;
+
+    //An estimate of the server's clock in ticks, for rendering only. Snapped to
+    //a snapshot's tick when one arrives, and advanced by one per step in
+    //between so a frame that falls between snapshots still has somewhere to
+    //interpolate to. Not a clock-synchronisation subsystem and not used by the
+    //simulation: nothing that affects state reads it.
+    double m_RemoteClock = 0.0;
 
     //One input the server has not yet acknowledged, kept so it can be replayed
     //on top of a correction.

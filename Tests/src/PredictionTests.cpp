@@ -236,3 +236,130 @@ TEST_CASE("A correction bigger than the threshold snaps")
     CHECK(client.Match().Player(client.LocalPlayer()).Position().x
         == doctest::Approx(predicted.x).epsilon(0.01));
 }
+
+namespace
+{
+    //Hand-built snapshots, so a test can say exactly where a remote was at
+    //exactly which tick. A real server would work too, but then the expected
+    //values would have to be read back out of it, and a test that asks the
+    //subject what the answer is proves very little.
+    SnapshotMessage SnapshotAt(std::uint64_t tick, PlayerId local, PlayerId remote,
+        const glm::vec3& remotePosition)
+    {
+        SnapshotMessage snapshot;
+        snapshot.Tick = tick;
+
+        PlayerSnapshot mine;
+        mine.Player = local;
+        mine.Position = Spawn;
+        mine.Grounded = true;
+
+        PlayerSnapshot theirs;
+        theirs.Player = remote;
+        theirs.Position = remotePosition;
+        theirs.Yaw = static_cast<float>(tick);
+        theirs.Grounded = true;
+
+        snapshot.Players = { mine, theirs };
+        return snapshot;
+    }
+}
+
+TEST_CASE("A remote player is drawn between the two samples that bracket the interpolation point")
+{
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    for (int i = 0; i < 5; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const PlayerId local = client.LocalPlayer();
+    const PlayerId remote = PlayerId{ static_cast<std::uint16_t>(local + 1) };
+
+    //Twenty snapshots, the remote walking one block per tick along x, so the
+    //expected interpolated x IS the interpolated tick. Any arithmetic error
+    //shows up as a number rather than as a wobble somebody has to see.
+    for (std::uint64_t tick = 100; tick <= 120; ++tick)
+    {
+        network.Server().Send(peer,
+            Encode(SnapshotAt(tick, local, remote, glm::vec3(static_cast<float>(tick), 2.0f, 8.0f))),
+            Channel::Unreliable);
+
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(client.ServerTick() == 120);
+
+    //Six ticks behind the newest snapshot (120) is tick 114, but m_RemoteClock
+    //has already advanced one tick past it: every one of these iterations
+    //delivers a snapshot AND runs one predicted client step in the same
+    //client.Step() call, and the advance happens after the snap. So the
+    //render clock reads 121, not 120, and the query lands on tick 115 - still
+    //an exact sample, so still "on the nose".
+    const MatchClient::RemotePose onTick = client.PoseOf(remote, 0.0f);
+    CHECK(onTick.Position.x == doctest::Approx(115.0f));
+
+    //And half a tick further on, which must be halfway between two samples
+    //rather than either of them.
+    const MatchClient::RemotePose halfway = client.PoseOf(remote, 0.5f);
+    CHECK(halfway.Position.x == doctest::Approx(115.5f));
+}
+
+TEST_CASE("A remote player is held, never extrapolated, when nothing new arrives")
+{
+    //The rule that keeps a remote honest. Guessing forward is right most of the
+    //time and wrong exactly when it matters - at a stop, a turn, or a jump -
+    //and being wrong means taking the guess back, which looks precisely like
+    //the stutter extrapolation was meant to prevent.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    for (int i = 0; i < 5; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const PlayerId local = client.LocalPlayer();
+    const PlayerId remote = PlayerId{ static_cast<std::uint16_t>(local + 1) };
+
+    for (std::uint64_t tick = 100; tick <= 110; ++tick)
+    {
+        network.Server().Send(peer,
+            Encode(SnapshotAt(tick, local, remote, glm::vec3(static_cast<float>(tick), 2.0f, 8.0f))),
+            Channel::Unreliable);
+
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //Nothing more arrives for a second.
+    for (int i = 0; i < 60; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+
+        //Never past the newest thing anybody actually said.
+        CHECK(client.PoseOf(remote, 0.0f).Position.x <= doctest::Approx(110.0f));
+    }
+
+    //And it settles on the newest sample rather than drifting back to the
+    //oldest or to the origin.
+    CHECK(client.PoseOf(remote, 0.0f).Position.x == doctest::Approx(110.0f));
+}

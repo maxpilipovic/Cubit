@@ -509,9 +509,10 @@ private:
 
     //Draws everyone else in the match as a wireframe box.
     //
-    //Interpolated between the last two snapshots rather than snapped to the
-    //newest, which is what MatchClient's SetState call preserves the previous
-    //position for. Single-player draws nothing here: there is nobody else.
+    //Drawn from MatchClient's interpolation ring, six ticks behind the newest
+    //server tick this client has seen, rather than snapped to the newest or
+    //extrapolated past it. Single-player draws nothing here: there is nobody
+    //else.
     void DrawRemotePlayers(float alpha)
     {
         if (!m_Client)
@@ -522,9 +523,13 @@ private:
             if (player == m_LocalPlayer)
                 continue;
 
-            const glm::vec3 centre = character.InterpolatedPosition(alpha);
+            //From the interpolation ring rather than from the character, which
+            //holds whatever the last snapshot said and steps between packets.
+            //The character is still what supplies the box: how big a player is
+            //is simulation, where they are drawn is not.
+            const MatchClient::RemotePose pose = m_Client->PoseOf(player, alpha);
             const glm::vec3 half = character.Config().HalfExtents;
-            DebugDraw::Box(centre - half, centre + half, RemotePlayerColor);
+            DebugDraw::Box(pose.Position - half, pose.Position + half, RemotePlayerColor);
         }
     }
 

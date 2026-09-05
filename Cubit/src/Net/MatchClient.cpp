@@ -108,6 +108,7 @@ void MatchClient::Step(double seconds)
     //snapshot has said where this player stands.
     m_Match.StepPlayer(m_LocalPlayer, m_Input, static_cast<float>(seconds));
     m_Match.SetTick(tick);
+    m_RemoteClock += 1.0;
 
     //The last three, oldest first. The redundancy is the whole defence against
     //the server stepping a tick with nothing to apply: one lost or late packet
@@ -220,6 +221,7 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
     //what an input is stamped with. Adopting the server's number here would
     //rewind it every snapshot and stamp two different inputs with one tick.
     m_ServerTick = snapshot.Tick;
+    m_RemoteClock = static_cast<double>(snapshot.Tick);
 
     std::vector<PlayerId> present;
     present.reserve(snapshot.Players.size());
@@ -268,6 +270,12 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             entry.Position, previous, entry.VerticalVelocity, entry.Grounded);
 
         m_ViewAngles[entry.Player] = glm::vec2(entry.Yaw, entry.Pitch);
+
+        std::deque<RemoteSample>& samples = m_RemoteSamples[entry.Player];
+        samples.push_back(RemoteSample{ snapshot.Tick, entry.Position, entry.Yaw, entry.Pitch });
+
+        if (samples.size() > MaxRemoteSamples)
+            samples.pop_front();
     }
 
     //Anybody the snapshot did not mention has left.
@@ -283,6 +291,7 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
     {
         m_Match.RemovePlayer(player);
         m_ViewAngles.erase(player);
+        m_RemoteSamples.erase(player);
     }
 }
 
@@ -393,4 +402,57 @@ glm::vec2 MatchClient::ViewAngles(PlayerId player) const
 double MatchClient::RoundTripTime() const
 {
     return m_ServerPeer == InvalidPeer ? 0.0 : m_Transport.RoundTripTime(m_ServerPeer);
+}
+
+MatchClient::RemotePose MatchClient::PoseOf(PlayerId player, float alpha) const
+{
+    const auto found = m_RemoteSamples.find(player);
+    if (found == m_RemoteSamples.end() || found->second.empty())
+        return RemotePose{};
+
+    const std::deque<RemoteSample>& samples = found->second;
+
+    //Deliberately in the past. Drawing at the newest sample would mean every
+    //packet that arrives late is a remote standing still and then jumping.
+    const double target = m_RemoteClock + alpha - InterpolationDelayTicks;
+
+    //Newer than anything anybody has said: HOLD, do not guess. Extrapolation
+    //is right most of the time and wrong exactly at a stop, a turn or a jump,
+    //and being wrong means taking it back.
+    const RemoteSample& newest = samples.back();
+    if (target >= static_cast<double>(newest.ServerTick))
+        return RemotePose{ newest.Position, newest.Yaw, newest.Pitch };
+
+    //Older than anything kept: the connection has been quiet for longer than
+    //the ring is deep. Hold the oldest for the same reason.
+    const RemoteSample& oldest = samples.front();
+    if (target <= static_cast<double>(oldest.ServerTick))
+        return RemotePose{ oldest.Position, oldest.Yaw, oldest.Pitch };
+
+    for (std::size_t i = 1; i < samples.size(); ++i)
+    {
+        const RemoteSample& previous = samples[i - 1];
+        const RemoteSample& next = samples[i];
+
+        if (target > static_cast<double>(next.ServerTick))
+            continue;
+
+        const double span = static_cast<double>(next.ServerTick - previous.ServerTick);
+        const float t = span <= 0.0
+            ? 0.0f
+            : static_cast<float>((target - static_cast<double>(previous.ServerTick)) / span);
+
+        RemotePose pose;
+        pose.Position = glm::mix(previous.Position, next.Position, t);
+
+        //Linear on purpose, and it takes the long way round across the ±180°
+        //seam. Nothing draws a remote's facing yet - DrawRemotePlayers is an
+        //axis-aligned box - so a wrap-aware lerp would be a guess with no way
+        //to see it working. Fix this when something first draws a facing.
+        pose.Yaw = glm::mix(previous.Yaw, next.Yaw, t);
+        pose.Pitch = glm::mix(previous.Pitch, next.Pitch, t);
+        return pose;
+    }
+
+    return RemotePose{ newest.Position, newest.Yaw, newest.Pitch };
 }
