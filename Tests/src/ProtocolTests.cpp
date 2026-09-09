@@ -165,12 +165,13 @@ TEST_CASE("Snapshot round-trips every player")
     CHECK(received.Players[1].LastInputTick == 0);
 }
 
-TEST_CASE("A two-player snapshot is 81 bytes")
+TEST_CASE("A two-player snapshot is 83 bytes")
 {
     //Pinned for the same reason the input bundle's size is: this is where the
-    //stage's 4,860 B/s per client comes from. 1 id + 8 tick + 2 count +
-    //2 x 35 = 81.
-    CHECK(Encode(TwoPlayerSnapshot()).size() == 81);
+    //stage's per-client bandwidth is quoted from. 1 id + 8 tick + 2 count +
+    //2 x 36 = 83. The per-entry width grew from 35 to 36 in protocol version 3,
+    //when PlayerSnapshot gained Health.
+    CHECK(Encode(TwoPlayerSnapshot()).size() == 83);
 }
 
 TEST_CASE("An empty roster is a legal snapshot")
@@ -313,4 +314,88 @@ TEST_CASE("A welcome declaring an edit count near its type's limit is refused wi
     bool ok = true;
     CHECK_NOTHROW(ok = Decode(writer.Span(), received));
     CHECK_FALSE(ok);
+}
+
+TEST_CASE("A fire message round-trips")
+{
+    FireMessage sent;
+    sent.ClientTick = 4321;
+    sent.RenderTick = 4300;
+    sent.RenderAlpha = 0.25f;
+    sent.Yaw = -137.5f;
+    sent.Pitch = 12.25f;
+
+    FireMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+
+    CHECK(received.ClientTick == 4321);
+    CHECK(received.RenderTick == 4300);
+    CHECK(received.RenderAlpha == doctest::Approx(0.25f));
+    CHECK(received.Yaw == doctest::Approx(-137.5f));
+    CHECK(received.Pitch == doctest::Approx(12.25f));
+}
+
+TEST_CASE("A shot resolution round-trips, hit and miss alike")
+{
+    ShotResolvedMessage hit;
+    hit.Shooter = 1;
+    hit.Victim = 2;
+    hit.Impact = glm::vec3(1.5f, -2.25f, 300.0f);
+    hit.VictimHealth = 66;
+    hit.Killed = false;
+
+    ShotResolvedMessage received;
+    REQUIRE(Decode(Encode(hit), received));
+    CHECK(received.Shooter == 1);
+    CHECK(received.Victim == 2);
+    CHECK(received.Impact.z == doctest::Approx(300.0f));
+    CHECK(received.VictimHealth == 66);
+    CHECK_FALSE(received.Killed);
+
+    ShotResolvedMessage miss;
+    miss.Shooter = 1;
+    miss.Victim = InvalidPlayer;
+    miss.Impact = glm::vec3(50.0f, 0.0f, 0.0f);
+    miss.Killed = false;
+
+    REQUIRE(Decode(Encode(miss), received));
+    CHECK(received.Victim == InvalidPlayer);
+}
+
+TEST_CASE("A snapshot carries health")
+{
+    SnapshotMessage sent;
+    sent.Tick = 9;
+    PlayerSnapshot entry;
+    entry.Player = 3;
+    entry.Health = 32;
+    sent.Players.push_back(entry);
+
+    SnapshotMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+    REQUIRE(received.Players.size() == 1);
+    CHECK(received.Players[0].Health == 32);
+}
+
+TEST_CASE("A fire message is not mistaken for a shot resolution")
+{
+    //The two directions must never be confused, which is why they are separate
+    //ids rather than one payload with a flag.
+    FireMessage fire;
+    ShotResolvedMessage resolved;
+
+    CHECK_FALSE(Decode(Encode(fire), resolved));
+    CHECK_FALSE(Decode(Encode(resolved), fire));
+}
+
+TEST_CASE("A truncated fire message is refused rather than half-read")
+{
+    const std::vector<std::uint8_t> whole = Encode(FireMessage{});
+
+    for (std::size_t length = 0; length < whole.size(); ++length)
+    {
+        FireMessage out;
+        const std::span<const std::uint8_t> truncated(whole.data(), length);
+        CHECK_FALSE(Decode(truncated, out));
+    }
 }

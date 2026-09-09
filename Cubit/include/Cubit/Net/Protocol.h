@@ -17,7 +17,7 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Every message the wire carries. Six, and deliberately not seven: there are no
+//Every message the wire carries. Eight, and deliberately not nine: there are no
 //join or leave messages, because a snapshot carries the whole roster every tick
 //and ids are never reused, so a client derives both by diffing what it held
 //last.
@@ -28,7 +28,9 @@ enum class MessageId : std::uint8_t
     Input = 3,
     Snapshot = 4,
     EditRequest = 5,
-    EditApplied = 6
+    EditApplied = 6,
+    Fire = 7,
+    ShotResolved = 8
 };
 
 //Bumped whenever any message's layout changes. A mismatch is a disconnect with
@@ -39,7 +41,10 @@ enum class MessageId : std::uint8_t
 //2: inputs became a bundle carrying a real client tick, and PlayerSnapshot
 //gained the ack that makes replay possible. Both are on the per-tick path,
 //which is exactly the case this counter exists for.
-constexpr std::uint32_t ProtocolVersion = 2;
+//
+//3: shooting. A Fire message, a ShotResolved answer, and a Health byte on
+//PlayerSnapshot. The last is on the per-tick path.
+constexpr std::uint32_t ProtocolVersion = 3;
 
 //How many inputs one InputMessage carries at most.
 //
@@ -111,6 +116,11 @@ struct PlayerSnapshot
     //agree about each other's numbering: each reads only its own entry, and
     //nobody else's is meaningful to it.
     std::uint64_t LastInputTick = 0;
+
+    //Current health, 0 to 100. Never predicted: a client displays what arrives
+    //and nothing more, because health changes only when a game rule fires and
+    //the client owns no game rules.
+    std::uint8_t Health = 0;
 };
 
 struct SnapshotMessage
@@ -127,12 +137,67 @@ struct EditMessage
     BlockEdit Edit;
 };
 
+//A client asking to shoot.
+//
+//Carries TWO instants, and conflating them is the mistake this stage is most
+//likely to make. ClientTick is when the shooter fired, in their own numbering,
+//and locates the shooter's own eye in the server's history. RenderTick plus
+//RenderAlpha is the instant the shooter's SCREEN was showing, in the SERVER's
+//numbering, and locates everybody else. They differ by roughly the interpolation
+//delay plus a one-way trip.
+struct FireMessage
+{
+    std::uint64_t ClientTick = 0;
+
+    //Whole part of the instant the shooter's screen was showing, in the
+    //server's tick numbering. Clamped by the server before it is believed.
+    std::uint64_t RenderTick = 0;
+
+    //Fractional part, in [0, 1). Carried because MatchClient::PoseOf
+    //interpolates between snapshots, so the screen showed the target BETWEEN
+    //two ticks; rewinding to a whole tick would aim at somewhere the target
+    //never appeared to be.
+    float RenderAlpha = 0.0f;
+
+    //Aim, in degrees, in the Heading.h convention.
+    //
+    //Sent rather than looked up from the input at ClientTick, because that
+    //input may have been dropped and may never arrive - and a shot that
+    //silently became a miss because its input packet was lost is
+    //indistinguishable from a bug in the rewind. Trusting client aim is
+    //already this design's position: yaw is an input, not simulated state.
+    float Yaw = 0.0f;
+    float Pitch = 0.0f;
+};
+
+//The server's ruling on one shot, sent to everybody.
+//
+//To everybody rather than to the two involved, so every client can draw the
+//tracer and the impact. At six shots a second and 19 bytes this is nothing
+//beside the 3,900 B/s snapshot stream.
+struct ShotResolvedMessage
+{
+    PlayerId Shooter = InvalidPlayer;
+
+    //InvalidPlayer when the shot hit terrain or nothing.
+    PlayerId Victim = InvalidPlayer;
+
+    //Where the ray stopped, whether that was a player, a block, or the end of
+    //its range. Always meaningful: something is drawn at the end of every shot.
+    glm::vec3 Impact{ 0.0f };
+
+    std::uint8_t VictimHealth = 0;
+    bool Killed = false;
+};
+
 CB_API std::vector<std::uint8_t> Encode(const HelloMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const WelcomeMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const InputMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const SnapshotMessage& message);
 CB_API std::vector<std::uint8_t> EncodeEditRequest(const EditMessage& message);
 CB_API std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message);
+CB_API std::vector<std::uint8_t> Encode(const FireMessage& message);
+CB_API std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message);
 
 //Each returns false and leaves `out` untouched when the bytes are truncated,
 //malformed, or of the wrong type. Malformed input is a routine wire condition
@@ -142,6 +207,8 @@ CB_API bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, InputMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out);
+CB_API bool Decode(std::span<const std::uint8_t> bytes, FireMessage& out);
+CB_API bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out);
 
 //Reads the leading id without consuming anything, so a receiver can pick a
 //decoder. False when the buffer is empty or the id is not one of the six.

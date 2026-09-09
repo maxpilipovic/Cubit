@@ -7,7 +7,11 @@ namespace
     //Bytes each entry costs on the wire. Used to reject an absurd count before
     //reserving for it, which is what stops a tiny hostile packet claiming a
     //huge collection from becoming a denial of service.
-    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8;
+    //
+    //The trailing 1 is Health, added in version 3. This constant MUST track
+    //the encoder: too small and the guard rejects packets that are perfectly
+    //valid, which looks like random snapshot loss rather than a decode bug.
+    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8 + 1;
     constexpr std::size_t BlockEditBytes = 12 + 2;
     constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
 
@@ -92,6 +96,7 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
         writer.F32(player.VerticalVelocity);
         writer.Bool(player.Grounded);
         writer.U64(player.LastInputTick);
+        writer.U8(player.Health);
     }
 
     return writer.Bytes();
@@ -110,6 +115,30 @@ std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message)
     ByteWriter writer;
     writer.U8(static_cast<std::uint8_t>(MessageId::EditApplied));
     WriteEdit(writer, message.Edit);
+    return writer.Bytes();
+}
+
+std::vector<std::uint8_t> Encode(const FireMessage& message)
+{
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::Fire));
+    writer.U64(message.ClientTick);
+    writer.U64(message.RenderTick);
+    writer.F32(message.RenderAlpha);
+    writer.F32(message.Yaw);
+    writer.F32(message.Pitch);
+    return writer.Bytes();
+}
+
+std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message)
+{
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::ShotResolved));
+    writer.U16(message.Shooter);
+    writer.U16(message.Victim);
+    writer.Vec3(message.Impact);
+    writer.U8(message.VictimHealth);
+    writer.Bool(message.Killed);
     return writer.Bytes();
 }
 
@@ -263,6 +292,7 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
         player.VerticalVelocity = reader.F32();
         player.Grounded = reader.Bool();
         player.LastInputTick = reader.U64();
+        player.Health = reader.U8();
         message.Players.push_back(player);
     }
 
@@ -287,6 +317,51 @@ bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out)
 
     EditMessage message;
     message.Edit = ReadEdit(reader);
+
+    if (!reader.Ok())
+        return false;
+
+    out = message;
+    return true;
+}
+
+bool Decode(std::span<const std::uint8_t> bytes, FireMessage& out)
+{
+    ByteReader reader(bytes);
+    if (!OpenAs(reader, MessageId::Fire))
+        return false;
+
+    FireMessage message;
+    message.ClientTick = reader.U64();
+    message.RenderTick = reader.U64();
+    message.RenderAlpha = reader.F32();
+    message.Yaw = reader.F32();
+    message.Pitch = reader.F32();
+
+    //No count field and no variable-length field, so there is nothing here to
+    //reserve on a hostile packet's word and no allocation guard to write. Worth
+    //saying so, because the guards in Decode(WelcomeMessage&) and
+    //Decode(SnapshotMessage&) are not decoration and must not be deleted by
+    //analogy with this one.
+    if (!reader.Ok())
+        return false;
+
+    out = message;
+    return true;
+}
+
+bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out)
+{
+    ByteReader reader(bytes);
+    if (!OpenAs(reader, MessageId::ShotResolved))
+        return false;
+
+    ShotResolvedMessage message;
+    message.Shooter = reader.U16();
+    message.Victim = reader.U16();
+    message.Impact = reader.Vec3();
+    message.VictimHealth = reader.U8();
+    message.Killed = reader.Bool();
 
     if (!reader.Ok())
         return false;
