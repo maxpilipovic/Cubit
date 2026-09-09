@@ -211,7 +211,7 @@ CB_API bool Decode(std::span<const std::uint8_t> bytes, FireMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out);
 
 //Reads the leading id without consuming anything, so a receiver can pick a
-//decoder. False when the buffer is empty or the id is not one of the six.
+//decoder. False when the buffer is empty or the id is not one of the eight.
 CB_API bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out);
 
 #ifdef _MSC_VER

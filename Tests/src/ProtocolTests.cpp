@@ -3,6 +3,7 @@
 #include "Cubit/Net/Protocol.h"
 
 #include <glm/glm.hpp>
+#include <utility>
 #include <vector>
 
 namespace
@@ -397,5 +398,30 @@ TEST_CASE("A truncated fire message is refused rather than half-read")
         FireMessage out;
         const std::span<const std::uint8_t> truncated(whole.data(), length);
         CHECK_FALSE(Decode(truncated, out));
+    }
+}
+
+TEST_CASE("Every message id the wire carries is recognised")
+{
+    //PeekMessageId gates dispatch: an id it refuses is a packet that vanishes
+    //with no error anywhere. Adding a message and forgetting this bound is the
+    //natural mistake, so every id is checked rather than only the new ones.
+    const std::vector<std::pair<std::vector<std::uint8_t>, MessageId>> cases{
+        { Encode(HelloMessage{}),                   MessageId::Hello },
+        { Encode(WelcomeMessage{}),                 MessageId::Welcome },
+        { Encode(InputMessage{}),                   MessageId::Input },
+        { Encode(SnapshotMessage{}),                MessageId::Snapshot },
+        { EncodeEditRequest(EditMessage{}),         MessageId::EditRequest },
+        { EncodeEditApplied(EditMessage{}),         MessageId::EditApplied },
+        { Encode(FireMessage{}),                    MessageId::Fire },
+        { Encode(ShotResolvedMessage{}),            MessageId::ShotResolved }
+    };
+
+    for (const auto& [bytes, expected] : cases)
+    {
+        MessageId id = MessageId::Hello;
+        CAPTURE(static_cast<int>(expected));
+        REQUIRE(PeekMessageId(bytes, id));
+        CHECK(id == expected);
     }
 }

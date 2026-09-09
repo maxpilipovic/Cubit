@@ -8,9 +8,19 @@ namespace
     //reserving for it, which is what stops a tiny hostile packet claiming a
     //huge collection from becoming a denial of service.
     //
-    //The trailing 1 is Health, added in version 3. This constant MUST track
-    //the encoder: too small and the guard rejects packets that are perfectly
-    //valid, which looks like random snapshot loss rather than a decode bug.
+    //The trailing 1 is Health, added in version 3. Keep this at the encoder's
+    //true entry width, but for the reason that is easy to get backwards: the
+    //guard below is `count > Remaining() / PlayerSnapshotBytes`, so a value
+    //SMALLER than the true width only raises that threshold and makes the
+    //guard MORE permissive - it cannot reject a complete, validly-encoded
+    //packet, only weaken the defence against a hostile oversized-count claim.
+    //A value LARGER than the true width is what would wrongly reject valid
+    //packets; this constant has never been set that way. Verified by
+    //mutation, not assumed: setting this to 35 (the pre-Health width) and
+    //rebuilding left the full suite green, not red - a resource guard gone
+    //slack is invisible to every test's return value on a well-formed packet,
+    //the same way the guard in Decode(SnapshotMessage&) below is invisible to
+    //one. Do not chase a red test by lowering this number; there isn't one.
     constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8 + 1;
     constexpr std::size_t BlockEditBytes = 12 + 2;
     constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
@@ -377,7 +387,7 @@ bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
 
     const std::uint8_t id = bytes[0];
     if (id < static_cast<std::uint8_t>(MessageId::Hello) ||
-        id > static_cast<std::uint8_t>(MessageId::EditApplied))
+        id > static_cast<std::uint8_t>(MessageId::ShotResolved))
         return false;
 
     out = static_cast<MessageId>(id);
