@@ -824,8 +824,15 @@ TEST_CASE("Half a tick of rewind error is enough to miss")
     Aabb rounded;
     REQUIRE(history.BoxAt(2, 91.0, PlayerHalfExtents, rounded));
 
-    //Aim at the trailing edge of where the target actually was.
-    const glm::vec3 aimPoint(exact.Min.x + 0.3f, 1.0f, exact.Min.z + 0.01f);
+    //Aim just inside the LEADING edge of where the target actually was.
+    //
+    //The edge matters and picking the wrong one makes this test unpassable.
+    //The rounded box is half a tick EARLIER, so it sits 0.042 blocks back
+    //along +z: exact spans [7.325, 7.925] and rounded spans [7.283, 7.883].
+    //The sliver that is in exact but not in rounded is the leading edge,
+    //(7.883, 7.925] - aiming near exact.Min.z lands inside BOTH boxes and the
+    //miss never happens.
+    const glm::vec3 aimPoint(exact.Min.x + 0.3f, 1.0f, exact.Max.z - 0.01f);
     const glm::vec3 eye(0.0f, 1.0f, aimPoint.z);
     const glm::vec3 direction = glm::normalize(aimPoint - eye);
 
