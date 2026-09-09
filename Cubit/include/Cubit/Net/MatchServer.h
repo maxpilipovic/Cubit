@@ -4,6 +4,7 @@
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/Transport.h"
 #include "Cubit/Voxel/BlockEdit.h"
+#include "Cubit/Voxel/HitboxHistory.h"
 #include "Cubit/Voxel/MatchState.h"
 #include "Cubit/Voxel/World.h"
 
@@ -43,6 +44,11 @@ public:
     //Every edit applied since construction, in application order. Sent to
     //joiners so a client arriving after somebody dug a hole sees the hole.
     const std::vector<BlockEdit>& EditLog() const { return m_EditLog; }
+
+    //Where everybody has recently been, which is what a shot is resolved
+    //against. Exposed for tests and for nothing else: the rewind happens in
+    //here.
+    const HitboxHistory& History() const { return m_History; }
 
     //Connected peers, whether or not they have completed the handshake.
     std::size_t ClientCount() const { return m_Clients.size(); }
@@ -146,6 +152,7 @@ private:
     std::vector<Client> m_Clients;
     std::vector<PendingEdit> m_PendingEdits;
     std::vector<BlockEdit> m_EditLog;
+    HitboxHistory m_History;
 };
 
 #ifdef _MSC_VER

@@ -682,6 +682,58 @@ TEST_CASE("A snapshot acknowledges the oldest input of the bundle first")
     }
 }
 
+TEST_CASE("Nothing is recorded for a player who does not exist")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    //Enough ticks to fill and overflow the ring, had anybody been in it.
+    for (int tick = 0; tick < 40; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.History().SampleCount(1) == 0);
+}
+
+TEST_CASE("A joined player's recorded history matches where the match stepped them")
+{
+    //The history must hold the positions the match actually produced, not an
+    //approximation of them: a rewind is only honest if it replays the server's
+    //own past.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    //Tick numbers paired with the position that tick produced, so the check
+    //below is against a middle tick rather than only the newest - the newest
+    //is the one value an off-by-one in the recorded tick can still get right.
+    std::vector<std::pair<std::uint64_t, glm::vec3>> stepped;
+    for (int tick = 0; tick < 10; ++tick)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+        stepped.emplace_back(server.Match().Tick() - 1,
+            server.Match().Player(player).Position());
+    }
+
+    const glm::vec3 halfExtents(0.3f, 0.9f, 0.3f);
+
+    for (const auto& [tick, position] : stepped)
+    {
+        CAPTURE(tick);
+
+        Aabb box;
+        REQUIRE(server.History().BoxAt(player, static_cast<double>(tick), halfExtents, box));
+
+        const glm::vec3 centre = (box.Min + box.Max) * 0.5f;
+        CHECK(centre.x == doctest::Approx(position.x));
+        CHECK(centre.y == doctest::Approx(position.y));
+        CHECK(centre.z == doctest::Approx(position.z));
+    }
+}
+
 TEST_CASE("A bundle carrying older ticks than are already queued is still applied oldest first")
 {
     //Every other test in this file sends bundles whose ticks are already

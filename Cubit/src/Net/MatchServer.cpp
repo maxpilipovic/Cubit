@@ -88,6 +88,18 @@ void MatchServer::Step(double seconds)
 
     m_Match.Step(commands, static_cast<float>(seconds));
 
+    //AFTER the step and BEFORE the snapshot, so the recorded position is the
+    //one this tick's snapshot reports. Recording before the step would store
+    //last tick's position under this tick's number, putting every rewind one
+    //step in the past - which would look exactly like a rewind that is
+    //slightly too aggressive rather than like an off-by-one.
+    //
+    //Tick() has already been incremented by Step, so the position just computed
+    //belongs to tick Tick() - 1.
+    const std::uint64_t recordedTick = m_Match.Tick() - 1;
+    for (const auto& [player, character] : m_Match.Players())
+        m_History.Record(player, recordedTick, character.Position());
+
     SendSnapshots();
 }
 
@@ -109,7 +121,10 @@ void MatchServer::HandleDisconnected(PeerId peer)
         return;
 
     if (found->Player != InvalidPlayer)
+    {
         m_Match.RemovePlayer(found->Player);
+        m_History.Forget(found->Player);
+    }
 
     m_Clients.erase(found);
 }
