@@ -988,3 +988,39 @@ TEST_CASE("The clamp applies to the combined instant, not to RenderTick before R
     CHECK(zeroAlpha.y == doctest::Approx(nearWholeAlpha.y));
     CHECK(zeroAlpha.z == doctest::Approx(nearWholeAlpha.z));
 }
+
+TEST_CASE("A shot accepted on the server's tick zero still guards the next one")
+{
+    //Hello and Fire both arrive before this server has stepped even once, so
+    //both are handled inside the SAME Step call, before m_Match.Step has
+    //incremented the tick off its starting value - HandleFire therefore runs
+    //with Tick() == 0. That is a real tick a shot can land on, not a spare
+    //value free for "never fired" to mean.
+    //
+    //Join() cannot set this scenario up: it steps at least once waiting for
+    //Welcome, so Tick() >= 1 in every fire this file sends elsewhere.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& shooter = network.AddClient(peer);
+
+    shooter.Send(LoopbackNetwork::ServerPeer, Encode(HelloMessage{}), Channel::Reliable);
+    SendFire(shooter, 1, 0, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int firstCount = 0;
+    const std::optional<ShotResolvedMessage> first = LastShotResolved(shooter, firstCount);
+    REQUIRE(first.has_value());
+
+    //One tick later - well inside the ten-tick fire rate - a second shot must
+    //still be dropped. A LastShotTick of 0 mistaken for "has not fired" would
+    //let this one through.
+    SendFire(shooter, 2, 0, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int secondCount = 0;
+    LastShotResolved(shooter, secondCount);
+
+    CHECK(secondCount == 0);
+}

@@ -306,7 +306,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     const std::uint64_t now = m_Match.Tick();
 
     //The fire rate, which is also the flood guard.
-    if (shooter.LastShotTick != 0 && now - shooter.LastShotTick < static_cast<std::uint64_t>(TicksBetweenShots))
+    if (shooter.HasFired && now - shooter.LastShotTick < static_cast<std::uint64_t>(TicksBetweenShots))
     {
         if (!shooter.FireRateWarned)
         {
@@ -322,6 +322,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     }
 
     shooter.FireRateWarned = false;
+    shooter.HasFired = true;
     shooter.LastShotTick = now;
 
     //THE CLAMP. Applied to the combined fractional instant, never to the whole

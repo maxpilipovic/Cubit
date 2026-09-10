@@ -107,9 +107,17 @@ private:
         float Pitch = 0.0f;
 
         //Server tick of this client's last accepted shot, for the fire rate.
-        //Zero means they have not fired; the first shot of a match is
-        //therefore always allowed.
+        //Meaningless until HasFired is set - tick 0 is a real tick a shot can
+        //land on (a Hello and a Fire can both be handled inside the very
+        //first Step, before m_Match.Step has incremented the counter even
+        //once), so it cannot double as its own "never fired" sentinel.
         std::uint64_t LastShotTick = 0;
+
+        //Set on this client's first accepted shot and never cleared, so the
+        //fire rate can tell "never fired" apart from "fired on tick 0" - the
+        //two are otherwise indistinguishable and the first shot of a match is
+        //therefore always allowed regardless of which one it was.
+        bool HasFired = false;
 
         //Set once a shot has been dropped for the fire rate and cleared once
         //one is accepted, so a client holding the button down logs one warning
