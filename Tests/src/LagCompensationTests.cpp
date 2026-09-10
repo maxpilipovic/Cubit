@@ -551,9 +551,10 @@ TEST_CASE("A shot aimed where the client renders a target hits it, through the w
     //strafes across the other's line of sight; the other aims at the pose it is
     //DRAWING and fires. Every shot must connect.
     //
-    //Sixty shots rather than a handful: at twenty ticks apart they span ten
-    //strafe reversals and about twenty deaths, so a rewind that only works away
-    //from a turn, or only before the first respawn, has nowhere to hide.
+    //Sixty shots rather than a handful: thirty ticks apart, and with a forty-tick
+    //pause after each death, they span about 2,600 ticks - some forty strafe
+    //reversals and, as the run reports, twenty deaths. A rewind that only works
+    //away from a turn, or only before the first respawn, has nowhere to hide.
     const RunOutcome outcome = FireAtAStrafingTarget(ShootingRun{ 3, 60, 0.05f });
 
     REQUIRE(outcome.Fired == 60);
