@@ -20,6 +20,16 @@
 #pragma warning(disable: 4251)
 #endif
 
+//Minimum ticks between one client's shots. Ten is six shots a second.
+//
+//It is the weapon's rate of fire and, at the same time, the flood answer for a
+//new reliable client-to-server message: a client that spams Fire has its extras
+//dropped rather than queued.
+constexpr int TicksBetweenShots = 10;
+
+//How far a shot carries, in blocks.
+constexpr float ShotRange = 128.0f;
+
 //The authority. Owns the only MatchState anybody is entitled to believe.
 //
 //Holds no window, no renderer and no GL context, so it runs anywhere a World
@@ -95,6 +105,17 @@ private:
         //characters are drawn facing the right way.
         float Yaw = 0.0f;
         float Pitch = 0.0f;
+
+        //Server tick of this client's last accepted shot, for the fire rate.
+        //Zero means they have not fired; the first shot of a match is
+        //therefore always allowed.
+        std::uint64_t LastShotTick = 0;
+
+        //Set once a shot has been dropped for the fire rate and cleared once
+        //one is accepted, so a client holding the button down logs one warning
+        //per episode rather than one per dropped shot. Same shape as
+        //QueueOverflowWarned.
+        bool FireRateWarned = false;
     };
 
     //An edit waiting for this tick's ordered application.
@@ -111,6 +132,10 @@ private:
     //Applies this tick's edits in player-id order and tells every joined client
     //about each one that actually changed the world.
     void ApplyPendingEdits();
+
+    //Resolves one shot against the world as the shooter saw it and tells
+    //everybody the answer.
+    void HandleFire(Client& shooter, const FireMessage& fire);
 
     void SendSnapshots();
 

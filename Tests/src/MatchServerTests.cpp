@@ -108,6 +108,55 @@ namespace
 
         return InvalidPlayer;
     }
+
+    //Sends one input for a client's own tick, the way MatchClient does.
+    //Unreliable, matching the real client - inputs are the one thing on this
+    //wire that is cheaper to lose than to delay.
+    void SendInput(Transport& client, std::uint64_t tick, const CharacterInput& input)
+    {
+        InputMessage message;
+        message.FirstTick = tick;
+        message.Inputs.push_back(input);
+        client.Send(LoopbackNetwork::ServerPeer, Encode(message), Channel::Unreliable);
+    }
+
+    //Fires one shot, claiming an instant and an aim.
+    void SendFire(Transport& client, std::uint64_t clientTick, std::uint64_t renderTick,
+        float renderAlpha, float yaw, float pitch)
+    {
+        FireMessage fire;
+        fire.ClientTick = clientTick;
+        fire.RenderTick = renderTick;
+        fire.RenderAlpha = renderAlpha;
+        fire.Yaw = yaw;
+        fire.Pitch = pitch;
+        client.Send(LoopbackNetwork::ServerPeer, Encode(fire), Channel::Reliable);
+    }
+
+    //The newest shot ruling waiting on this endpoint, and how many arrived.
+    //The count matters on its own for the fire rate, where the question is
+    //whether a second ruling exists at all.
+    std::optional<ShotResolvedMessage> LastShotResolved(Transport& transport, int& count)
+    {
+        std::optional<ShotResolvedMessage> latest;
+        count = 0;
+
+        NetEvent event;
+        while (transport.Poll(event))
+        {
+            if (event.Type != NetEventType::Message)
+                continue;
+
+            ShotResolvedMessage resolved;
+            if (Decode(event.Data, resolved))
+            {
+                latest = resolved;
+                ++count;
+            }
+        }
+
+        return latest;
+    }
 }
 
 TEST_CASE("A server with no clients still ticks")
@@ -765,4 +814,177 @@ TEST_CASE("A bundle carrying older ticks than are already queued is still applie
         REQUIRE(snapshot->Players.size() == 1);
         CHECK(snapshot->Players[0].LastInputTick == expected);
     }
+}
+
+TEST_CASE("A shot claiming an ancient instant is clamped into the window")
+{
+    //A lying client gets aimed at a quarter-second-old world, which is exactly
+    //what an honest 250 ms player gets. The lie buys nothing, and that is the
+    //entire trust story for RenderTick.
+    //
+    //Falsifiable because of how BoxAt answers an instant it has no record of:
+    //WITHOUT the clamp, tick 0 falls before the target's oldest sample, so the
+    //target is not a candidate and the shot comes back a miss.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId shooterPeer = InvalidPeer;
+    Transport& shooter = network.AddClient(shooterPeer);
+    const PlayerId shooterId = Join(server, shooter);
+
+    PeerId targetPeer = InvalidPeer;
+    Transport& target = network.AddClient(targetPeer);
+    const PlayerId targetId = Join(server, target);
+
+    REQUIRE(shooterId != InvalidPlayer);
+    REQUIRE(targetId != InvalidPlayer);
+
+    //Walk the target away along +x, then let them stand. Yaw 0 faces +x and
+    //Move.y walks forward, per Heading.h and CharacterInput.
+    CharacterInput walk;
+    walk.Move = glm::vec2(0.0f, 1.0f);
+    walk.Yaw = 0.0f;
+
+    for (std::uint64_t tick = 0; tick < 30; ++tick)
+    {
+        SendInput(target, tick, walk);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //Standing still for longer than the ring is deep, so every instant in the
+    //window reports the same position and the two shots below are comparable.
+    for (int tick = 0; tick < 20; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    int ignored = 0;
+    LastShotResolved(shooter, ignored);
+
+    //An honest claim: the oldest instant the window allows.
+    SendFire(shooter, 1, server.Match().Tick() - MaxRewindTicks, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int honestCount = 0;
+    const std::optional<ShotResolvedMessage> honest = LastShotResolved(shooter, honestCount);
+    REQUIRE(honest.has_value());
+
+    for (int tick = 0; tick < TicksBetweenShots; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    //A claim from before the match had any history at all.
+    SendFire(shooter, 2, 0, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int liarCount = 0;
+    const std::optional<ShotResolvedMessage> liar = LastShotResolved(shooter, liarCount);
+    REQUIRE(liar.has_value());
+
+    CHECK(honest->Victim == targetId);
+    CHECK(liar->Victim == targetId);
+}
+
+TEST_CASE("A second shot within the fire rate is dropped")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& shooter = network.AddClient(peer);
+    REQUIRE(Join(server, shooter) != InvalidPlayer);
+
+    int ignored = 0;
+    LastShotResolved(shooter, ignored);
+
+    SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    SendFire(shooter, 2, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int count = 0;
+    LastShotResolved(shooter, count);
+
+    //One ruling, not two: the second shot came a tick after the first, and the
+    //weapon fires once every ten.
+    CHECK(count == 1);
+}
+
+TEST_CASE("A fire before the handshake is ignored")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& stranger = network.AddClient(peer);
+
+    //No Hello. A peer exists; a player does not.
+    SendFire(stranger, 1, 0, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    int count = 0;
+    LastShotResolved(stranger, count);
+
+    CHECK(count == 0);
+    CHECK(server.Match().Players().empty());
+}
+
+TEST_CASE("The clamp applies to the combined instant, not to RenderTick before RenderAlpha is added")
+{
+    //A claim of RenderTick 0 is so far outside a 15-tick window that no
+    //RenderAlpha in [0, 1) can pull it back in - clamping the combined instant
+    //lands on exactly the same tick regardless of what RenderAlpha says. A
+    //clamp that clamped RenderTick alone and added RenderAlpha afterwards
+    //would let that alpha survive as a fractional offset nobody claimed to be
+    //at, and a target walking the whole time would be hit somewhere else for
+    //it.
+    //
+    //"A shot claiming an ancient instant is clamped into the window" cannot
+    //catch that bug: it lets the target come to rest well before firing, so
+    //the entire rewind window reports one position and a fractional offset
+    //inside it is invisible no matter what RenderAlpha claims. This one never
+    //lets the target stop.
+    const auto fireAndGetImpact = [](float alpha) -> glm::vec3
+    {
+        LoopbackNetwork network;
+        MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+        PeerId shooterPeer = InvalidPeer;
+        Transport& shooter = network.AddClient(shooterPeer);
+        const PlayerId shooterId = Join(server, shooter);
+
+        PeerId targetPeer = InvalidPeer;
+        Transport& target = network.AddClient(targetPeer);
+        const PlayerId targetId = Join(server, target);
+
+        REQUIRE(shooterId != InvalidPlayer);
+        REQUIRE(targetId != InvalidPlayer);
+
+        CharacterInput walk;
+        walk.Move = glm::vec2(0.0f, 1.0f);
+        walk.Yaw = 0.0f;
+
+        for (std::uint64_t tick = 0; tick < 50; ++tick)
+        {
+            SendInput(target, tick, walk);
+            server.Step(FrameClock::FixedStepSeconds);
+        }
+
+        int ignored = 0;
+        LastShotResolved(shooter, ignored);
+
+        SendFire(shooter, 1, 0, alpha, 0.0f, 0.0f);
+        server.Step(FrameClock::FixedStepSeconds);
+
+        int count = 0;
+        const std::optional<ShotResolvedMessage> resolved = LastShotResolved(shooter, count);
+        REQUIRE(resolved.has_value());
+        REQUIRE(resolved->Victim == targetId);
+        return resolved->Impact;
+    };
+
+    const glm::vec3 zeroAlpha = fireAndGetImpact(0.0f);
+    const glm::vec3 nearWholeAlpha = fireAndGetImpact(0.99f);
+
+    CHECK(zeroAlpha.x == doctest::Approx(nearWholeAlpha.x));
+    CHECK(zeroAlpha.y == doctest::Approx(nearWholeAlpha.y));
+    CHECK(zeroAlpha.z == doctest::Approx(nearWholeAlpha.z));
 }

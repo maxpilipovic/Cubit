@@ -29,3 +29,25 @@ inline glm::vec3 HeadingRight(float yawDegrees)
     const float yaw = glm::radians(yawDegrees);
     return glm::vec3(-std::sin(yaw), 0.0f, std::cos(yaw));
 }
+
+//Full 3D aim direction from a yaw and a pitch, both in degrees.
+//
+//The pitched sibling of HeadingForward, and the note above about pitch being
+//deliberately absent still stands for everything it was written about: WALKING
+//must not change when you look up. Aiming is the case that reasoning does not
+//cover - a shot goes where you are looking, including up and down.
+//
+//Identical to PerspectiveCamera::RecalculateViewMatrix's forward vector, and
+//HeadingTests pins the two together rather than reading the formula twice. If
+//they ever drift, every shot lands somewhere other than the crosshair while
+//every unit test still passes.
+inline glm::vec3 AimDirection(float yawDegrees, float pitchDegrees)
+{
+    const float yaw = glm::radians(yawDegrees);
+    const float pitch = glm::radians(pitchDegrees);
+
+    return glm::normalize(glm::vec3(
+        std::cos(yaw) * std::cos(pitch),
+        std::sin(pitch),
+        std::sin(yaw) * std::cos(pitch)));
+}

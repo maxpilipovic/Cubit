@@ -67,3 +67,27 @@ TEST_CASE("Yaw zero faces positive x, with right toward positive z")
     CHECK(HeadingRight(0.0f).x == doctest::Approx(0.0f));
     CHECK(HeadingRight(0.0f).z == doctest::Approx(1.0f));
 }
+
+TEST_CASE("AimDirection matches what the camera renders with")
+{
+    //The shot must leave along the direction the crosshair points. Pinned
+    //against the camera itself, not against a second reading of the formula -
+    //the same standard HeadingForward is held to in this file.
+    for (const float yaw : { -180.0f, -90.0f, 0.0f, 37.5f, 90.0f, 179.0f })
+    {
+        for (const float pitch : { -89.0f, -45.0f, 0.0f, 22.5f, 89.0f })
+        {
+            PerspectiveCamera camera(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+            camera.SetRotation(yaw, pitch);
+
+            const glm::vec3 expected = camera.GetForwardDirection();
+            const glm::vec3 actual = AimDirection(yaw, pitch);
+
+            CAPTURE(yaw);
+            CAPTURE(pitch);
+            CHECK(actual.x == doctest::Approx(expected.x));
+            CHECK(actual.y == doctest::Approx(expected.y));
+            CHECK(actual.z == doctest::Approx(expected.z));
+        }
+    }
+}

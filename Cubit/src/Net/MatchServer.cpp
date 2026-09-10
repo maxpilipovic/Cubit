@@ -3,6 +3,8 @@
 #include "Cubit/Net/MatchServer.h"
 
 #include "Cubit/Logger.h"
+#include "Cubit/Voxel/Heading.h"
+#include "Cubit/Voxel/ResolveShot.h"
 
 #include <algorithm>
 #include <optional>
@@ -244,11 +246,22 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         return;
     }
 
+    case MessageId::Fire:
+    {
+        FireMessage fire;
+        if (!Decode(data, fire) || client->Player == InvalidPlayer)
+            return;
+
+        HandleFire(*client, fire);
+        return;
+    }
+
     //Server-to-client messages arriving at a server are malformed traffic, not
     //something to act on.
     case MessageId::Welcome:
     case MessageId::Snapshot:
     case MessageId::EditApplied:
+    case MessageId::ShotResolved:
         return;
     }
 }
@@ -286,6 +299,76 @@ void MatchServer::ApplyPendingEdits()
     }
 
     m_PendingEdits.clear();
+}
+
+void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
+{
+    const std::uint64_t now = m_Match.Tick();
+
+    //The fire rate, which is also the flood guard.
+    if (shooter.LastShotTick != 0 && now - shooter.LastShotTick < static_cast<std::uint64_t>(TicksBetweenShots))
+    {
+        if (!shooter.FireRateWarned)
+        {
+            //CB_WARN takes ONE argument and does no formatting - it is
+            //`Logger::Warn(message)`. Build the string, matching how the
+            //input-queue warning a few lines up already does it.
+            CB_WARN("Dropping a shot from player " + std::to_string(shooter.Player)
+                + " fired faster than the weapon allows");
+            shooter.FireRateWarned = true;
+        }
+
+        return;
+    }
+
+    shooter.FireRateWarned = false;
+    shooter.LastShotTick = now;
+
+    //THE CLAMP. Applied to the combined fractional instant, never to the whole
+    //part alone: clamping the two separately would let a claim of tick 0 with
+    //alpha 0.9 survive as a fractional offset on a completely different tick.
+    const double claimed = static_cast<double>(fire.RenderTick) + static_cast<double>(fire.RenderAlpha);
+    const double newest = static_cast<double>(now);
+    const double oldest = newest - static_cast<double>(MaxRewindTicks);
+    const double instant = glm::clamp(claimed, oldest, newest);
+
+    //THE TARGETS rewind to the instant the shooter's screen was showing.
+    std::vector<ShotCandidate> candidates;
+    for (const auto& [player, character] : m_Match.Players())
+    {
+        //Never a candidate against their own shot.
+        if (player == shooter.Player)
+            continue;
+
+        Aabb box;
+        //False means there is no record of them at that instant - they joined
+        //after it, or they have respawned since. Not a hit of zero size.
+        if (!m_History.BoxAt(player, instant, character.Config().HalfExtents, box))
+            continue;
+
+        candidates.push_back(ShotCandidate{ player, box });
+    }
+
+    //THE SHOOTER'S OWN EYE comes from a different instant: the tick the server
+    //last stepped them, which is where it already believes they stand. Using
+    //the render instant here would put their eye a round trip behind where they
+    //believe they are, and every shot fired while moving would leave from the
+    //wrong place.
+    const CharacterController& character = m_Match.Player(shooter.Player);
+    const glm::vec3 eye = character.Position() + glm::vec3(0.0f, character.Config().EyeOffset, 0.0f);
+    const glm::vec3 direction = AimDirection(fire.Yaw, fire.Pitch);
+
+    const ShotResult shot = ResolveShot(
+        m_Match.GetWorld(), candidates, eye, direction, ShotRange);
+
+    ShotResolvedMessage resolved;
+    resolved.Shooter = shooter.Player;
+    resolved.Victim = shot.Victim;
+    resolved.Impact = shot.Impact;
+    resolved.VictimHealth = 0;
+    resolved.Killed = false;
+
+    SendToJoined(Encode(resolved), Channel::Reliable);
 }
 
 void MatchServer::SendSnapshots()
