@@ -697,3 +697,178 @@ TEST_CASE("A replay uses the step length prediction used")
 
     CHECK(client.Match().Player(localPlayer).Position() != atFixedStep.Player(localPlayer).Position());
 }
+
+namespace
+{
+    //Same shape as MatchServerTests.cpp's LastShotResolved, but reading a
+    //FireMessage off the SERVER end of the loopback - what the client actually
+    //put on the wire, not what it meant to send.
+    std::optional<FireMessage> LastFire(Transport& transport, int& count)
+    {
+        std::optional<FireMessage> latest;
+        count = 0;
+
+        NetEvent event;
+        while (transport.Poll(event))
+        {
+            if (event.Type != NetEventType::Message)
+                continue;
+
+            FireMessage fire;
+            if (Decode(event.Data, fire))
+            {
+                latest = fire;
+                ++count;
+            }
+        }
+
+        return latest;
+    }
+}
+
+TEST_CASE("A fired shot declares the instant the client is rendering")
+{
+    //The client must send the SAME instant PoseOf is drawing at, because that
+    //is the whole contract: the server reproduces the shooter's screen. Any
+    //other number and the server aims at a target the shooter never saw.
+    //
+    //m_RemoteClock has no accessor, and re-deriving it from ServerTick() here
+    //would make this a second reading of the same formula rather than a test
+    //of it - the same standard HeadingTests already holds AimDirection to,
+    //pinned against the camera rather than against a re-reading of the
+    //trigonometry. So this reuses the oracle from "A remote player is drawn
+    //between the two samples that bracket the interpolation point" below: a
+    //remote walking one block per tick along x, so PoseOf's returned
+    //Position.x IS the interpolated tick number, in units PoseOf actually
+    //drew rather than in the formula's own terms. If Fire declares the same
+    //instant PoseOf is drawing at, the two numbers must agree.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    for (int i = 0; i < 5; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    const PlayerId local = client.LocalPlayer();
+    const PlayerId remote = PlayerId{ static_cast<std::uint16_t>(local + 1) };
+
+    //Identical setup to the interpolation test below: twenty snapshots, the
+    //remote walking one block per tick along x, landing m_RemoteClock at 121
+    //for the same reason explained there.
+    for (std::uint64_t tick = 100; tick <= 120; ++tick)
+    {
+        network.Server().Send(peer,
+            Encode(SnapshotAt(tick, local, remote, glm::vec3(static_cast<float>(tick), 2.0f, 8.0f))),
+            Channel::Unreliable);
+
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(client.ServerTick() == 120);
+
+    //A nonzero alpha, so the fractional part - RenderAlpha - is actually
+    //exercised. A whole-number alpha would leave it at zero and prove nothing
+    //about the split between RenderTick and RenderAlpha.
+    constexpr float alpha = 0.5f;
+
+    //THE ORACLE: what PoseOf actually drew for this alpha, read back as a tick
+    //number because the remote walks one block per tick.
+    const double drawnInstant = static_cast<double>(client.PoseOf(remote, alpha).Position.x);
+
+    //Twenty ticks of this client's own unreliable Input traffic are sitting
+    //unconsumed on the server end, because this test never calls
+    //server.Step() past the handshake - draining them here first means the
+    //helper below finds only the shot.
+    int ignored = 0;
+    LastFire(network.Server(), ignored);
+
+    client.Fire(alpha);
+
+    int count = 0;
+    const std::optional<FireMessage> fire = LastFire(network.Server(), count);
+    REQUIRE(fire.has_value());
+    CHECK(count == 1);
+
+    const double declaredInstant =
+        static_cast<double>(fire->RenderTick) + static_cast<double>(fire->RenderAlpha);
+
+    //THE PROPERTY: the instant Fire put on the wire is the same instant PoseOf
+    //actually drew, pinned through what was rendered rather than through the
+    //formula the two share.
+    CHECK(declaredInstant == doctest::Approx(drawnInstant));
+}
+
+TEST_CASE("A shot resolution is reported to the caller")
+{
+    //LastShot exists so the Sandbox can draw a hit marker for as many frames
+    //as it likes, without the Sandbox keeping its own callback or its own
+    //clock - so what matters here is that decoding populates every field the
+    //wire message carries, not that a real shot found a real target. A
+    //hand-built ShotResolvedMessage, sent directly the way SnapshotAt is sent
+    //above, pins the decode without needing live geometry to actually hit -
+    //that geometry is Task 2's and Task 9's, not this one's.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    for (int i = 0; i < 5; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    //Nothing to report before anything has arrived.
+    CHECK_FALSE(client.LastShot().has_value());
+
+    const PlayerId shooter = client.LocalPlayer();
+    const PlayerId victim = PlayerId{ static_cast<std::uint16_t>(shooter + 1) };
+
+    //Every field set away from ShotReport's own default - InvalidPlayer,
+    //the zero vector, 0, false - so a HandleShotResolved that forgot to copy
+    //one would leave it reading the default and this test would not notice.
+    //VictimHealth is 51 rather than the 0 a real kill would carry, on
+    //purpose: this message is hand-built rather than a real server's ruling,
+    //so there is no reason to let Killed's realistic correlation with health
+    //quietly cover for VictimHealth never being copied at all.
+    ShotResolvedMessage resolved;
+    resolved.Shooter = shooter;
+    resolved.Victim = victim;
+    resolved.Impact = glm::vec3(4.0f, 2.0f, 6.0f);
+    resolved.VictimHealth = 51;
+    resolved.Killed = true;
+
+    network.Server().Send(peer, Encode(resolved), Channel::Reliable);
+
+    const std::uint64_t tickBeforeArrival = client.Match().Tick();
+
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    REQUIRE(client.LastShot().has_value());
+    const MatchClient::ShotReport& report = *client.LastShot();
+
+    CHECK(report.Shooter == shooter);
+    CHECK(report.Victim == victim);
+    CHECK(report.Impact == resolved.Impact);
+    CHECK(report.VictimHealth == resolved.VictimHealth);
+    CHECK(report.Killed == resolved.Killed);
+
+    //The message is decoded during Step's drain, before that step's own tick
+    //advance - so the tick it is stamped with is the one this client was on
+    //when the ruling arrived, not the one it reaches by the time Step returns.
+    CHECK(report.ReceivedAtTick == tickBeforeArrival);
+}

@@ -169,10 +169,46 @@ public:
     //number it hands InterpolatedPosition.
     RemotePose PoseOf(PlayerId player, float alpha) const;
 
+    //Asks the server to resolve a shot, declaring the instant this client is
+    //currently rendering remote players at.
+    //
+    //`alpha` is the renderer's position within the current step - the same
+    //number handed to PoseOf, and it must be the same value in the same frame.
+    //Passing a different one asks the server to rewind to an instant this
+    //client never drew.
+    //
+    //Nothing happens locally. Whether the shot HIT is the server's to say, and
+    //showing a hit marker that could be retracted is worse than showing one a
+    //round trip late.
+    void Fire(float alpha);
+
+    //The server's ruling on the most recent shot anybody fired, or nothing if
+    //no shot has been resolved yet. Held rather than delivered by callback so
+    //the Sandbox can draw it for as many frames as it likes.
+    struct ShotReport
+    {
+        PlayerId Shooter = InvalidPlayer;
+        PlayerId Victim = InvalidPlayer;
+        glm::vec3 Impact{ 0.0f };
+        std::uint8_t VictimHealth = 0;
+        bool Killed = false;
+
+        //This client's own tick when the ruling arrived, so a caller can fade
+        //the marker out without keeping its own clock.
+        std::uint64_t ReceivedAtTick = 0;
+    };
+
+    const std::optional<ShotReport>& LastShot() const { return m_LastShot; }
+
+    //This client's own health, as last reported by a snapshot. Zero before the
+    //first snapshot arrives.
+    std::uint8_t LocalHealth() const { return m_LocalHealth; }
+
 private:
     void HandleWelcome(std::span<const std::uint8_t> data);
     void HandleSnapshot(std::span<const std::uint8_t> data);
     void HandleEditApplied(std::span<const std::uint8_t> data);
+    void HandleShotResolved(std::span<const std::uint8_t> data);
 
     //Writes the authoritative state in, replays what the server has not
     //acknowledged, and decides whether the difference is worth showing.
@@ -252,6 +288,9 @@ private:
     std::uint64_t m_CorrectionCount = 0;
     float m_CorrectionTotal = 0.0f;
     float m_CorrectionMax = 0.0f;
+
+    std::optional<ShotReport> m_LastShot;
+    std::uint8_t m_LocalHealth = 0;
 };
 
 #ifdef _MSC_VER

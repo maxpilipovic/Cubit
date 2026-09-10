@@ -5,6 +5,7 @@
 #include "Cubit/Logger.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -68,15 +69,17 @@ void MatchClient::Step(double seconds)
 
             switch (id)
             {
-            case MessageId::Welcome:     HandleWelcome(event.Data); break;
-            case MessageId::Snapshot:    HandleSnapshot(event.Data); break;
-            case MessageId::EditApplied: HandleEditApplied(event.Data); break;
+            case MessageId::Welcome:      HandleWelcome(event.Data); break;
+            case MessageId::Snapshot:     HandleSnapshot(event.Data); break;
+            case MessageId::EditApplied:  HandleEditApplied(event.Data); break;
+            case MessageId::ShotResolved: HandleShotResolved(event.Data); break;
 
             //Client-to-server messages arriving at a client are malformed
             //traffic, not something to act on.
             case MessageId::Hello:
             case MessageId::Input:
             case MessageId::EditRequest:
+            case MessageId::Fire:
                 break;
             }
             break;
@@ -256,6 +259,7 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         //check is belt and braces.
         if (entry.Player == m_LocalPlayer && m_Match.HasPlayer(entry.Player))
         {
+            m_LocalHealth = entry.Health;
             Reconcile(entry);
             continue;
         }
@@ -366,6 +370,49 @@ MatchClient::CorrectionStats MatchClient::Corrections() const
         ? 0.0f
         : m_CorrectionTotal / static_cast<float>(m_CorrectionCount);
     return stats;
+}
+
+void MatchClient::Fire(float alpha)
+{
+    if (!m_Connected)
+        return;
+
+    //EXACTLY the instant PoseOf draws at for this alpha. Duplicated
+    //deliberately rather than factored out: the two are one contract, and a
+    //shared helper would hide that changing one changes the other.
+    const double instant = m_RemoteClock + static_cast<double>(alpha) - InterpolationDelayTicks;
+
+    //A negative instant cannot be split into a whole tick and a fraction in
+    //[0, 1), and it happens for real: the first six ticks after Welcome are
+    //before the interpolation delay has anything behind it.
+    const double clamped = instant < 0.0 ? 0.0 : instant;
+    const double whole = std::floor(clamped);
+
+    FireMessage fire;
+    fire.ClientTick = m_Match.Tick();
+    fire.RenderTick = static_cast<std::uint64_t>(whole);
+    fire.RenderAlpha = static_cast<float>(clamped - whole);
+    fire.Yaw = m_Input.Yaw;
+    fire.Pitch = m_Input.Pitch;
+
+    m_Transport.Send(m_ServerPeer, Encode(fire), Channel::Reliable);
+}
+
+void MatchClient::HandleShotResolved(std::span<const std::uint8_t> data)
+{
+    ShotResolvedMessage message;
+    if (!Decode(data, message))
+        return;
+
+    ShotReport report;
+    report.Shooter = message.Shooter;
+    report.Victim = message.Victim;
+    report.Impact = message.Impact;
+    report.VictimHealth = message.VictimHealth;
+    report.Killed = message.Killed;
+    report.ReceivedAtTick = m_Match.Tick();
+
+    m_LastShot = report;
 }
 
 void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)
