@@ -30,6 +30,14 @@ constexpr int TicksBetweenShots = 10;
 //How far a shot carries, in blocks.
 constexpr float ShotRange = 128.0f;
 
+//Health a player starts and respawns with.
+constexpr std::uint8_t StartingHealth = 100;
+
+//Damage one shot does. Three shots kill, with the third overshooting by two -
+//health is clamped at zero rather than wrapping, which an unsigned type makes
+//worth stating.
+constexpr std::uint8_t ShotDamage = 34;
+
 //The authority. Owns the only MatchState anybody is entitled to believe.
 //
 //Holds no window, no renderer and no GL context, so it runs anywhere a World
@@ -62,6 +70,9 @@ public:
 
     //Connected peers, whether or not they have completed the handshake.
     std::size_t ClientCount() const { return m_Clients.size(); }
+
+    //A player's current health, or zero if nobody holds that id.
+    std::uint8_t HealthOf(PlayerId player) const;
 
 private:
     //One connected participant. A peer exists from the moment the socket
@@ -124,6 +135,12 @@ private:
         //per episode rather than one per dropped shot. Same shape as
         //QueueOverflowWarned.
         bool FireRateWarned = false;
+
+        //Health lives here rather than on MatchState because MatchState is the
+        //whole SIMULATED state and health is not simulated by Step - it changes
+        //only when a game rule fires. MatchState::PlayerForWrite exists for
+        //exactly this kind of caller, and says so in its own comment.
+        std::uint8_t Health = StartingHealth;
     };
 
     //An edit waiting for this tick's ordered application.

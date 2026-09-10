@@ -1024,3 +1024,152 @@ TEST_CASE("A shot accepted on the server's tick zero still guards the next one")
 
     CHECK(secondCount == 0);
 }
+
+TEST_CASE("Three hits kill, and the third respawns the victim")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId shooterPeer = InvalidPeer;
+    Transport& shooter = network.AddClient(shooterPeer);
+    const PlayerId shooterId = Join(server, shooter);
+
+    PeerId targetPeer = InvalidPeer;
+    Transport& target = network.AddClient(targetPeer);
+    const PlayerId targetId = Join(server, target);
+
+    REQUIRE(shooterId != InvalidPlayer);
+    REQUIRE(targetId != InvalidPlayer);
+
+    //Both stand on the spawn point, because players do not collide with each
+    //other. The shot is therefore point blank and its aim does not matter: a
+    //ray beginning inside a box hits it at distance zero. What this case tests
+    //is the arithmetic of damage, not the geometry of aiming - the geometry is
+    //Task 2's and Task 9's.
+    CHECK(server.HealthOf(targetId) == StartingHealth);
+
+    const auto fireOnce = [&]() -> ShotResolvedMessage
+    {
+        int ignored = 0;
+        LastShotResolved(shooter, ignored);
+
+        SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+        server.Step(FrameClock::FixedStepSeconds);
+
+        int count = 0;
+        const std::optional<ShotResolvedMessage> resolved = LastShotResolved(shooter, count);
+        REQUIRE(resolved.has_value());
+
+        //Wait out the fire rate so the next call is not silently dropped.
+        for (int tick = 0; tick < TicksBetweenShots; ++tick)
+            server.Step(FrameClock::FixedStepSeconds);
+
+        return *resolved;
+    };
+
+    const ShotResolvedMessage first = fireOnce();
+    CHECK(first.Shooter == shooterId);
+    CHECK(first.Victim == targetId);
+    CHECK(first.VictimHealth == 66);
+    CHECK_FALSE(first.Killed);
+
+    const ShotResolvedMessage second = fireOnce();
+    CHECK(second.VictimHealth == 32);
+    CHECK_FALSE(second.Killed);
+
+    const ShotResolvedMessage third = fireOnce();
+
+    //Zero, not the respawned 100. Reporting health AFTER the respawn would make
+    //a kill indistinguishable from a graze on the wire.
+    CHECK(third.VictimHealth == 0);
+    CHECK(third.Killed);
+
+    //Alive again, standing where they started. Only x and z are checked: the
+    //steps that waited out the fire rate have applied gravity since.
+    CHECK(server.HealthOf(targetId) == StartingHealth);
+    CHECK(server.Match().Player(targetId).Position().x == doctest::Approx(Spawn.x));
+    CHECK(server.Match().Player(targetId).Position().z == doctest::Approx(Spawn.z));
+}
+
+TEST_CASE("A kill forgets the victim's history")
+{
+    //THE RULE THAT STOPS A DEAD PLAYER BEING KILLED TWICE, tested where it can
+    //actually be falsified.
+    //
+    //Deliberately split from the shooting: proving it end-to-end would need the
+    //victim to die somewhere the respawn point is NOT, because both players
+    //stand on the same spawn and a ray starting inside a box always hits it -
+    //so an end-to-end version passes whether or not Forget is called. Task 1
+    //already proves that a forgotten player cannot be hit at a past instant.
+    //What is left to prove here is that the server forgets, and that is this.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId shooterPeer = InvalidPeer;
+    Transport& shooter = network.AddClient(shooterPeer);
+    REQUIRE(Join(server, shooter) != InvalidPlayer);
+
+    PeerId targetPeer = InvalidPeer;
+    Transport& target = network.AddClient(targetPeer);
+    const PlayerId targetId = Join(server, target);
+    REQUIRE(targetId != InvalidPlayer);
+
+    //Fill the ring well past MaxHistorySamples.
+    for (int tick = 0; tick < 40; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    REQUIRE(server.History().SampleCount(targetId) == MaxHistorySamples);
+
+    for (int shot = 0; shot < 3; ++shot)
+    {
+        SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+        server.Step(FrameClock::FixedStepSeconds);
+
+        for (int tick = 0; tick < TicksBetweenShots; ++tick)
+            server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //The kill cleared the ring, and only the ticks since have refilled it. If
+    //Forget were not called this would still be at MaxHistorySamples.
+    CHECK(server.History().SampleCount(targetId) < MaxHistorySamples);
+}
+
+TEST_CASE("Health arrives in the snapshot")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId shooterPeer = InvalidPeer;
+    Transport& shooter = network.AddClient(shooterPeer);
+    REQUIRE(Join(server, shooter) != InvalidPlayer);
+
+    PeerId targetPeer = InvalidPeer;
+    Transport& target = network.AddClient(targetPeer);
+    const PlayerId targetId = Join(server, target);
+    REQUIRE(targetId != InvalidPlayer);
+
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const auto healthInSnapshot = [&](Transport& endpoint) -> std::uint8_t
+    {
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(endpoint);
+        REQUIRE(snapshot.has_value());
+
+        for (const PlayerSnapshot& entry : snapshot->Players)
+        {
+            if (entry.Player == targetId)
+                return entry.Health;
+        }
+
+        FAIL("the snapshot did not mention the target");
+        return 0;
+    };
+
+    CHECK(healthInSnapshot(target) == StartingHealth);
+
+    SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(healthInSnapshot(target) == 66);
+}

@@ -369,6 +369,40 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     resolved.VictimHealth = 0;
     resolved.Killed = false;
 
+    if (shot.Victim != InvalidPlayer)
+    {
+        const auto found = std::find_if(m_Clients.begin(), m_Clients.end(),
+            [&shot](const Client& candidate) { return candidate.Player == shot.Victim; });
+
+        if (found != m_Clients.end())
+        {
+            Client& victim = *found;
+
+            //Clamped rather than allowed to wrap. Health is unsigned, so
+            //34 subtracted from 32 is not -2, it is 254 - a dead player at
+            //more than full health.
+            victim.Health = victim.Health <= ShotDamage
+                ? std::uint8_t{ 0 }
+                : static_cast<std::uint8_t>(victim.Health - ShotDamage);
+
+            resolved.VictimHealth = victim.Health;
+            resolved.Killed = victim.Health == 0;
+
+            if (resolved.Killed)
+            {
+                m_Match.TeleportPlayer(victim.Player, m_Spawn);
+                m_Match.PlayerForWrite(victim.Player).SetVerticalVelocity(0.0f);
+                victim.Health = StartingHealth;
+
+                //THE HISTORY GOES TOO. Without this, a shot already in flight
+                //could rewind to before the death, find the victim standing
+                //where they fell, and damage the player who has since
+                //respawned there.
+                m_History.Forget(victim.Player);
+            }
+        }
+    }
+
     SendToJoined(Encode(resolved), Channel::Reliable);
 }
 
@@ -397,6 +431,7 @@ void MatchServer::SendSnapshots()
             entry.Yaw = owner->Yaw;
             entry.Pitch = owner->Pitch;
             entry.LastInputTick = owner->LastInputTick;
+            entry.Health = owner->Health;
         }
 
         snapshot.Players.push_back(entry);
@@ -425,4 +460,12 @@ MatchServer::Client* MatchServer::Find(PeerId peer)
         [peer](const Client& candidate) { return candidate.Peer == peer; });
 
     return found == m_Clients.end() ? nullptr : &*found;
+}
+
+std::uint8_t MatchServer::HealthOf(PlayerId player) const
+{
+    const auto found = std::find_if(m_Clients.begin(), m_Clients.end(),
+        [player](const Client& candidate) { return candidate.Player == player; });
+
+    return found == m_Clients.end() ? 0 : found->Health;
 }
