@@ -357,3 +357,95 @@ not go red.
 - **`ShotResolved` is reliable and unordered against snapshots.** A hit marker can
   therefore arrive a tick before or after the snapshot carrying the health change. Both
   orders must look correct on screen.
+
+## Shipped: the measured number, Task 9 of twelve
+
+_Recorded 2026-09-10 by the acceptance gate in `Tests/src/LagCompensationTests.cpp`. This
+section records what was measured, not that the stage is finished — Tasks 10 to 12 are
+still open. The suite went 450 -> 453._
+
+**The harness.** A `MatchServer` and two `MatchClient`s over `SimulatedTransport`, seed 1,
+5% loss, no jitter, on a 64 x 64 floor. The shooter walks fifteen blocks off the spawn and
+then stands still; the target strafes five blocks each way across the line of sight, at
+walk speed, for the whole run. Each shot takes the pose `PoseOf` reports for the alpha the
+frame is rendering, turns it into a yaw and a pitch from the shooter's own predicted eye,
+and hands the same alpha to `Fire`. Shots are 30 ticks apart, not the weapon's minimum of
+10 — see "What ran differently" below. Every hit is a `ShotResolved` ruling that came back
+over the wire.
+
+**The gate.** 100 ms RTT, 5% loss: **60 of 60 shots hit**, across 20 deaths and ten strafe
+reversals. Largest disagreement between the eye the shot was aimed from and the eye the
+server fired it from over the whole run: **0.000 blocks**.
+
+**The table.** 200 shots a row, 5% loss, seed 1. The right-hand column is the same rays
+resolved against the boxes the server holds when it handles the shot — the rewind switched
+off and nothing else changed.
+
+| Link                       | Rewound            | Rewind off       |
+| -------------------------- | ------------------ | ---------------- |
+| 0 ms RTT                   | 200/200 (100.0%)   | 14/200 (7.0%)    |
+| 100 ms RTT                 | 200/200 (100.0%)   | 12/200 (6.0%)    |
+| 166.7 ms RTT               | **189/200 (94.5%)**| 1/200 (0.5%)     |
+| 300 ms RTT                 | 1/200 (0.5%)       | 1/200 (0.5%)     |
+| 166.7 ms RTT, no loss      | 200/200 (100.0%)   | 1/200 (0.5%)     |
+
+166.7 ms rather than 150: 150 ms RTT is 4.5 ticks one way and every latency here has to be
+a whole tick multiple. Stage 3 substituted the same number for the same reason.
+
+### What the numbers say
+
+**The rewind depth is `2L + InterpolationDelayTicks - 1 - alpha` ticks**, for a one-way
+latency of `L` ticks: `L` for the snapshot to arrive, `L` for the `Fire` to come back, six
+because `PoseOf` draws that far behind the newest snapshot, and one back because the server
+handles a shot before it steps. That is 5, 11, 15 and 23 ticks for the four rows, against a
+`MaxRewindTicks` of 15. It was checked against the run rather than only derived: at the
+166.7 ms row, the distance between the pose the client drew and the server's live position
+on the tick a shot fired then is handled measured 1.25 blocks at alpha 0 - 15 ticks at walk
+speed.
+
+**The 166.7 ms row does not meet the design's 95% floor. It measures 94.5%.** The same
+latency with no loss lands every one of 200 shots, so the rewind is exact at that depth and
+what runs out is the cap. `SimulatedTransport` models the loss of a reliable packet as a
+retransmission costing one extra round trip, and `Fire` is reliable, so the ~5% of shots
+whose `Fire` is lost arrive ten ticks late and need a depth of 25. They are clamped to 15,
+resolve against a box 0.83 blocks further along, and miss — 11 of 200 against an expected
+10. The same thing happens at 100 ms and does not cost a hit: a retransmitted shot there
+needs 17 and is clamped by 2 ticks, which is 0.167 blocks, still inside the 0.3-block half
+width of the box.
+
+**The 250 ms cap is worth less than it sounds.** Six of its fifteen ticks are spent on the
+interpolation delay before any latency at all, so on a clean link the cap covers RTT up to
+exactly 10 ticks — 166.7 ms, with nothing left over. That is the link this arc targets, and
+it fits with zero margin. Under 5% loss a retransmitted shot stays inside the cap only up
+to about 66.7 ms RTT; between there and 166.7 ms it survives on the width of the hitbox
+rather than on the window.
+
+**Above the cap it is a cliff, not a slope.** The 300 ms row is 8 ticks over, which is 0.67
+blocks at walk speed against a box 0.3 blocks wide — so the answer is not "degraded" but
+"gone": 0.5%, identical to the rewind-off column. Whether the cap is set right is therefore
+a question about 150-200 ms links, because at 300 ms the mechanism does not partially work.
+
+**The rewind lands one tick later than the pose the shooter aimed at.** Measured, not
+inferred: with latency and loss held so the declared instant can be computed from
+`MatchClient::ServerTick()` alone, the centre of the box `MatchServer::History()` rebuilds
+at the instant the client declared sits **1.000 tick further along the target's travel**
+than the pose `PoseOf` drew at that same instant — 0.083 blocks at walk speed, 28% of the
+box's half width, in five of six samples and 0.000 in the sixth, where the target had not
+yet moved. `MatchServer::Step` records history under `m_Match.Tick() - 1` while
+`SendSnapshots` labels the same position `m_Match.Tick()`, and the client's interpolation
+timeline is the snapshot's. Left as found: this task changed no production code.
+
+### What ran differently from the plan
+
+- **Shots are 30 ticks apart, not the weapon's 10-tick minimum.** A retransmitted `Fire`
+  arrives one round trip late, but the reliable channel is sequenced rather than spaced, so
+  the next shot is not delayed with it and lands 2L ticks closer behind. At 20 ticks apart
+  that pushed 15 of 200 shots on the 300 ms row inside the fire rate, where the server
+  dropped them: a rate limiter's number, not a rewind's. Thirty is the deepest
+  retransmission here (18 ticks) plus the weapon's limit plus slack.
+- **The shooter holds fire for 40 ticks after each respawn.** A death forgets the target's
+  history and teleports it, and both reach the shooter L+6 ticks late, so a shot fired
+  sooner declares an instant the server has deliberately thrown away. Those shots measure
+  the respawn rule, not the rewind.
+- **The gate's contrast is 60 shots rather than 200**, at 100 ms and 5% loss: rewound 60/60
+  (100.0%), rewind off 5/60 (8.3%).
