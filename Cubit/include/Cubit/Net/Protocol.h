@@ -143,10 +143,8 @@ struct EditMessage
 //likely to make. RenderTick plus RenderAlpha is the instant the shooter's
 //SCREEN was showing, in the SERVER's numbering, and locates everybody else -
 //that is the one the rewind actually reads. ClientTick is when the shooter
-//fired, in their OWN numbering; the server resolves the shooter's own eye from
-//their live position instead, so today ClientTick is carried but not read by
-//shot resolution - kept for the server to correlate and diagnose a shot
-//against the input stream from the same client tick.
+//fired, in their OWN numbering. Nothing in this stage reads it: the shooter's
+//own eye comes from their live server-side position, not from ClientTick.
 struct FireMessage
 {
     std::uint64_t ClientTick = 0;
