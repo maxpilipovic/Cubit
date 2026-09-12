@@ -357,11 +357,10 @@ public:
 
     //The stage's acceptance number, from a real run rather than a test.
     //
-    //Logged rather than drawn on the HUD, and that is not laziness: the debug
-    //font carries only "0123456789-.: ACDEFGNOPSTU", so most of the words this
-    //needs cannot be rendered at all - and an unsupported character draws as a
-    //BLANK rather than failing, so a wrong label reads as a rendering bug. See
-    //the note on the same trap in the HUD's own header.
+    //Logged at detach rather than drawn on the HUD: it is a whole-run figure,
+    //read once the run is over. It was first kept off the HUD because the
+    //debug font could not draw most of its words; the font can now, so that
+    //reason no longer holds on its own.
     void OnDetach() override
     {
         if (!m_Client)

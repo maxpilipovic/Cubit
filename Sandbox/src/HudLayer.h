@@ -235,9 +235,10 @@ private:
         DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), TextMargin, y);
 
         y -= lineHeight;
-        // The debug font only carries "0123456789-.: ACDEFGNOPSTU", so the flags
-        // are digits and the label avoids every letter it lacks — an unsupported
-        // character renders as a blank, which would silently hide a set flag.
+        // The flags are digits. Every label on this readout has to be spelled
+        // from DebugFont::Order: an unsupported character still renders as a
+        // blank rather than failing, which would silently hide a set flag.
+        // DebugFontTests checks the HUD's own words against the font.
         DrawText(
             std::string("OCEAN ") +
             (m_State->EyeInFluid ? "1" : "0") +
@@ -273,11 +274,11 @@ private:
         //the log scrolls past behind a fullscreen window, and "nothing is
         //happening" is exactly what a silent rejection looks like.
         //
-        //Every label here is spelled out of the debug font's alphabet, which is
-        //only "0123456789-.: ACDEFGNOPSTU". That rules out the obvious words -
-        //PING, RTT and PLAYERS all contain letters the font cannot draw, and an
-        //unsupported character renders as a blank rather than failing, so a
-        //wrong label would silently show as a gap.
+        //Every label here must be spelled from DebugFont::Order. An unsupported
+        //character renders as a blank rather than failing, so a wrong label
+        //would silently show as a gap - which is what kept these to CONNECTED
+        //and NET while the font lacked most of the alphabet. DebugFontTests now
+        //checks the words this readout draws.
         y -= lineHeight;
 
         if (m_State->Rejected)
