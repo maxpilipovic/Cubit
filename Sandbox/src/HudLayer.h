@@ -49,6 +49,13 @@ struct HudState
     bool Rejected = false;
     double RoundTripMs = 0.0;
     std::size_t PlayersInMatch = 0;
+
+    //The shot. Connected only, like the lines above. Health is this player's
+    //own, as the last snapshot reported it. ShotLabel is HIT or KILLED for a
+    //short while after the server rules that one of this player's shots
+    //connected, and empty otherwise - it only ever follows the server's word.
+    std::uint8_t Health = 0;
+    std::string ShotLabel;
 };
 
 //Draws screen-space overlay art on top of the rendered scene.
@@ -292,6 +299,15 @@ private:
         y -= lineHeight;
         DrawText("NET " + std::to_string(static_cast<int>(m_State->RoundTripMs + 0.5)),
             TextMargin, y);
+
+        y -= lineHeight;
+        DrawText("HEALTH " + std::to_string(m_State->Health), TextMargin, y);
+
+        if (!m_State->ShotLabel.empty())
+        {
+            y -= lineHeight;
+            DrawText(m_State->ShotLabel, TextMargin, y);
+        }
     }
 
     //Draws one glyph per character, left to right.

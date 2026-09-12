@@ -60,6 +60,28 @@ namespace
     //guess. Warm, so it separates from the near-black edit outline.
     const glm::vec4 RemotePlayerColor{ 0.9f, 0.3f, 0.2f, 1.0f };
 
+    //The local tracer, drawn the instant the fire button goes down.
+    const glm::vec4 TracerColor{ 1.0f, 0.9f, 0.4f, 1.0f };
+
+    //The server's ruling, drawn where the shot stopped: red where it named a
+    //victim, grey where it did not.
+    const glm::vec4 ImpactHitColor{ 1.0f, 0.15f, 0.15f, 1.0f };
+    const glm::vec4 ImpactMissColor{ 0.6f, 0.6f, 0.6f, 1.0f };
+    constexpr float ImpactHalfSize = 0.1f;
+
+    //How long a tracer and a ruling stay on screen, in simulation ticks rather
+    //than frames. Debug renders at 144 fps and Release faster, so "a few
+    //frames" would be a different - and nearly invisible - length on each.
+    constexpr std::uint64_t TracerTicks = 12;
+    constexpr std::uint64_t ShotMarkerTicks = 45;
+
+    //Where the tracer is drawn FROM, relative to the eye, in blocks. A line
+    //from the eye along the view direction projects onto a single point under
+    //the crosshair, so the player who fired it could never see it. Purely
+    //visual: the shot itself leaves from the eye, on both ends of the wire.
+    constexpr float TracerMuzzleRight = 0.25f;
+    constexpr float TracerMuzzleDown = 0.2f;
+
     //Roughly where to start. Only a column: the height, and whether this exact
     //column is usable at all, are resolved against the loaded map. A hint over
     //a hill or the river moves to the nearest spot that can hold the player
@@ -215,11 +237,7 @@ public:
         // Reading the keyboard is this layer's job, not the controller's: the
         // controller is handed what the player asked for, which is what lets it
         // be stepped by a test with no window and no focus.
-        CharacterInput input;
-        input.Move = ReadWalkInput();
-        input.Yaw = m_CameraController.GetYaw();
-        input.Pitch = m_CameraController.GetPitch();
-        input.Jump = Input::IsKeyPressed(KeyCode::Space);
+        const CharacterInput input = ReadInput();
 
         // BRANCH POINT 2 OF 3.
         if (m_Client)
@@ -247,6 +265,7 @@ public:
             m_HudState->Rejected = m_Client->Rejected();
             m_HudState->RoundTripMs = m_Client->RoundTripTime() * 1000.0;
             m_HudState->PlayersInMatch = Match_().Players().size();
+            m_HudState->Health = m_Client->LocalHealth();
 
             if (!HaveLocalPlayer())
                 return;
@@ -289,6 +308,10 @@ public:
     //Draws the meshed voxel world through Cubit's scene renderer.
     void OnRender(float alpha) override
     {
+        // Kept before the early return below, so a click that lands before the
+        // first snapshot still has this frame's alpha rather than a stale one.
+        m_LastAlpha = alpha;
+
         // Nothing to draw from until the server has said who we are AND put us
         // in a snapshot. Player_() would throw, and until Welcome lands the
         // world is still the 1x1x1 placeholder MatchState was constructed with.
@@ -329,6 +352,7 @@ public:
         // a later flush would draw these lines in screen space.
         DrawTargetedBlockOutline();
         DrawRemotePlayers(alpha);
+        DrawShots();
         DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
 
         m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
@@ -565,10 +589,112 @@ private:
         }
     }
 
+    //What the player is asking for this instant: the movement keys held, the
+    //camera's aim, and jump. One place, because a shot has to send the same
+    //aim a step would.
+    CharacterInput ReadInput()
+    {
+        CharacterInput input;
+        input.Move = ReadWalkInput();
+        input.Yaw = m_CameraController.GetYaw();
+        input.Pitch = m_CameraController.GetPitch();
+        input.Jump = Input::IsKeyPressed(KeyCode::Space);
+        return input;
+    }
+
+    //Fires along the camera's view ray: the local tracer now, and the shot to
+    //the server when connected. Single-player has nobody to shoot, so the
+    //tracer is all there is - drawn regardless, so the binding is visibly
+    //alive.
+    void FireShot()
+    {
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        const glm::vec3 eye = camera.GetPosition() - WorldOffset;
+        const glm::vec3 forward = camera.GetForwardDirection();
+
+        if (m_Client)
+        {
+            // Fire sends the yaw and pitch of the INPUT, which OnFixedUpdate
+            // last set from the camera up to a whole step ago - and the mouse
+            // moves between steps. Refreshing it here sends the aim the
+            // crosshair shows on this frame, which is also the direction the
+            // tracer below is drawn along. The next step reads it afresh.
+            m_Client->SetInput(ReadInput());
+            m_Client->Fire(m_LastAlpha);
+        }
+
+        // Solid only, like an edit: water does not stop a shot.
+        const VoxelRayHit hit = VoxelRaycast::Cast(World_(), eye, forward, ShotRange, true);
+        const float length = hit.Hit ? hit.Distance : ShotRange;
+
+        // Pitch is clamped short of straight up or down, so forward is never
+        // parallel to the world's up and this cross product never vanishes.
+        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+        const glm::vec3 up = glm::cross(right, forward);
+
+        m_TracerFrom = eye + right * TracerMuzzleRight - up * TracerMuzzleDown;
+        m_TracerTo = eye + forward * length;
+        m_TracerTick = Match_().Tick();
+        m_TracerActive = true;
+    }
+
+    //The local tracer while it lasts, and the server's ruling on the most
+    //recent shot anybody fired.
+    //
+    //The two are deliberately separate. The tracer is this machine's own trace
+    //and appears the instant the button goes down. Whether it HIT anybody is
+    //the server's to say, and a hit marker that has to be taken back is worse
+    //than one a round trip late - so the marker and the HUD word come only
+    //from LastShot.
+    void DrawShots()
+    {
+        const std::uint64_t now = Match_().Tick();
+
+        if (m_TracerActive && now >= m_TracerTick && now - m_TracerTick < TracerTicks)
+            DebugDraw::Line(m_TracerFrom, m_TracerTo, TracerColor);
+        else
+            m_TracerActive = false;
+
+        m_HudState->ShotLabel.clear();
+
+        if (!m_Client || !m_Client->LastShot().has_value())
+            return;
+
+        // ReceivedAtTick is on this client's own clock, which is the one
+        // Match_() reads connected - so the two can be subtracted directly.
+        const MatchClient::ShotReport& shot = *m_Client->LastShot();
+        if (now < shot.ReceivedAtTick || now - shot.ReceivedAtTick >= ShotMarkerTicks)
+            return;
+
+        const bool connected = shot.Victim != InvalidPlayer;
+        const glm::vec3 half(ImpactHalfSize);
+        DebugDraw::Box(shot.Impact - half, shot.Impact + half,
+            connected ? ImpactHitColor : ImpactMissColor);
+
+        // Every client receives every ruling, so everybody's impacts draw
+        // above. Only this player's own shots put a word on the HUD.
+        if (connected && shot.Shooter == m_LocalPlayer)
+            m_HudState->ShotLabel = shot.Killed ? "KILLED" : "HIT";
+    }
+
     //Breaks or places a block along the camera's view ray.
     bool OnMouseButtonPressed(MouseButtonPressedEvent& event)
     {
         const MouseCode button = event.GetMouseButton();
+
+        // Middle rather than left, and the reason is verification rather than
+        // ergonomics: a script can drive the mouse but NOT the keyboard, so a
+        // shot bound to a key would be the one feature nobody can screenshot.
+        // It also leaves both edit paths below byte-for-byte as they were.
+        if (button == MouseCode::Middle)
+        {
+            if (!HaveLocalPlayer())
+                return false;
+
+            FireShot();
+            return true;
+        }
+
         if (button != MouseCode::Left && button != MouseCode::Right)
             return false;
 
@@ -866,6 +992,17 @@ private:
     //is a latch rather than a re-aim because after that the view belongs to the
     //mouse, and re-running it would yank the player's aim back every frame.
     bool m_Aimed = false;
+
+    //The renderer's position within the current step, as of the last frame.
+    //Fire must be handed the alpha PoseOf drew remote players with, and a
+    //click arrives between frames, so this is the frame the player saw.
+    float m_LastAlpha = 1.0f;
+
+    //The local tracer, in world space, and the tick it was fired on.
+    glm::vec3 m_TracerFrom{ 0.0f };
+    glm::vec3 m_TracerTo{ 0.0f };
+    std::uint64_t m_TracerTick = 0;
+    bool m_TracerActive = false;
 
     WorldRenderer m_WorldRenderer;
     BlockId m_PlaceBlock = BlockId{2};

@@ -872,3 +872,55 @@ TEST_CASE("A shot resolution is reported to the caller")
     //when the ruling arrived, not the one it reaches by the time Step returns.
     CHECK(report.ReceivedAtTick == tickBeforeArrival);
 }
+
+TEST_CASE("A client's own health follows what its snapshots report")
+{
+    //The Sandbox's HUD reads LocalHealth every step, and nothing checked it.
+    //Two halves: a real join, which must report the server's starting health
+    //rather than LocalHealth's zero default, and then a hand-built snapshot
+    //carrying a number no real server would send here, so the second check
+    //cannot pass on the first one's value.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    CHECK(client.LocalHealth() == 0);
+
+    //Until a snapshot has named this client's player, not just until Welcome:
+    //health arrives in snapshots, and Welcome carries none.
+    for (int i = 0; i < 30 && !(client.Connected() && client.Match().HasPlayer(client.LocalPlayer())); ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    CHECK(client.LocalHealth() == StartingHealth);
+
+    //Newer than anything the server has sent, including the snapshot from its
+    //last Step that this client has not drained yet - so this one is applied
+    //last and cannot be discarded as stale.
+    const PlayerId local = client.LocalPlayer();
+
+    PlayerSnapshot mine;
+    mine.Player = local;
+    mine.Position = client.Match().Player(local).Position();
+    mine.Grounded = true;
+    mine.Health = 37;
+
+    SnapshotMessage snapshot;
+    snapshot.Tick = server.Match().Tick() + 1;
+    snapshot.Players = { mine };
+
+    network.Server().Send(peer, Encode(snapshot), Channel::Unreliable);
+
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(client.LocalHealth() == 37);
+}
