@@ -96,9 +96,15 @@ void MatchServer::Step(double seconds)
     //step in the past - which would look exactly like a rewind that is
     //slightly too aggressive rather than like an off-by-one.
     //
-    //Tick() has already been incremented by Step, so the position just computed
-    //belongs to tick Tick() - 1.
-    const std::uint64_t recordedTick = m_Match.Tick() - 1;
+    //Filed under Tick(), NOT Tick() - 1. SendSnapshots, two lines below, labels
+    //this same position with snapshot.Tick == m_Match.Tick() - and the wire's
+    //label is the only one the client ever sees: MatchClient::HandleSnapshot
+    //sets its clock straight from snapshot.Tick, and every instant it later
+    //hands back to the server - PoseOf's, Fire's - is a number on that same
+    //timeline. A history that filed this position under Tick() - 1 would be
+    //using a tick number the client has no way to name, so an instant that
+    //names this position on the wire would land one tick short of it here.
+    const std::uint64_t recordedTick = m_Match.Tick();
     for (const auto& [player, character] : m_Match.Players())
         m_History.Record(player, recordedTick, character.Position());
 

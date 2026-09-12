@@ -748,6 +748,17 @@ TEST_CASE("A joined player's recorded history matches where the match stepped th
     //The history must hold the positions the match actually produced, not an
     //approximation of them: a rewind is only honest if it replays the server's
     //own past.
+    //
+    //This alone is NOT the test that catches an off-by-one in which tick number
+    //a position is filed under: both sides of the comparison below read that
+    //number from MatchServer/MatchState's own convention
+    //(server.Match().Tick()), so a bug that shifts the recorded tick by one
+    //shifts this test's expectation by the same one and the two stay in
+    //lock-step. That is exactly how the previous version of this case - which
+    //paired the position with server.Match().Tick() - 1 - passed while the
+    //history was filed one tick off from what the wire actually reported. See
+    //"A history's positions land under the tick number the wire reports them
+    //at" below for the case that reads the wire instead of the match.
     LoopbackNetwork network;
     MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
 
@@ -763,7 +774,7 @@ TEST_CASE("A joined player's recorded history matches where the match stepped th
     for (int tick = 0; tick < 10; ++tick)
     {
         server.Step(FrameClock::FixedStepSeconds);
-        stepped.emplace_back(server.Match().Tick() - 1,
+        stepped.emplace_back(server.Match().Tick(),
             server.Match().Player(player).Position());
     }
 
@@ -780,6 +791,71 @@ TEST_CASE("A joined player's recorded history matches where the match stepped th
         CHECK(centre.x == doctest::Approx(position.x));
         CHECK(centre.y == doctest::Approx(position.y));
         CHECK(centre.z == doctest::Approx(position.z));
+    }
+}
+
+TEST_CASE("A history's positions land under the tick number the wire reports them at")
+{
+    //THE WIRE ORACLE. Task 5's case above compares the history against
+    //MatchState's own tick counter - the same convention on both sides of the
+    //check - so a bug that files a position under the wrong tick number moves
+    //both sides together and the case cannot see it. This one instead reads
+    //the SnapshotMessage the server actually sent, because that is the only
+    //number the client ever gets: MatchClient::HandleSnapshot sets its clock
+    //from snapshot.Tick, and every instant it later declares to the server -
+    //through PoseOf or Fire - is built on that number. If the history filed a
+    //position under some other tick, a rewind to the instant the wire's own
+    //tick names would find the wrong sample, or none, even though the match's
+    //own bookkeeping thought it was consistent.
+    //
+    //Collection and verification are two separate passes, deliberately not one
+    //loop that checks each snapshot right after sending it: BoxAt clamps an
+    //instant at or past its newest sample to that newest sample rather than
+    //failing, so a check made while a tick's sample is still the newest one
+    //recorded would get the right answer by that clamp regardless of which
+    //tick label the sample actually sits under - the exact self-masking this
+    //test exists to avoid. Checking only after ten more ticks have been
+    //recorded past each one puts every check but the last inside the ring,
+    //where a wrong label lands on a neighbour's position instead.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    //The wire's own label, paired with the position it shipped under that
+    //label, for every tick stepped.
+    std::vector<std::pair<std::uint64_t, glm::vec3>> wire;
+    for (int tick = 0; tick < 10; ++tick)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(client);
+        REQUIRE(snapshot.has_value());
+        REQUIRE(snapshot->Players.size() == 1);
+        CHECK(snapshot->Players[0].Player == player);
+
+        wire.emplace_back(snapshot->Tick, snapshot->Players[0].Position);
+    }
+
+    const glm::vec3 halfExtents(0.3f, 0.9f, 0.3f);
+
+    for (const auto& [wireTick, wirePosition] : wire)
+    {
+        CAPTURE(wireTick);
+
+        //A sample filed under Tick() - 1 instead of Tick() would answer this
+        //query with a neighbouring sample's position instead - the position
+        //one tick either side of what the wire reported under this label.
+        Aabb box;
+        REQUIRE(server.History().BoxAt(player, static_cast<double>(wireTick), halfExtents, box));
+
+        const glm::vec3 centre = (box.Min + box.Max) * 0.5f;
+        CHECK(centre.x == doctest::Approx(wirePosition.x));
+        CHECK(centre.y == doctest::Approx(wirePosition.y));
+        CHECK(centre.z == doctest::Approx(wirePosition.z));
     }
 }
 
