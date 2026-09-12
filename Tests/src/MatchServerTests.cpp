@@ -749,16 +749,14 @@ TEST_CASE("A joined player's recorded history matches where the match stepped th
     //approximation of them: a rewind is only honest if it replays the server's
     //own past.
     //
-    //This alone is NOT the test that catches an off-by-one in which tick number
-    //a position is filed under: both sides of the comparison below read that
-    //number from MatchServer/MatchState's own convention
-    //(server.Match().Tick()), so a bug that shifts the recorded tick by one
-    //shifts this test's expectation by the same one and the two stay in
-    //lock-step. That is exactly how the previous version of this case - which
-    //paired the position with server.Match().Tick() - 1 - passed while the
-    //history was filed one tick off from what the wire actually reported. See
-    //"A history's positions land under the tick number the wire reports them
-    //at" below for the case that reads the wire instead of the match.
+    //What this case can NOT say is whether that numbering is the right one. It
+    //pins the history to MatchState's own tick counter as written here, so it
+    //does go red if the history moves off Tick() - but its expectation is only
+    //as right as whoever wrote it. The previous version expected Tick() - 1,
+    //passed, and was wrong: the wire labels the same position Tick(), and the
+    //wire is the only numbering the client has. "A history's positions land
+    //under the tick number the wire reports them at" below reads the snapshot
+    //the server actually sent, which is what decides which numbering is right.
     LoopbackNetwork network;
     MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
 
@@ -839,6 +837,17 @@ TEST_CASE("A history's positions land under the tick number the wire reports the
 
         wire.emplace_back(snapshot->Tick, snapshot->Players[0].Position);
     }
+
+    //A precondition, not decoration. A wrong label only shows where
+    //neighbouring ticks hold different positions, and here that is the few
+    //ticks the player spends falling from Spawn to the floor - after landing
+    //every sample is identical and ANY label passes. If a change to Spawn or
+    //FlatWorld ever takes the fall away, this goes red rather than the case
+    //going quietly vacuous.
+    bool moved = false;
+    for (std::size_t i = 1; i < wire.size(); ++i)
+        moved = moved || wire[i].second != wire[i - 1].second;
+    REQUIRE(moved);
 
     const glm::vec3 halfExtents(0.3f, 0.9f, 0.3f);
 
