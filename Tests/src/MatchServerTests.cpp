@@ -743,6 +743,32 @@ TEST_CASE("Nothing is recorded for a player who does not exist")
     CHECK(server.History().SampleCount(1) == 0);
 }
 
+TEST_CASE("A disconnected player's history is forgotten")
+{
+    //HitboxHistory::Forget runs on disconnect as well as on respawn. The
+    //respawn half is reached by the kill tests; nothing reached this one.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    for (int tick = 0; tick < 5; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+    REQUIRE(server.History().SampleCount(player) > 0);
+
+    network.RemoveClient(peer);
+    for (int tick = 0; tick < 3; ++tick)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    //Gone from the match, so nothing new is recorded for them either way -
+    //which is what makes a count that stays where it was mean Forget never ran.
+    REQUIRE_FALSE(server.Match().HasPlayer(player));
+    CHECK(server.History().SampleCount(player) == 0);
+}
+
 TEST_CASE("A joined player's recorded history matches where the match stepped them")
 {
     //The history must hold the positions the match actually produced, not an
@@ -990,6 +1016,49 @@ TEST_CASE("A second shot within the fire rate is dropped")
 
     //One ruling, not two: the second shot came a tick after the first, and the
     //weapon fires once every ten.
+    CHECK(count == 1);
+}
+
+TEST_CASE("The fire rate accepts a shot exactly TicksBetweenShots after the last, and not one tick sooner")
+{
+    //The case above checks a one-tick gap, which a limit of 2 or of 50 would
+    //drop just the same. This pins the boundary itself: nine ticks after an
+    //accepted shot is dropped, ten is accepted.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& shooter = network.AddClient(peer);
+    REQUIRE(Join(server, shooter) != InvalidPlayer);
+
+    int count = 0;
+    LastShotResolved(shooter, count);
+
+    //A shot is handled inside Step's poll, before the match advances, so the
+    //tick it is charged to is Tick() as it reads just before that Step.
+    const std::uint64_t firstTick = server.Match().Tick();
+    const std::uint64_t limit = static_cast<std::uint64_t>(TicksBetweenShots);
+
+    SendFire(shooter, 1, firstTick, 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+    LastShotResolved(shooter, count);
+    REQUIRE(count == 1);
+
+    while (server.Match().Tick() < firstTick + limit - 1)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    //Handled at firstTick + 9.
+    SendFire(shooter, 2, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+    LastShotResolved(shooter, count);
+    CHECK(count == 0);
+
+    //Handled at firstTick + 10. The dropped shot above must not have reset the
+    //clock, or this one would be dropped too.
+    REQUIRE(server.Match().Tick() == firstTick + limit);
+    SendFire(shooter, 3, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+    LastShotResolved(shooter, count);
     CHECK(count == 1);
 }
 

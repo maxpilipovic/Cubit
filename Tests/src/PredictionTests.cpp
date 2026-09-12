@@ -807,6 +807,49 @@ TEST_CASE("A fired shot declares the instant the client is rendering")
     CHECK(declaredInstant == doctest::Approx(drawnInstant));
 }
 
+TEST_CASE("A shot fired before the interpolation delay has anything behind it declares instant zero")
+{
+    //For the first few ticks after joining, the instant PoseOf draws at - six
+    //ticks behind the newest snapshot - is negative. Fire clamps it to zero
+    //before splitting it into RenderTick and RenderAlpha, because a negative
+    //double cast to an unsigned tick is undefined behaviour.
+    //
+    //The nonzero alpha is what makes this checkable without depending on what
+    //that undefined cast happens to produce: unclamped, -2.5 splits into a
+    //whole part of -3 and a fraction of 0.5, so RenderAlpha would come back
+    //0.5 rather than the clamp's 0.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    for (int i = 0; i < 30 && !client.Connected(); ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+
+    //A precondition, not the property. The render clock runs at most a tick
+    //ahead of the newest snapshot, so a server this young leaves the declared
+    //instant at least a tick and a half below zero even with the alpha added.
+    REQUIRE(client.ServerTick() <= 3);
+
+    int ignored = 0;
+    LastFire(network.Server(), ignored);
+
+    client.Fire(0.5f);
+
+    int count = 0;
+    const std::optional<FireMessage> fire = LastFire(network.Server(), count);
+    REQUIRE(fire.has_value());
+    CHECK(fire->RenderTick == 0);
+    CHECK(fire->RenderAlpha == 0.0f);
+}
+
 TEST_CASE("A shot resolution is reported to the caller")
 {
     //LastShot exists so the Sandbox can draw a hit marker for as many frames

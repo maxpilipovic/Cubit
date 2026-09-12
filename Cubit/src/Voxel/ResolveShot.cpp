@@ -5,7 +5,7 @@
 #include "Cubit/Voxel/VoxelRaycast.h"
 #include "Cubit/Voxel/World.h"
 
-#include <limits>
+#include <utility>
 
 namespace
 {
@@ -17,8 +17,10 @@ namespace
     bool RayHitsBox(const glm::vec3& origin, const glm::vec3& direction,
         const Aabb& box, float maxDistance, float& distance)
     {
-        float near = 0.0f;
-        float far = maxDistance;
+        //Not `near` and `far`: <windows.h> defines both as empty macros, and a
+        //translation unit that ever pulls it in would see these vanish.
+        float latestEnter = 0.0f;
+        float earliestExit = maxDistance;
 
         for (int axis = 0; axis < 3; ++axis)
         {
@@ -40,14 +42,14 @@ namespace
             if (enter > exit)
                 std::swap(enter, exit);
 
-            near = glm::max(near, enter);
-            far = glm::min(far, exit);
+            latestEnter = glm::max(latestEnter, enter);
+            earliestExit = glm::min(earliestExit, exit);
 
-            if (near > far)
+            if (latestEnter > earliestExit)
                 return false;
         }
 
-        distance = near;
+        distance = latestEnter;
         return true;
     }
 }
