@@ -4,6 +4,7 @@
 #include "Cubit/Net/LoopbackTransport.h"
 #include "Cubit/Net/MatchClient.h"
 #include "Cubit/Net/MatchServer.h"
+#include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/SimulatedTransport.h"
 #include "Cubit/Voxel/CharacterController.h"
 #include "Cubit/Voxel/Heading.h"
@@ -269,6 +270,19 @@ namespace
         //server fired it from, in blocks.
         float MaxEyeError = 0.0f;
 
+        //Shots whose declared instant sat inside the rewind window, so the
+        //server's clamp left it alone and the history had a box at exactly
+        //that instant - and, over those, the largest distance in blocks
+        //between the pose the shooter drew and the box the server rebuilt.
+        //
+        //THIS is the number that sees a rewind landing a tick off. Hits cannot:
+        //one tick at walk speed is 0.083 blocks against a 0.3-block half width,
+        //so a server resolving every shot one tick late still lands all of
+        //them, and on 2026-09-12 it did - the whole table came back identical
+        //with the history filed one tick short.
+        int RewindChecked = 0;
+        float MaxRewindError = 0.0f;
+
         std::vector<ShotDiagnosis> Misses;
     };
 
@@ -286,6 +300,91 @@ namespace
             whole == 0 ? 0.0 : 100.0 * static_cast<double>(part) / static_cast<double>(whole));
         return buffer;
     }
+
+    //How far the box the server rebuilds may sit from the pose the shooter drew.
+    //The two are the same lerp over the same positions, so the only honest
+    //difference is float noise; a tick of error at walk speed is 0.083 blocks,
+    //eighty times this.
+    constexpr float RewindTolerance = 0.001f;
+
+    //What the server's history held for one shot, at the instant it declared.
+    struct ServedShot
+    {
+        bool InsideWindow = false;
+        bool HasBox = false;
+        glm::vec3 Centre{ 0.0f };
+    };
+
+    //Sits between the server and its link and reads every Fire the moment the
+    //server pulls it off. HandleFire runs on that message before anything
+    //steps, so the history and the tick read here are the ones it is about to
+    //use - which is what lets the test check the box the server rewound to,
+    //rather than a box it reconstructs from a guess about when the shot landed.
+    class FireTap : public Transport
+    {
+    public:
+        explicit FireTap(Transport& inner) : m_Inner(inner) {}
+
+        //Nothing is read until there is a server and a target to read.
+        void Watch(const MatchServer& server, PlayerId target)
+        {
+            m_Server = &server;
+            m_Target = target;
+        }
+
+        //One per Fire received, in the order received.
+        std::deque<ServedShot>& Served() { return m_Served; }
+
+        void Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Send(peer, data, channel);
+        }
+
+        void Broadcast(std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Broadcast(data, channel);
+        }
+
+        void Disconnect(PeerId peer) override { m_Inner.Disconnect(peer); }
+        void Advance(double seconds) override { m_Inner.Advance(seconds); }
+        double RoundTripTime(PeerId peer) const override { return m_Inner.RoundTripTime(peer); }
+
+        bool Poll(NetEvent& out) override
+        {
+            if (!m_Inner.Poll(out))
+                return false;
+
+            MessageId id = MessageId::Hello;
+            FireMessage fire;
+            if (m_Server != nullptr && out.Type == NetEventType::Message
+                && PeekMessageId(out.Data, id) && id == MessageId::Fire && Decode(out.Data, fire))
+            {
+                //The window test is HandleFire's clamp, restated: inside it the
+                //clamp is the identity and the server rewinds to exactly this.
+                const double claimed =
+                    static_cast<double>(fire.RenderTick) + static_cast<double>(fire.RenderAlpha);
+                const double now = static_cast<double>(m_Server->Match().Tick());
+
+                ServedShot served;
+                served.InsideWindow =
+                    claimed >= now - static_cast<double>(MaxRewindTicks) && claimed <= now;
+
+                Aabb box;
+                served.HasBox = m_Server->History().BoxAt(m_Target, claimed, PlayerHalfExtents, box);
+                served.Centre = (box.Min + box.Max) * 0.5f;
+
+                m_Served.push_back(served);
+            }
+
+            return true;
+        }
+
+    private:
+        Transport& m_Inner;
+        const MatchServer* m_Server = nullptr;
+        PlayerId m_Target = InvalidPlayer;
+        std::deque<ServedShot> m_Served;
+    };
 
     //Two clients on one link. One strafes; the other aims at the pose it is
     //DRAWING and fires. The shot goes over the wire, the server rules on it,
@@ -311,7 +410,8 @@ namespace
         SimulatedTransport shooterNet(network.AddClient(shooterPeer), sim);
         SimulatedTransport targetNet(network.AddClient(targetPeer), sim);
 
-        MatchServer server(FloorWorld(), "floor.vox", MapHash, Spawn, serverNet);
+        FireTap tap(serverNet);
+        MatchServer server(FloorWorld(), "floor.vox", MapHash, Spawn, tap);
         MatchClient shooter(shooterNet, GoodLoader());
         MatchClient target(targetNet, GoodLoader());
 
@@ -345,6 +445,7 @@ namespace
         const PlayerId shooterId = shooter.LocalPlayer();
         const PlayerId targetId = target.LocalPlayer();
         REQUIRE(shooter.Match().HasPlayer(targetId));
+        tap.Watch(server, targetId);
 
         shooterInput.Move = glm::vec2(0.0f, 1.0f);
         shooterInput.Yaw = 0.0f;
@@ -462,6 +563,19 @@ namespace
                 if (!presentPositions.empty())
                     presentPositions.pop_front();
 
+                //Fire reached the server before its ruling left it, so the
+                //box for this shot is already at the front.
+                const ServedShot served = tap.Served().empty() ? ServedShot{} : tap.Served().front();
+                if (!tap.Served().empty())
+                    tap.Served().pop_front();
+
+                if (served.InsideWindow && served.HasBox)
+                {
+                    ++outcome.RewindChecked;
+                    outcome.MaxRewindError = glm::max(outcome.MaxRewindError,
+                        glm::distance(shot.Drawn, served.Centre));
+                }
+
                 if (ruling->Victim == targetId)
                 {
                     ++outcome.Hits;
@@ -571,6 +685,14 @@ TEST_CASE("A shot aimed where the client renders a target hits it, through the w
     ReportMisses(outcome);
 
     CHECK(outcome.Hits == outcome.Fired);
+
+    //Landing every shot is necessary and not enough: a rewind a whole tick
+    //short lands every one of these too. The box the server rewound to has to
+    //be the pose the shooter drew.
+    MESSAGE("rewind error: max " << outcome.MaxRewindError << " blocks over "
+        << outcome.RewindChecked << " shots inside the window");
+    REQUIRE(outcome.RewindChecked > 0);
+    CHECK(outcome.MaxRewindError < RewindTolerance);
 }
 
 TEST_CASE("The same shots miss when the server does not rewind")
@@ -619,7 +741,10 @@ TEST_CASE("Hit rate across latencies")
     //for a one-way latency of L ticks: L for the snapshot to arrive, L for the
     //Fire to come back, six because PoseOf deliberately draws that far behind
     //the newest snapshot, and one back because the server handles a shot before
-    //it steps. That is 5, 11, 15 and 23 ticks for the four rows here, against a
+    //it steps. That is 7, 11, 15 and 23 ticks for the four rows here - 7 and
+    //not 5 on the first, because this harness cannot deliver a packet sooner
+    //than the next tick, so a zero-latency link still costs one each way -
+    //against a
     //MaxRewindTicks of 15. The last row is over the cap by eight ticks - 0.67
     //blocks at walk speed, twice the half-width of the box - which is why it
     //collapses rather than degrades.
@@ -638,22 +763,26 @@ TEST_CASE("Hit rate across latencies")
         Row{ 0, "0 ms RTT", 190 },
         Row{ 3, "100 ms RTT", 190 },
 
-        //185, NOT the 190 the design promises, and the five shots are a
-        //measured shortfall rather than slack invented to make this pass.
+        //185, not 190, because the design's 95% covers shots whose rewind fits
+        //inside the window, and at this latency a lost shot's does not.
         //
         //The depth this row needs is 15 ticks: exactly MaxRewindTicks, with
         //nothing to spare. SimulatedTransport models the loss of a reliable
         //packet as a retransmission costing one extra round trip, so the ~5% of
         //Fire messages that are lost reach the server ten ticks late and need a
-        //depth of 25. They are clamped to 15, resolve against a box 0.83 blocks
-        //further along, and miss. The measured value is printed below; the
-        //clean-link run under this table shows the same latency landing every
-        //shot when nothing has to be retransmitted, which is what says the
-        //rewind is exact here and the cap is what runs out.
+        //depth of 25. They are clamped to 15, resolve against a box 0.70-0.83
+        //blocks further along, and miss: 11 of 200. Every other shot on this
+        //row lands - the clean-link run under this table lands all 200.
         //
-        //Raising MaxRewindTicks is a production change and deliberately not
-        //made here. This floor is where the shortfall is recorded rather than
-        //hidden.
+        //This was held open until the history's off-by-one was fixed, in case
+        //that was costing hits too. It was not: fixed and unfixed, the table is
+        //identical shot for shot, and all 11 misses are retransmissions. What
+        //changed is where a shot inside the window lands, which the rewind error
+        //below measures and a hit rate cannot.
+        //
+        //Raising MaxRewindTicks would buy these back and widen the "shot behind
+        //cover" window for every shot to do it, so it was decided against on
+        //2026-09-12 and the promise narrowed instead.
         Row{ 5, "166.7 ms RTT", 185 },
 
         Row{ 9, "300 ms RTT", 0 },
@@ -672,8 +801,16 @@ TEST_CASE("Hit rate across latencies")
             << "), present-state " << outcome.PresentStateHits << "/" << outcome.Fired
             << " (" << Percent(outcome.PresentStateHits, outcome.Fired) << ")");
 
+        MESSAGE(std::string(row.Label) << ", 5% loss: rewind error max "
+            << outcome.MaxRewindError << " blocks over " << outcome.RewindChecked
+            << " shots inside the window");
+
         if (row.Floor > 0)
             CHECK(outcome.Hits >= row.Floor);
+
+        //On every row, the 300 ms one included: a shot that does fit inside
+        //the window has to land exactly, however many around it do not.
+        CHECK(outcome.MaxRewindError < RewindTolerance);
     }
 
     //THE ROW ABOVE, WITHOUT THE RETRANSMISSIONS. One extra run, on the one
@@ -690,4 +827,11 @@ TEST_CASE("Hit rate across latencies")
         << " (" << Percent(clean.PresentStateHits, clean.Fired) << ")");
 
     CHECK(clean.Hits == clean.Fired);
+
+    //With nothing retransmitted, every shot's rewind fits, so every one of
+    //them is checked - at a depth of exactly MaxRewindTicks for alpha 0.
+    MESSAGE("166.7 ms RTT, no loss: rewind error max " << clean.MaxRewindError
+        << " blocks over " << clean.RewindChecked << " shots inside the window");
+    CHECK(clean.RewindChecked == clean.Fired);
+    CHECK(clean.MaxRewindError < RewindTolerance);
 }

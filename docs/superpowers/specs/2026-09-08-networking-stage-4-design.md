@@ -362,7 +362,8 @@ not go red.
 
 _Recorded 2026-09-10 by the acceptance gate in `Tests/src/LagCompensationTests.cpp`. This
 section records what was measured, not that the stage is finished — Tasks 10 to 12 are
-still open. The suite went 450 -> 453._
+still open. The suite went 450 -> 453. Re-measured 2026-09-12 after the history off-by-one
+recorded at the end of "What the numbers say" was fixed; the suite is now 454._
 
 **The harness.** A `MatchServer` and two `MatchClient`s over `SimulatedTransport`, seed 1,
 5% loss, no jitter, on a 64 x 64 floor. The shooter walks fifteen blocks off the spawn and
@@ -375,19 +376,27 @@ over the wire.
 
 **The gate.** 100 ms RTT, 5% loss: **60 of 60 shots hit**, across 20 deaths and ten strafe
 reversals. Largest disagreement between the eye the shot was aimed from and the eye the
-server fired it from over the whole run: **0.000 blocks**.
+server fired it from over the whole run: **0.000 blocks**. And the box the server rewound to
+sat **0.000 blocks** from the pose the shooter drew, over the 59 of those shots whose rewind
+fit inside the window — checked, not inferred from the hits, for the reason the off-by-one
+below gives.
 
 **The table.** 200 shots a row, 5% loss, seed 1. The right-hand column is the same rays
 resolved against the boxes the server holds when it handles the shot — the rewind switched
-off and nothing else changed.
+off and nothing else changed. The last column is the largest distance between the pose the
+shooter drew and the box the server rebuilt, over the shots whose declared instant sat
+inside the rewind window.
 
-| Link                       | Rewound            | Rewind off       |
-| -------------------------- | ------------------ | ---------------- |
-| 0 ms RTT                   | 200/200 (100.0%)   | 14/200 (7.0%)    |
-| 100 ms RTT                 | 200/200 (100.0%)   | 12/200 (6.0%)    |
-| 166.7 ms RTT               | **189/200 (94.5%)**| 1/200 (0.5%)     |
-| 300 ms RTT                 | 1/200 (0.5%)       | 1/200 (0.5%)     |
-| 166.7 ms RTT, no loss      | 200/200 (100.0%)   | 1/200 (0.5%)     |
+| Link                       | Rewound            | Rewind off       | Rewind error          |
+| -------------------------- | ------------------ | ---------------- | --------------------- |
+| 0 ms RTT                   | 200/200 (100.0%)   | 14/200 (7.0%)    | 0.000 over 200 shots  |
+| 100 ms RTT                 | 200/200 (100.0%)   | 12/200 (6.0%)    | 0.000 over 188 shots  |
+| 166.7 ms RTT               | **189/200 (94.5%)**| 1/200 (0.5%)     | 0.000 over 189 shots  |
+| 300 ms RTT                 | 1/200 (0.5%)       | 1/200 (0.5%)     | none inside the window|
+| 166.7 ms RTT, no loss      | 200/200 (100.0%)   | 1/200 (0.5%)     | 0.000 over 200 shots  |
+
+With the off-by-one below put back, the first two columns come back identical shot for shot
+and the last reads 0.083 on every row that has a shot in it.
 
 166.7 ms rather than 150: 150 ms RTT is 4.5 ticks one way and every latency here has to be
 a whole tick multiple. Stage 3 substituted the same number for the same reason.
@@ -397,21 +406,32 @@ a whole tick multiple. Stage 3 substituted the same number for the same reason.
 **The rewind depth is `2L + InterpolationDelayTicks - 1 - alpha` ticks**, for a one-way
 latency of `L` ticks: `L` for the snapshot to arrive, `L` for the `Fire` to come back, six
 because `PoseOf` draws that far behind the newest snapshot, and one back because the server
-handles a shot before it steps. That is 5, 11, 15 and 23 ticks for the four rows, against a
-`MaxRewindTicks` of 15. It was checked against the run rather than only derived: at the
+handles a shot before it steps. That is 7, 11, 15 and 23 ticks for the four rows, against a
+`MaxRewindTicks` of 15 — 7 and not 5 on the first, because the harness cannot deliver a
+packet sooner than the next tick, so a zero-latency link still costs one each way. The
+server's own logs agree: shots that were not retransmitted asked for 6.25–7, 10.25–11,
+14.25–15 and 22.25–23 ticks, the spread being alpha. It was also checked against the run: at the
 166.7 ms row, the distance between the pose the client drew and the server's live position
 on the tick a shot fired then is handled measured 1.25 blocks at alpha 0 - 15 ticks at walk
 speed.
 
-**The 166.7 ms row does not meet the design's 95% floor. It measures 94.5%.** The same
-latency with no loss lands every one of 200 shots, so the rewind is exact at that depth and
-what runs out is the cap. `SimulatedTransport` models the loss of a reliable packet as a
-retransmission costing one extra round trip, and `Fire` is reliable, so the ~5% of shots
-whose `Fire` is lost arrive ten ticks late and need a depth of 25. They are clamped to 15,
-resolve against a box 0.83 blocks further along, and miss — 11 of 200 against an expected
-10. The same thing happens at 100 ms and does not cost a hit: a retransmitted shot there
-needs 17 and is clamped by 2 ticks, which is 0.167 blocks, still inside the 0.3-block half
-width of the box.
+**The 166.7 ms row measures 94.5%, and the 95% promise is narrowed to the shots the window
+can cover.** The same latency with no loss lands every one of 200 shots, so the rewind is
+exact at that depth and what runs out is the cap. `SimulatedTransport` models the loss of a
+reliable packet as a retransmission costing one extra round trip, and `Fire` is reliable, so
+the ~5% of shots whose `Fire` is lost arrive ten ticks late and need a depth of 24.25–25.
+They are clamped to 15, resolve against a box 0.70–0.83 blocks further along, and miss — 11
+of 200 against an expected 10, and all 11 are retransmissions. The same thing happens at
+100 ms and does not cost a hit: a retransmitted shot there needs 17 and is clamped by 2
+ticks, which is 0.167 blocks, still inside the 0.3-block half width of the box.
+
+This row was held open until the off-by-one below was fixed, in case it was costing hits
+too. It was not. **The promise, as decided 2026-09-12:** at every latency up to the cap,
+every shot whose rewind fits inside the window lands exactly where the shooter drew the
+target, and 95% of all shots hit; a shot retransmitted past the window is an expected miss,
+which on this row puts the floor at 185 of 200. Raising `MaxRewindTicks` to 25 would buy
+those shots back and widen the "shot behind cover" window to about 417 ms for every shot to
+do it, and was decided against.
 
 **The 250 ms cap is worth less than it sounds.** Six of its fifteen ticks are spent on the
 interpolation delay before any latency at all, so on a clean link the cap covers RTT up to
@@ -425,15 +445,26 @@ blocks at walk speed against a box 0.3 blocks wide — so the answer is not "deg
 "gone": 0.5%, identical to the rewind-off column. Whether the cap is set right is therefore
 a question about 150-200 ms links, because at 300 ms the mechanism does not partially work.
 
-**The rewind lands one tick later than the pose the shooter aimed at.** Measured, not
-inferred: with latency and loss held so the declared instant can be computed from
-`MatchClient::ServerTick()` alone, the centre of the box `MatchServer::History()` rebuilds
-at the instant the client declared sits **1.000 tick further along the target's travel**
-than the pose `PoseOf` drew at that same instant — 0.083 blocks at walk speed, 28% of the
-box's half width, in five of six samples and 0.000 in the sixth, where the target had not
-yet moved. `MatchServer::Step` records history under `m_Match.Tick() - 1` while
-`SendSnapshots` labels the same position `m_Match.Tick()`, and the client's interpolation
-timeline is the snapshot's. Left as found: this task changed no production code.
+**The rewind landed one tick later than the pose the shooter aimed at, and that is fixed.**
+Measured, not inferred: with latency and loss held so the declared instant could be computed
+from `MatchClient::ServerTick()` alone, the centre of the box `MatchServer::History()`
+rebuilt at the instant the client declared sat **1.000 tick further along the target's
+travel** than the pose `PoseOf` drew at that same instant — 0.083 blocks at walk speed, 28%
+of the box's half width. `MatchServer::Step` recorded history under `m_Match.Tick() - 1`
+while `SendSnapshots` labels the same position `m_Match.Tick()`, and the client's
+interpolation timeline is the snapshot's.
+
+Fixed 2026-09-12 by recording under `m_Match.Tick()`: the wire's numbering is the authority,
+because it is the only one the client ever sees. **It cost no hits anywhere in the table**,
+which is why the table could not find it. Fixed and unfixed, every row is identical shot for
+shot: 0.083 blocks stays inside the box, and the rewind depths do not move either, because
+the clamp compares two numbers off the wire and the history's labels never enter it. What
+the fix changes is where a shot inside the window lands, and that is what the rewind-error
+column now checks on every run. Task 5's test compared the history against `MatchState`'s
+own tick counter — the same convention on both sides — and passed with the bug present. Its
+replacements read the snapshot the client actually receives (`MatchServerTests`) and the box
+the server rebuilds as it receives each `Fire` (`LagCompensationTests`), and both were seen
+to go red with the bug put back.
 
 ### What ran differently from the plan
 
