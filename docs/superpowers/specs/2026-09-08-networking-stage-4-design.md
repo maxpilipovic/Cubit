@@ -358,12 +358,13 @@ not go red.
   therefore arrive a tick before or after the snapshot carrying the health change. Both
   orders must look correct on screen.
 
-## Shipped: the measured number, Task 9 of twelve
+## Shipped 2026-09-12
 
-_Recorded 2026-09-10 by the acceptance gate in `Tests/src/LagCompensationTests.cpp`. This
-section records what was measured, not that the stage is finished — Tasks 10 to 12 are
-still open. The suite went 450 -> 453. Re-measured 2026-09-12 after the history off-by-one
-recorded at the end of "What the numbers say" was fixed; the suite is now 454._
+_All twelve tasks, from Task 1's `0a6121c` onward; the suite went 416 -> 458. The gate's numbers below
+were first recorded 2026-09-10 by `Tests/src/LagCompensationTests.cpp` and re-measured
+2026-09-12, after the history off-by-one recorded at the end of "What the numbers say" was
+fixed. The application run, the oracle's mutation, and what turned out differently follow
+the numbers._
 
 **The harness.** A `MatchServer` and two `MatchClient`s over `SimulatedTransport`, seed 1,
 5% loss, no jitter, on a 64 x 64 floor. The shooter walks fifteen blocks off the spawn and
@@ -480,3 +481,84 @@ to go red with the bug put back.
   the respawn rule, not the rewind.
 - **The gate's contrast is 60 shots rather than 200**, at 100 ms and 5% loss: rewound 60/60
   (100.0%), rewind off 5/60 (8.3%).
+
+### The application
+
+`Server.exe` plus two `Sandbox.exe --connect 127.0.0.1 --latency 150` clients, played by
+hand for about six minutes on 2026-09-12: one player walked off the shared spawn and
+strafed, the other aimed and middle-clicked. Confirmed by eye: the tracer draws the moment
+the button goes down; the impact marker and `HIT` arrive about a round trip later; fired
+slowly, the target's `HEALTH` reads 100, 66, 32, and the third hit shows `KILLED` on the
+shooter and puts the target back on the spawn at 100. Fired quickly, a kill *looks* like two
+hits, because `HIT` stays up for 45 ticks while the weapon allows a shot every 10 — the
+readout, not the damage.
+
+The two clients reconciled 21,590 and 21,515 snapshots and logged **12 and 41 corrections**
+(0.56 and 1.91 per 1,000), mean 1.80 and 1.12 blocks, maximum 10.76 and 9.81. Stage 3's
+run had zero on both sides. This one is not the same experiment: every kill teleports the
+victim to the spawn, and its client, which predicted it standing where it died, can only be
+corrected there. Maxima of ten blocks fit that exactly. **What these numbers do not show is
+how many corrections were respawns and how many were anything else** — NETSTATS counts
+them together, and nothing logged the kills. They are recorded as unattributed rather
+than explained.
+
+Single-player is unchanged: `POS 240.500000 26.900099 300.500000` and `FACES 1927774` once
+meshing settles, and a scripted middle click draws a tracer without moving the player or
+changing the mesh. The first attempt at that check read different numbers, because the
+freshly launched window had keyboard focus; the same binary run again read the values
+exactly.
+
+### Whether the acceptance oracle's mutation turned it red
+
+**Yes — and it was not enough.** The design declined to assert that disabling the rewind
+would fail the gate. It does, decisively: the same 60 rays resolved against present-state
+boxes land 5 (8.3%) against the rewind's 60, and 200-shot rows go 14/12/1 against
+200/200/189. Task 3's oracle, with no network in it, fails the same way.
+
+But the gate passed, 60 of 60, while every rewind in the game was a whole tick short. Hits
+cannot see an error smaller than the target: one tick at walk speed is 0.083 blocks inside
+a 0.3-block half width, and the table came back identical shot for shot with the bug fixed
+and with it put back. The bug was found by building the gate, not by the gate — and Task 5's
+own test, which had a genuine mutation proof, pinned the wrong tick numbering because it
+compared the history against the server's own counter instead of the snapshot the client
+reads. The oracle that now catches it measures *where* each shot is resolved, against the
+pose the shooter drew. **A test's oracle has to be what the consumer sees, and a pass rate
+is not a measurement of accuracy.**
+
+### What turned out differently from the design
+
+- **The history filed every position one tick early.** `MatchState::Step` increments its
+  tick after stepping, so the server recorded under `Tick() - 1` a position its snapshot
+  labels `Tick()`. Fixed by recording under the wire's number, the only one a client has.
+- **The 95% floor is narrowed, not met, at 166.7 ms under loss.** See "What the numbers
+  say". Every shot whose rewind fits the window lands exactly; a retransmitted `Fire` needs
+  25 ticks against a 15-tick cap. Raising the cap would widen the shot-behind-cover window
+  for every shot and was decided against.
+- **The 250 ms cap has no margin at the link it was chosen for.** Six of its fifteen ticks
+  are the interpolation delay, so a clean 166.7 ms link needs exactly fifteen. With the fix,
+  the history's oldest sample is exactly the clamp's floor — valid, with nothing spare.
+- **`FireMessage::ClientTick` is written and never read** anywhere in the stage.
+- **The Sandbox refreshes the input just before `Fire`.** `Fire` sends the input's yaw and
+  pitch, which the last fixed step set up to a whole step earlier, and the mouse moves
+  between steps.
+- **The tracer starts beside the eye, not at it.** Drawn from the eye along the view ray,
+  it projects onto one point under the crosshair and the shooter never sees it. The shot
+  itself still leaves from the eye.
+- **Tracer and marker lifetimes are ticks, not frames.** Debug renders at 144 fps; "a few
+  frames" is about 20 ms.
+- **The font test the plan specified checked the wrong words.** Its list was PING, RTT and
+  PLAYERS, which the HUD has never drawn; the test checks the labels the readout actually
+  uses. A count check alone cannot catch a duplicated glyph, so the table is also checked
+  for distinct glyphs.
+- **`LocalHealth` had no test** until the HUD came to depend on it.
+
+### Still open
+
+- Predicted terrain edits, and the rollback risk: undoing a rejected edit can invalidate
+  predicted movement, because the world the character collided against changed.
+- The edit log grows without bound.
+- The session death after about six seconds under `--loss 80/90`, still undiagnosed.
+- Attributing the live run's corrections between respawns and anything else.
+- The gate's rewind-off column resolves a retransmitted shot at its scheduled tick rather
+  than the tick the server really handled it — about 5% of shots. The test now knows the
+  real moment and could use it.

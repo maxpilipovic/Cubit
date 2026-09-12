@@ -335,6 +335,20 @@ obvious, and better shaped, the moment something concretely needs it.
   induced loss) reconciled 3,851 and 3,625 snapshots on its two clients for zero
   corrections apiece. Under 20% packet loss injected in the gate test — well past this
   design's target — 3 corrections per 1,000 ticks, comfortably under half a block.
+
+  **Stage 4 shipped 2026-09-12** (`0a6121c` onward, suite 416 → 458). Players can shoot
+  each other: middle mouse fires a hitscan shot, three hits kill, and death respawns
+  instantly. The server resolves each shot against where the target was on the
+  shooter's own screen — the client declares the fractional instant it was drawing,
+  and the server rewinds a per-player hitbox history to it, capped at 250 ms. At
+  100 ms RTT with 5% loss, 60 of 60 shots aimed at a strafing target hit, against 5 with
+  the rewind off; every shot whose rewind fits the window is resolved within a
+  millionth of a block of the pose the shooter drew. At 166.7 ms, 189 of 200 hit: the
+  misses are all lost-and-resent shots that fall outside the cap. Played by hand
+  across three processes at 150 ms, tracers are immediate and hit markers arrive a
+  round trip later. The measurement that mattered most was a failure of measurement:
+  the hit-rate gate passed while every rewind was a tick short, because hits cannot
+  see an error smaller than the target, so the gate now checks position as well.
   **Predicted terrain edits and their rollback problem are still the
   arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
   because the world the character collided against changed underneath it, and that
