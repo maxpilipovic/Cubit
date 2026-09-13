@@ -3,6 +3,7 @@
 #include "Cubit/Net/MatchClient.h"
 
 #include "Cubit/Logger.h"
+#include "Cubit/Voxel/EditRules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -73,6 +74,7 @@ void MatchClient::Step(double seconds)
             case MessageId::Snapshot:     HandleSnapshot(event.Data); break;
             case MessageId::EditApplied:  HandleEditApplied(event.Data); break;
             case MessageId::ShotResolved: HandleShotResolved(event.Data); break;
+            case MessageId::EditResult:   HandleEditResult(event.Data); break;
 
             //Client-to-server messages arriving at a client are malformed
             //traffic, not something to act on.
@@ -98,7 +100,42 @@ void MatchClient::Step(double seconds)
     //echoes back and the number replay reinserts against.
     const std::uint64_t tick = m_Match.Tick() + 1;
 
-    m_Unacked.push_back(PendingInput{ tick, m_Input });
+    //PREDICTING AN EDIT, before the step - the order the server applies it in.
+    //Checked against the state this tick steps from, with the same function
+    //the server will run, so a legal edit here is a legal edit there unless
+    //another player has moved into the cell since this client last saw them.
+    std::optional<BlockEdit> edit;
+    if (!m_EditQueue.empty())
+    {
+        const BlockEdit requested = m_EditQueue.front();
+        m_EditQueue.pop_front();
+
+        if (IsEditLegal(m_Match, m_LocalPlayer, requested, OtherPlayers::Check))
+        {
+            World& world = m_Match.GetWorld();
+            const glm::ivec3& at = requested.Position;
+
+            PredictedEdit predicted;
+            predicted.Tick = tick;
+            predicted.Edit = requested;
+            predicted.Beneath = world.GetBlock(at.x, at.y, at.z);
+
+            //For real - relit and remeshed, the cost EditApplied used to pay
+            //a round trip later.
+            ApplyBlockEdit(world, requested);
+
+            m_Predicted.push_back(predicted);
+
+            //The same bound as m_Unacked, for the same reason: only a silent
+            //server grows this, and it forgets the bookkeeping, not the block.
+            if (m_Predicted.size() > MaxUnackedInputs)
+                m_Predicted.pop_front();
+
+            edit = requested;
+        }
+    }
+
+    m_Unacked.push_back(PendingInput{ tick, m_Input, edit });
 
     //A silent server cannot grow this without limit. Dropping the oldest loses
     //replay history for an input that is never going to be acknowledged
@@ -122,7 +159,10 @@ void MatchClient::Step(double seconds)
     InputMessage message;
     message.FirstTick = m_Unacked[begin].Tick;
     for (std::size_t i = begin; i < m_Unacked.size(); ++i)
+    {
         message.Inputs.push_back(m_Unacked[i].Input);
+        message.Edits.push_back(m_Unacked[i].Edit);
+    }
 
     //Unreliable: a resend would deliver an intent the player has already
     //replaced, and the bundle already covers the loss.
@@ -141,12 +181,13 @@ void MatchClient::RequestEdit(const BlockEdit& edit)
     if (!m_Connected)
         return;
 
-    EditMessage message;
-    message.Edit = edit;
+    //Dropped past the cap rather than queued without bound: a client that
+    //clicks faster than 60 a second for long enough has asked for edits it
+    //will not see for seconds.
+    if (m_EditQueue.size() >= MaxQueuedEdits)
+        return;
 
-    //Reliable: an edit that arrives late is still correct, but one that
-    //vanishes is a permanent world desync.
-    m_Transport.Send(m_ServerPeer, EncodeEditRequest(message), Channel::Reliable);
+    m_EditQueue.push_back(edit);
 }
 
 void MatchClient::HandleWelcome(std::span<const std::uint8_t> data)
@@ -424,7 +465,50 @@ void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)
     if (!Decode(data, message))
         return;
 
-    ApplyBlockEdit(m_Match.GetWorld(), message.Edit);
+    ApplyConfirmedBlock(message.Edit.Position, message.Edit.Block);
+}
+
+void MatchClient::HandleEditResult(std::span<const std::uint8_t> data)
+{
+    if (!m_Connected)
+        return;
+
+    EditResultMessage result;
+    if (!Decode(data, result))
+        return;
+
+    const auto found = std::find_if(m_Predicted.begin(), m_Predicted.end(),
+        [&result](const PredictedEdit& predicted)
+        {
+            return predicted.Tick == result.ClientTick
+                && predicted.Edit.Position == result.Edit.Position;
+        });
+
+    //Resolved either way: accepted, its block is confirmed; refused, the
+    //server's block is. Both are result.Edit.Block. A result matching no
+    //prediction - a duplicate, or one already forgotten - still carries the
+    //server's truth, so it goes through the same path.
+    if (found != m_Predicted.end())
+        m_Predicted.erase(found);
+
+    ApplyConfirmedBlock(result.Edit.Position, result.Edit.Block);
+}
+
+void MatchClient::ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block)
+{
+    //The OLDEST prediction on this cell sits directly on the confirmed layer.
+    const auto bottom = std::find_if(m_Predicted.begin(), m_Predicted.end(),
+        [&cell](const PredictedEdit& predicted) { return predicted.Edit.Position == cell; });
+
+    if (bottom != m_Predicted.end())
+    {
+        bottom->Beneath = block;
+        return;
+    }
+
+    //Nothing predicted here: the server's block is what shows. A no-op when it
+    //already does, which is the accepted-prediction case.
+    ApplyBlockEdit(m_Match.GetWorld(), BlockEdit{ cell, block });
 }
 
 void MatchClient::Reject(const char* reason)

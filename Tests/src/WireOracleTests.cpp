@@ -255,51 +255,6 @@ TEST_CASE("Two clients see each other move")
     CHECK(first.PoseOf(second.LocalPlayer(), 0.0f).Yaw == doctest::Approx(-90.0f));
 }
 
-TEST_CASE("An edit takes a round trip and is not applied locally first")
-{
-    //The visible round trip, asserted rather than felt. The requester's own
-    //world changes only when the server's broadcast arrives.
-    LoopbackNetwork network;
-
-    NetworkSim sim;
-    sim.Latency = OneWayLatency;
-    SimulatedTransport serverNet(network.Server(), sim);
-
-    PeerId peer = InvalidPeer;
-    SimulatedTransport clientNet(network.AddClient(peer), sim);
-
-    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
-    MatchClient client(clientNet, GoodLoader());
-
-    for (int i = 0; i < 30; ++i)
-    {
-        client.Step(FrameClock::FixedStepSeconds);
-        server.Step(FrameClock::FixedStepSeconds);
-    }
-    REQUIRE(client.Connected());
-
-    const glm::ivec3 target(4, 0, 4);
-    REQUIRE(client.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
-
-    client.RequestEdit(BlockEdit{ target, BlockId{ 0 } });
-
-    //One tick later nothing has happened locally: the request has not even
-    //reached the server yet.
-    client.Step(FrameClock::FixedStepSeconds);
-    server.Step(FrameClock::FixedStepSeconds);
-    CHECK(client.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
-
-    for (int i = 0; i < 30; ++i)
-    {
-        client.Step(FrameClock::FixedStepSeconds);
-        server.Step(FrameClock::FixedStepSeconds);
-    }
-
-    CHECK(client.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
-    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
-    CHECK(server.EditLog().size() == 1);
-}
-
 TEST_CASE("A client joining late gets a world matching everyone else's, block for block")
 {
     //Without the edit log in Welcome, a client arriving after somebody dug a
@@ -317,8 +272,11 @@ TEST_CASE("A client joining late gets a world matching everyone else's, block fo
     MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
     MatchClient first(firstNet, GoodLoader());
 
+    //An input before every client Step: Step predicts, and sends any queued
+    //edit, only on a tick that has one.
     for (int i = 0; i < 30; ++i)
     {
+        first.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
     }
@@ -328,12 +286,14 @@ TEST_CASE("A client joining late gets a world matching everyone else's, block fo
     for (int x = 0; x < 20; ++x)
     {
         first.RequestEdit(BlockEdit{ glm::ivec3(x, 0, 6), BlockId{ 0 } });
+        first.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
     }
 
     for (int i = 0; i < 40; ++i)
     {
+        first.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
     }
@@ -346,6 +306,8 @@ TEST_CASE("A client joining late gets a world matching everyone else's, block fo
 
     for (int i = 0; i < 40; ++i)
     {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         second.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
@@ -373,8 +335,12 @@ TEST_CASE("Two clients editing the same block on the same tick converge")
     MatchClient first(firstNet, GoodLoader());
     MatchClient second(secondNet, GoodLoader());
 
+    //An input before every client Step: Step predicts, and sends any queued
+    //edit, only on a tick that has one.
     for (int i = 0; i < 30; ++i)
     {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         second.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
@@ -388,10 +354,18 @@ TEST_CASE("Two clients editing the same block on the same tick converge")
 
     for (int i = 0; i < 40; ++i)
     {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
         first.Step(FrameClock::FixedStepSeconds);
         second.Step(FrameClock::FixedStepSeconds);
         server.Step(FrameClock::FixedStepSeconds);
     }
+
+    //Both edits really happened. Without this the case passes when NEITHER
+    //edit is ever sent - three untouched worlds agree with each other - which
+    //is exactly how it passed on 2026-09-13 once edits started riding inputs
+    //and this case had not yet been given any.
+    CHECK(server.EditLog().size() == 2);
 
     //Both agree with the server, whichever won. Player-id order decides, and
     //it decides the same way every run.

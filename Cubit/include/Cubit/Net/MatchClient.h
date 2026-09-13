@@ -30,6 +30,10 @@
 //bound exists so a silent server cannot grow this without limit.
 constexpr std::size_t MaxUnackedInputs = 120;
 
+//How many clicked edits may wait for an input tick. One edit rides each tick,
+//so this is the backlog a burst of clicks can build before extras are dropped.
+constexpr std::size_t MaxQueuedEdits = 4;
+
 //How far prediction may disagree with the server before the correction is
 //shown, in blocks, as a full 3D distance.
 //
@@ -97,8 +101,10 @@ public:
     //caller can set it whenever it likes without deciding the send rate.
     void SetInput(const CharacterInput& input);
 
-    //Asks the server to change a block. Nothing happens locally until the
-    //server's answer arrives - that round trip is the point.
+    //Asks for a block to change. Queued for the next Step, which checks it
+    //against the same rules the server uses: an illegal edit is dropped there
+    //and never sent, and a legal one is shown immediately and sent with that
+    //tick's input. At most one edit rides each tick.
     void RequestEdit(const BlockEdit& edit);
 
     //True once Welcome has been accepted and the world is loaded.
@@ -117,6 +123,10 @@ public:
     MatchState& MatchForWrite() { return m_Match; }
 
     double RoundTripTime() const;
+
+    //Predicted edits still waiting for the server's EditResult. For tests and
+    //diagnostics.
+    std::size_t PendingEditCount() const { return m_Predicted.size(); }
 
     //The newest tick any snapshot has reported. NOT this client's own tick:
     //since prediction, Match().Tick() is the client's, free-running from the
@@ -209,6 +219,13 @@ private:
     void HandleSnapshot(std::span<const std::uint8_t> data);
     void HandleEditApplied(std::span<const std::uint8_t> data);
     void HandleShotResolved(std::span<const std::uint8_t> data);
+    void HandleEditResult(std::span<const std::uint8_t> data);
+
+    //A block the server has confirmed. Written underneath the oldest pending
+    //prediction on that cell when there is one, so what shows stays this
+    //client's prediction until that prediction resolves; written to the world
+    //directly otherwise.
+    void ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block);
 
     //Writes the authoritative state in, replays what the server has not
     //acknowledged, and decides whether the difference is worth showing.
@@ -272,11 +289,35 @@ private:
     {
         std::uint64_t Tick = 0;
         CharacterInput Input;
+
+        //The edit this tick carried, if any - resent with the input and
+        //replayed at its tick.
+        std::optional<BlockEdit> Edit;
     };
 
     //Oldest first, and consecutive: one input is produced per tick and they are
     //dropped from the front as they are acknowledged.
     std::deque<PendingInput> m_Unacked;
+
+    //One of this client's edits the server has not ruled on yet.
+    struct PredictedEdit
+    {
+        std::uint64_t Tick = 0;
+        BlockEdit Edit;
+
+        //What the cell held beneath this prediction. For the oldest prediction
+        //on a cell, the server-confirmed value; for a newer one, the older
+        //prediction's block.
+        BlockId Beneath = 0;
+    };
+
+    //Oldest first. Removed when their EditResult arrives, which can be after
+    //the snapshot that acknowledged their input: results are reliable and
+    //snapshots are not, so they arrive in either order.
+    std::deque<PredictedEdit> m_Predicted;
+
+    //Clicks waiting for a tick to ride on.
+    std::deque<BlockEdit> m_EditQueue;
 
     std::uint64_t m_ServerTick = 0;
 
