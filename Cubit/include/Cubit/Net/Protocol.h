@@ -8,6 +8,7 @@
 #include "Cubit/Voxel/MatchState.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -17,10 +18,9 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Every message the wire carries. Eight, and deliberately not nine: there are no
-//join or leave messages, because a snapshot carries the whole roster every tick
-//and ids are never reused, so a client derives both by diffing what it held
-//last.
+//Every message the wire carries. Nine, and deliberately no join or leave
+//messages among them: a snapshot carries the whole roster every tick and ids
+//are never reused, so a client derives both by diffing what it held last.
 enum class MessageId : std::uint8_t
 {
     Hello = 1,
@@ -30,7 +30,8 @@ enum class MessageId : std::uint8_t
     EditRequest = 5,
     EditApplied = 6,
     Fire = 7,
-    ShotResolved = 8
+    ShotResolved = 8,
+    EditResult = 9
 };
 
 //Bumped whenever any message's layout changes. A mismatch is a disconnect with
@@ -44,7 +45,10 @@ enum class MessageId : std::uint8_t
 //
 //3: shooting. A Fire message, a ShotResolved answer, and a Health byte on
 //PlayerSnapshot. The last is on the per-tick path.
-constexpr std::uint32_t ProtocolVersion = 3;
+//
+//4: predicted edits. An input entry may carry one edit, and the editor hears
+//its fate from EditResult. On the per-tick path.
+constexpr std::uint32_t ProtocolVersion = 4;
 
 //How many inputs one InputMessage carries at most.
 //
@@ -91,6 +95,15 @@ struct InputMessage
     //Oldest first. Never longer than InputBundleSize when this client sent it,
     //but a decoder must not assume that of a packet off a socket.
     std::vector<CharacterInput> Inputs;
+
+    //At most one edit per input, riding with the tick it was made on so the
+    //server applies it at exactly that step - the whole of what makes a
+    //predicted edit agree with the server.
+    //
+    //Entry i carries an edit exactly when i < Edits.size() and Edits[i] has a
+    //value, so a sender with no edits may leave this empty. Decode always
+    //fills one element per input, so a receiver can index the two together.
+    std::vector<std::optional<BlockEdit>> Edits;
 };
 
 struct PlayerSnapshot
@@ -190,6 +203,22 @@ struct ShotResolvedMessage
     bool Killed = false;
 };
 
+//The server's ruling on one of a client's own edits, sent to that client only.
+//
+//Reliable, because a lost refusal would leave a block on one client that the
+//server never had - a permanent desync, not a correction. Tagged with the
+//client's own tick, which is how the client finds the prediction it answers.
+struct EditResultMessage
+{
+    std::uint64_t ClientTick = 0;
+    bool Accepted = false;
+
+    //The position, and the block the server has there AFTER ruling: the
+    //requested block when accepted, the unchanged one when refused. Always
+    //the server's truth, so the client never has to work it out.
+    BlockEdit Edit;
+};
+
 CB_API std::vector<std::uint8_t> Encode(const HelloMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const WelcomeMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const InputMessage& message);
@@ -198,6 +227,7 @@ CB_API std::vector<std::uint8_t> EncodeEditRequest(const EditMessage& message);
 CB_API std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const FireMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message);
+CB_API std::vector<std::uint8_t> Encode(const EditResultMessage& message);
 
 //Each returns false and leaves `out` untouched when the bytes are truncated,
 //malformed, or of the wrong type. Malformed input is a routine wire condition
@@ -209,9 +239,10 @@ CB_API bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, FireMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out);
+CB_API bool Decode(std::span<const std::uint8_t> bytes, EditResultMessage& out);
 
 //Reads the leading id without consuming anything, so a receiver can pick a
-//decoder. False when the buffer is empty or the id is not one of the eight.
+//decoder. False when the buffer is empty or the id is not one of the nine.
 CB_API bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out);
 
 #ifdef _MSC_VER

@@ -25,6 +25,12 @@ namespace
     constexpr std::size_t BlockEditBytes = 12 + 2;
     constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
 
+    //The smallest an input entry can be on the wire: the input and its edit
+    //flag, with no edit. The guard in Decode(InputMessage&) divides by this -
+    //see the note on PlayerSnapshotBytes for why a guard constant must be the
+    //true minimum width and never larger.
+    constexpr std::size_t InputEntryMinBytes = CharacterInputBytes + 1;
+
     void WriteEdit(ByteWriter& writer, const BlockEdit& edit)
     {
         writer.IVec3(edit.Position);
@@ -78,13 +84,19 @@ std::vector<std::uint8_t> Encode(const InputMessage& message)
     writer.U8(static_cast<std::uint8_t>(message.Inputs.size()));
     writer.U64(message.FirstTick);
 
-    for (const CharacterInput& input : message.Inputs)
+    for (std::size_t i = 0; i < message.Inputs.size(); ++i)
     {
+        const CharacterInput& input = message.Inputs[i];
         writer.F32(input.Move.x);
         writer.F32(input.Move.y);
         writer.F32(input.Yaw);
         writer.F32(input.Pitch);
         writer.Bool(input.Jump);
+
+        const bool hasEdit = i < message.Edits.size() && message.Edits[i].has_value();
+        writer.Bool(hasEdit);
+        if (hasEdit)
+            WriteEdit(writer, *message.Edits[i]);
     }
 
     return writer.Bytes();
@@ -149,6 +161,16 @@ std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message)
     writer.Vec3(message.Impact);
     writer.U8(message.VictimHealth);
     writer.Bool(message.Killed);
+    return writer.Bytes();
+}
+
+std::vector<std::uint8_t> Encode(const EditResultMessage& message)
+{
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::EditResult));
+    writer.U64(message.ClientTick);
+    writer.Bool(message.Accepted);
+    WriteEdit(writer, message.Edit);
     return writer.Bytes();
 }
 
@@ -236,10 +258,11 @@ bool Decode(std::span<const std::uint8_t> bytes, InputMessage& out)
     //the same-shaped guard is NOT optional - its count is a u32, and deleting
     //it does not make Decode wrong, it makes Decode not return. Read that note
     //before touching any of the three.
-    if (!reader.Ok() || count > reader.Remaining() / CharacterInputBytes)
+    if (!reader.Ok() || count > reader.Remaining() / InputEntryMinBytes)
         return false;
 
     message.Inputs.reserve(count);
+    message.Edits.reserve(count);
     for (std::uint8_t i = 0; i < count; ++i)
     {
         CharacterInput input;
@@ -249,6 +272,11 @@ bool Decode(std::span<const std::uint8_t> bytes, InputMessage& out)
         input.Pitch = reader.F32();
         input.Jump = reader.Bool();
         message.Inputs.push_back(input);
+
+        std::optional<BlockEdit> edit;
+        if (reader.Bool())
+            edit = ReadEdit(reader);
+        message.Edits.push_back(edit);
     }
 
     if (!reader.Ok())
@@ -380,6 +408,25 @@ bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out)
     return true;
 }
 
+bool Decode(std::span<const std::uint8_t> bytes, EditResultMessage& out)
+{
+    ByteReader reader(bytes);
+    if (!OpenAs(reader, MessageId::EditResult))
+        return false;
+
+    EditResultMessage message;
+    message.ClientTick = reader.U64();
+    message.Accepted = reader.Bool();
+    message.Edit = ReadEdit(reader);
+
+    //Fixed width, no count: nothing to reserve on a hostile packet's word.
+    if (!reader.Ok())
+        return false;
+
+    out = message;
+    return true;
+}
+
 bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
 {
     if (bytes.empty())
@@ -387,7 +434,7 @@ bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
 
     const std::uint8_t id = bytes[0];
     if (id < static_cast<std::uint8_t>(MessageId::Hello) ||
-        id > static_cast<std::uint8_t>(MessageId::ShotResolved))
+        id > static_cast<std::uint8_t>(MessageId::EditResult))
         return false;
 
     out = static_cast<MessageId>(id);

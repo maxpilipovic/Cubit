@@ -3,6 +3,7 @@
 #include "Cubit/Net/Protocol.h"
 
 #include <glm/glm.hpp>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -99,17 +100,20 @@ TEST_CASE("Input round-trips a bundle and the tick it starts at")
     }
 }
 
-TEST_CASE("A three-input bundle is 61 bytes")
+TEST_CASE("A three-input bundle is 64 bytes, and 14 more for each edit it carries")
 {
     //Pinned because it is the number the stage's upstream cost is quoted from:
-    //1 id + 1 count + 8 tick + 3 x 17 = 61 bytes, 3,660 B/s per client at
-    //60 Hz. A field silently widening is a bandwidth regression nobody would
-    //otherwise notice until a real network was involved.
+    //1 id + 1 count + 8 tick + 3 x (17 input + 1 edit flag) = 64 bytes,
+    //3,840 B/s per client at 60 Hz. Version 3 was 61; the three flag bytes are
+    //this stage's whole standing cost.
     InputMessage message;
     message.FirstTick = 1;
     message.Inputs.assign(InputBundleSize, CharacterInput{});
 
-    CHECK(Encode(message).size() == 61);
+    CHECK(Encode(message).size() == 64);
+
+    message.Edits = { std::nullopt, BlockEdit{ glm::ivec3(1, 2, 3), BlockId{ 4 } }, std::nullopt };
+    CHECK(Encode(message).size() == 78);
 }
 
 TEST_CASE("An input declaring more entries than it carries is refused")
@@ -244,6 +248,18 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
         EditMessage edit;
         edit.Edit = BlockEdit{ glm::ivec3(2, 2, 2), BlockId{ 1 } };
         messages.push_back(EncodeEditRequest(edit));
+
+        InputMessage inputWithEdit;
+        inputWithEdit.FirstTick = 10;
+        inputWithEdit.Inputs.assign(InputBundleSize, CharacterInput{});
+        inputWithEdit.Edits = { BlockEdit{ glm::ivec3(3, 3, 3), BlockId{ 1 } }, std::nullopt, std::nullopt };
+        messages.push_back(Encode(inputWithEdit));
+
+        EditResultMessage result;
+        result.ClientTick = 3;
+        result.Accepted = true;
+        result.Edit = BlockEdit{ glm::ivec3(4, 4, 4), BlockId{ 2 } };
+        messages.push_back(Encode(result));
     }
 
     for (const std::vector<std::uint8_t>& whole : messages)
@@ -261,6 +277,7 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
             InputMessage input;
             SnapshotMessage snapshot;
             EditMessage edit;
+            EditResultMessage editResult;
 
             //Whichever decoder matches the id must refuse; the rest refuse on
             //the id alone. Either way nothing throws and nothing is trusted.
@@ -272,6 +289,7 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
             case MessageId::Snapshot:    CHECK_FALSE(Decode(truncated, snapshot)); break;
             case MessageId::EditRequest:
             case MessageId::EditApplied: CHECK_FALSE(Decode(truncated, edit)); break;
+            case MessageId::EditResult:  CHECK_FALSE(Decode(truncated, editResult)); break;
             }
         }
     }
@@ -414,7 +432,8 @@ TEST_CASE("Every message id the wire carries is recognised")
         { EncodeEditRequest(EditMessage{}),         MessageId::EditRequest },
         { EncodeEditApplied(EditMessage{}),         MessageId::EditApplied },
         { Encode(FireMessage{}),                    MessageId::Fire },
-        { Encode(ShotResolvedMessage{}),            MessageId::ShotResolved }
+        { Encode(ShotResolvedMessage{}),            MessageId::ShotResolved },
+        { Encode(EditResultMessage{}),              MessageId::EditResult }
     };
 
     for (const auto& [bytes, expected] : cases)
@@ -423,5 +442,72 @@ TEST_CASE("Every message id the wire carries is recognised")
         CAPTURE(static_cast<int>(expected));
         REQUIRE(PeekMessageId(bytes, id));
         CHECK(id == expected);
+    }
+}
+
+TEST_CASE("An input entry carries its edit, and an entry without one comes back without one")
+{
+    InputMessage sent;
+    sent.FirstTick = 77;
+    sent.Inputs.assign(3, CharacterInput{});
+    sent.Edits = {
+        std::nullopt,
+        BlockEdit{ glm::ivec3(-3, 40, 1000), BlockId{ 200 } },
+        std::nullopt
+    };
+
+    InputMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+
+    REQUIRE(received.Edits.size() == 3);
+    CHECK_FALSE(received.Edits[0].has_value());
+    REQUIRE(received.Edits[1].has_value());
+    CHECK(received.Edits[1]->Position == glm::ivec3(-3, 40, 1000));
+    CHECK(received.Edits[1]->Block == BlockId{ 200 });
+    CHECK_FALSE(received.Edits[2].has_value());
+}
+
+TEST_CASE("A bundle sent with no edits decodes one empty edit per input")
+{
+    //The encoder takes an empty Edits as "none"; the decoder never hands back a
+    //shorter list than Inputs, so a caller can index the two together.
+    InputMessage sent;
+    sent.FirstTick = 5;
+    sent.Inputs.assign(3, CharacterInput{});
+
+    InputMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+
+    REQUIRE(received.Edits.size() == 3);
+    for (const std::optional<BlockEdit>& edit : received.Edits)
+        CHECK_FALSE(edit.has_value());
+}
+
+TEST_CASE("An edit result round-trips, accepted and refused")
+{
+    for (const bool accepted : { true, false })
+    {
+        CAPTURE(accepted);
+
+        EditResultMessage sent;
+        sent.ClientTick = 4294967302ull;   //Past a u32, so a narrowed field shows up.
+        sent.Accepted = accepted;
+        sent.Edit = BlockEdit{ glm::ivec3(12, -4, 7), BlockId{ 2 } };
+
+        const std::vector<std::uint8_t> bytes = Encode(sent);
+
+        //1 id + 8 tick + 1 accepted + 12 position + 2 block.
+        CHECK(bytes.size() == 24);
+
+        MessageId id = MessageId::Hello;
+        REQUIRE(PeekMessageId(bytes, id));
+        CHECK(id == MessageId::EditResult);
+
+        EditResultMessage received;
+        REQUIRE(Decode(bytes, received));
+        CHECK(received.ClientTick == sent.ClientTick);
+        CHECK(received.Accepted == accepted);
+        CHECK(received.Edit.Position == sent.Edit.Position);
+        CHECK(received.Edit.Block == sent.Edit.Block);
     }
 }
