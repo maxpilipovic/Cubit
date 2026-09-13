@@ -81,7 +81,6 @@ void MatchClient::Step(double seconds)
             //traffic, not something to act on.
             case MessageId::Hello:
             case MessageId::Input:
-            case MessageId::EditRequest:
             case MessageId::Fire:
                 break;
             }

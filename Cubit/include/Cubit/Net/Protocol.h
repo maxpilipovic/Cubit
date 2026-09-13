@@ -18,7 +18,7 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Every message the wire carries. Nine, and deliberately no join or leave
+//Every message the wire carries. Eight, and deliberately no join or leave
 //messages among them: a snapshot carries the whole roster every tick and ids
 //are never reused, so a client derives both by diffing what it held last.
 enum class MessageId : std::uint8_t
@@ -27,7 +27,7 @@ enum class MessageId : std::uint8_t
     Welcome = 2,
     Input = 3,
     Snapshot = 4,
-    EditRequest = 5,
+    //5 was EditRequest, retired in version 4. Never reuse it.
     EditApplied = 6,
     Fire = 7,
     ShotResolved = 8,
@@ -142,9 +142,8 @@ struct SnapshotMessage
     std::vector<PlayerSnapshot> Players;
 };
 
-//One edit, in either direction. The two directions share a payload but not a
-//MessageId, because a client must never mistake its own request coming back
-//for the server's authoritative answer.
+//One edit the server has applied, sent to every joined client except the one
+//that made it. The editor hears about its own edits from EditResult instead.
 struct EditMessage
 {
     BlockEdit Edit;
@@ -223,7 +222,6 @@ CB_API std::vector<std::uint8_t> Encode(const HelloMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const WelcomeMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const InputMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const SnapshotMessage& message);
-CB_API std::vector<std::uint8_t> EncodeEditRequest(const EditMessage& message);
 CB_API std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const FireMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message);
@@ -242,7 +240,7 @@ CB_API bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out
 CB_API bool Decode(std::span<const std::uint8_t> bytes, EditResultMessage& out);
 
 //Reads the leading id without consuming anything, so a receiver can pick a
-//decoder. False when the buffer is empty or the id is not one of the nine.
+//decoder. False when the buffer is empty or the id is not one of the eight.
 CB_API bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out);
 
 #ifdef _MSC_VER

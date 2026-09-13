@@ -47,10 +47,6 @@ void MatchServer::Step(double seconds)
         }
     }
 
-    //Before the step, so an edit and the movement that follows it in the same
-    //tick see the same world.
-    ApplyPendingEdits();
-
     std::vector<PlayerCommand> commands;
     commands.reserve(m_Clients.size());
 
@@ -266,16 +262,6 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         return;
     }
 
-    case MessageId::EditRequest:
-    {
-        EditMessage edit;
-        if (!Decode(data, edit) || client->Player == InvalidPlayer)
-            return;
-
-        m_PendingEdits.push_back(PendingEdit{ client->Player, edit.Edit });
-        return;
-    }
-
     case MessageId::Fire:
     {
         FireMessage fire;
@@ -294,41 +280,6 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
     case MessageId::ShotResolved:
         return;
     }
-}
-
-void MatchServer::ApplyPendingEdits()
-{
-    if (m_PendingEdits.empty())
-        return;
-
-    //Player-id order, not arrival order. Arrival order is socket scheduling,
-    //which is not reproducible - two clients editing one block on one tick
-    //would resolve differently run to run, and every test touching edits would
-    //be a coin flip. stable_sort so two edits from one player keep the order
-    //that player sent them in.
-    std::stable_sort(m_PendingEdits.begin(), m_PendingEdits.end(),
-        [](const PendingEdit& a, const PendingEdit& b) { return a.Player < b.Player; });
-
-    for (const PendingEdit& pending : m_PendingEdits)
-    {
-        //Nothing came back: the position was out of range, or the block was
-        //already what the client asked for. Either way the world did not
-        //change, so there is nothing to log and nothing to tell anybody.
-        const std::optional<BlockEdit> inverse = ApplyBlockEdit(m_Match.GetWorld(), pending.Edit);
-        if (!inverse.has_value())
-            continue;
-
-        m_EditLog.push_back(pending.Edit);
-
-        EditMessage applied;
-        applied.Edit = pending.Edit;
-
-        //Everyone joined, the requester included. A client's own world changes
-        //only when this arrives, which is what makes the round trip visible.
-        SendToJoined(EncodeEditApplied(applied), Channel::Reliable);
-    }
-
-    m_PendingEdits.clear();
 }
 
 void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,

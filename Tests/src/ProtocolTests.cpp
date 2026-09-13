@@ -193,24 +193,37 @@ TEST_CASE("An empty roster is a legal snapshot")
     CHECK(received.Players.empty());
 }
 
-TEST_CASE("Edit messages round-trip and keep their own identity")
+TEST_CASE("An applied edit round-trips")
 {
     EditMessage sent;
     sent.Edit = BlockEdit{ glm::ivec3(300, 40, -12), BlockId{ 3 } };
 
-    std::vector<std::uint8_t> request = EncodeEditRequest(sent);
-    std::vector<std::uint8_t> applied = EncodeEditApplied(sent);
+    const std::vector<std::uint8_t> applied = EncodeEditApplied(sent);
 
     MessageId id = MessageId::Hello;
-    REQUIRE(PeekMessageId(request, id));
-    CHECK(id == MessageId::EditRequest);
     REQUIRE(PeekMessageId(applied, id));
     CHECK(id == MessageId::EditApplied);
 
     EditMessage received;
-    REQUIRE(Decode(request, received));
+    REQUIRE(Decode(applied, received));
     CHECK(received.Edit.Position == glm::ivec3(300, 40, -12));
     CHECK(received.Edit.Block == BlockId{ 3 });
+}
+
+TEST_CASE("A retired message id is not recognised")
+{
+    //5 was EditRequest until version 4. Ids are never reused, and a packet
+    //carrying one must vanish at dispatch rather than reach a decoder.
+    const std::vector<std::uint8_t> retired{ 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+    MessageId id = MessageId::Hello;
+    CHECK_FALSE(PeekMessageId(retired, id));
+
+    EditMessage edit;
+    CHECK_FALSE(Decode(retired, edit));
+
+    CHECK_FALSE(PeekMessageId(std::vector<std::uint8_t>{ 0 }, id));
+    CHECK_FALSE(PeekMessageId(std::vector<std::uint8_t>{ 10 }, id));
 }
 
 TEST_CASE("A message of the wrong type is refused")
@@ -247,7 +260,7 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
 
         EditMessage edit;
         edit.Edit = BlockEdit{ glm::ivec3(2, 2, 2), BlockId{ 1 } };
-        messages.push_back(EncodeEditRequest(edit));
+        messages.push_back(EncodeEditApplied(edit));
 
         InputMessage inputWithEdit;
         inputWithEdit.FirstTick = 10;
@@ -287,7 +300,6 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
             case MessageId::Welcome:     CHECK_FALSE(Decode(truncated, welcome)); break;
             case MessageId::Input:       CHECK_FALSE(Decode(truncated, input)); break;
             case MessageId::Snapshot:    CHECK_FALSE(Decode(truncated, snapshot)); break;
-            case MessageId::EditRequest:
             case MessageId::EditApplied: CHECK_FALSE(Decode(truncated, edit)); break;
             case MessageId::EditResult:  CHECK_FALSE(Decode(truncated, editResult)); break;
             }
@@ -429,7 +441,6 @@ TEST_CASE("Every message id the wire carries is recognised")
         { Encode(WelcomeMessage{}),                 MessageId::Welcome },
         { Encode(InputMessage{}),                   MessageId::Input },
         { Encode(SnapshotMessage{}),                MessageId::Snapshot },
-        { EncodeEditRequest(EditMessage{}),         MessageId::EditRequest },
         { EncodeEditApplied(EditMessage{}),         MessageId::EditApplied },
         { Encode(FireMessage{}),                    MessageId::Fire },
         { Encode(ShotResolvedMessage{}),            MessageId::ShotResolved },

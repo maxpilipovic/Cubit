@@ -150,20 +150,9 @@ private:
         std::uint8_t Health = StartingHealth;
     };
 
-    //An edit waiting for this tick's ordered application.
-    struct PendingEdit
-    {
-        PlayerId Player = InvalidPlayer;
-        BlockEdit Edit;
-    };
-
     void HandleConnected(PeerId peer);
     void HandleDisconnected(PeerId peer);
     void HandleMessage(PeerId peer, std::span<const std::uint8_t> data);
-
-    //Applies this tick's edits in player-id order and tells every joined client
-    //about each one that actually changed the world.
-    void ApplyPendingEdits();
 
     //Rules on one client's edit, applies it if legal, answers the editor with
     //EditResult and tells everyone else with EditApplied.
@@ -216,7 +205,6 @@ private:
     Transport& m_Transport;
 
     std::vector<Client> m_Clients;
-    std::vector<PendingEdit> m_PendingEdits;
     std::vector<BlockEdit> m_EditLog;
     HitboxHistory m_History;
 };

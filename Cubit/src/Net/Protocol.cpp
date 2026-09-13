@@ -124,14 +124,6 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
     return writer.Bytes();
 }
 
-std::vector<std::uint8_t> EncodeEditRequest(const EditMessage& message)
-{
-    ByteWriter writer;
-    writer.U8(static_cast<std::uint8_t>(MessageId::EditRequest));
-    WriteEdit(writer, message.Edit);
-    return writer.Bytes();
-}
-
 std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message)
 {
     ByteWriter writer;
@@ -344,13 +336,7 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
 bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out)
 {
     ByteReader reader(bytes);
-
-    const std::uint8_t id = reader.U8();
-    if (!reader.Ok())
-        return false;
-
-    if (id != static_cast<std::uint8_t>(MessageId::EditRequest) &&
-        id != static_cast<std::uint8_t>(MessageId::EditApplied))
+    if (!OpenAs(reader, MessageId::EditApplied))
         return false;
 
     EditMessage message;
@@ -432,11 +418,21 @@ bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
     if (bytes.empty())
         return false;
 
-    const std::uint8_t id = bytes[0];
-    if (id < static_cast<std::uint8_t>(MessageId::Hello) ||
-        id > static_cast<std::uint8_t>(MessageId::EditResult))
-        return false;
+    //A list, not a range: a retired id sits inside the range, and a range check
+    //would wave it through to dispatch.
+    switch (static_cast<MessageId>(bytes[0]))
+    {
+    case MessageId::Hello:
+    case MessageId::Welcome:
+    case MessageId::Input:
+    case MessageId::Snapshot:
+    case MessageId::EditApplied:
+    case MessageId::Fire:
+    case MessageId::ShotResolved:
+    case MessageId::EditResult:
+        out = static_cast<MessageId>(bytes[0]);
+        return true;
+    }
 
-    out = static_cast<MessageId>(id);
-    return true;
+    return false;
 }

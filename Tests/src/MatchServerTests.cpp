@@ -334,10 +334,9 @@ TEST_CASE("A peer that has not finished the handshake is sent nothing")
     PeerId silentPeer = InvalidPeer;
     Transport& silent = network.AddClient(silentPeer);
 
-    EditMessage edit;
-    edit.Edit.Position = glm::ivec3(8, 1, 8);
-    edit.Edit.Block = BlockId{ 1 };
-    speaker.Send(LoopbackNetwork::ServerPeer, EncodeEditRequest(edit), Channel::Reliable);
+    //A legal edit, clear of the players at the spawn, so the server does send
+    //EditApplied to joined clients - and must not send it to this one.
+    SendInputWithEdit(speaker, 1, CharacterInput{}, BlockEdit{ glm::ivec3(4, 1, 4), BlockId{ 1 } });
 
     server.Step(FrameClock::FixedStepSeconds);
 
@@ -435,8 +434,12 @@ TEST_CASE("A garbage packet is ignored rather than fatal")
     CHECK(server.Match().Players().empty());
 }
 
-TEST_CASE("An applied edit reaches every joined client and is remembered for the next one")
+TEST_CASE("An accepted edit is remembered for the next client to join")
 {
+    //A client arriving after somebody dug a hole must see the hole, so the log
+    //rides along in Welcome. The other half of the old case - who hears about
+    //an edit - is "An accepted edit answers its editor with a result and
+    //everyone else with EditApplied".
     LoopbackNetwork network;
     MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
 
@@ -444,43 +447,13 @@ TEST_CASE("An applied edit reaches every joined client and is remembered for the
     Transport& first = network.AddClient(firstPeer);
     REQUIRE(Join(server, first) != InvalidPlayer);
 
-    PeerId secondPeer = InvalidPeer;
-    Transport& second = network.AddClient(secondPeer);
-    REQUIRE(Join(server, second) != InvalidPlayer);
-
-    EditMessage request;
-    request.Edit.Position = glm::ivec3(8, 1, 8);
-    request.Edit.Block = BlockId{ 1 };
-    first.Send(LoopbackNetwork::ServerPeer, EncodeEditRequest(request), Channel::Reliable);
-
+    const BlockEdit edit{ glm::ivec3(4, 1, 4), BlockId{ 1 } };
+    SendInputWithEdit(first, 1, CharacterInput{}, edit);
     server.Step(FrameClock::FixedStepSeconds);
 
-    //The requester included: its own world changes only when this arrives,
-    //which is what makes the round trip visible in Stage 2.
-    std::size_t sawEdit = 0;
-    for (Transport* client : { &first, &second })
-    {
-        NetEvent event;
-        while (client->Poll(event))
-        {
-            if (event.Type != NetEventType::Message)
-                continue;
-
-            MessageId id = MessageId::Hello;
-            if (!PeekMessageId(event.Data, id) || id != MessageId::EditApplied)
-                continue;
-
-            EditMessage applied;
-            if (Decode(event.Data, applied) && applied.Edit.Position == request.Edit.Position)
-                ++sawEdit;
-        }
-    }
-
-    CHECK(sawEdit == 2);
     REQUIRE(server.EditLog().size() == 1);
-    CHECK(server.EditLog()[0].Position == request.Edit.Position);
+    CHECK(server.EditLog()[0].Position == edit.Position);
 
-    //A client arriving now must see the hole, so the log rides along in Welcome.
     PeerId latePeer = InvalidPeer;
     Transport& late = network.AddClient(latePeer);
     late.Send(LoopbackNetwork::ServerPeer, Encode(HelloMessage{}), Channel::Reliable);
@@ -489,7 +462,7 @@ TEST_CASE("An applied edit reaches every joined client and is remembered for the
     const std::optional<WelcomeMessage> welcome = FindWelcome(late);
     REQUIRE(welcome.has_value());
     REQUIRE(welcome->Edits.size() == 1);
-    CHECK(welcome->Edits[0].Position == request.Edit.Position);
+    CHECK(welcome->Edits[0].Position == edit.Position);
 }
 
 TEST_CASE("Snapshot loss is drawn per client, not shared between them")
