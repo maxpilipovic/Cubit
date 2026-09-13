@@ -74,6 +74,12 @@ void World::SetBlockAssumingDirty(int x, int y, int z, BlockId block)
     WriteBlock(x, y, z, block);
 }
 
+void World::SetBlockUnmarked(int x, int y, int z, BlockId block)
+{
+    //Same body as SetBlockAssumingDirty, different contract - see the header.
+    WriteBlock(x, y, z, block);
+}
+
 std::uint8_t World::GetSkyLight(int x, int y, int z) const
 {
     if (!IsInBounds(x, y, z))

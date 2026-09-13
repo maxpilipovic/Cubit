@@ -59,6 +59,18 @@ public:
     //load while changing nothing. See docs/performance.md P10.
     void SetBlockAssumingDirty(int x, int y, int z, BlockId block);
 
+    //Changes a block without marking anything dirty and without relighting;
+    //throws when the position is outside the world.
+    //
+    //For replay only. Replay undoes and redoes a client's pending edits so the
+    //character collides against the world as it stood at each replayed tick,
+    //then restores every block before returning - so the world it leaves is the
+    //world it found, and nothing needs remeshing or relighting. Used anywhere
+    //that does not restore, it leaves a stale mesh and stale light. Collision
+    //reads IsBlockSolid and IsBlockFluid only, never light, which is what makes
+    //skipping the relight safe while the writes are in place.
+    void SetBlockUnmarked(int x, int y, int z, BlockId block);
+
     //Returns the colour of a block by looking its id up in this world's palette.
     //The alpha channel carries the block's opacity.
     glm::vec4 GetBlockColor(BlockId block) const { return m_Palette[block]; }

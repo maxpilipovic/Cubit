@@ -182,3 +182,18 @@ TEST_CASE("SetBlockAssumingDirty rejects a position outside the world")
         world.SetBlockAssumingDirty(world.GetWidth(), 0, 0, BlockId{1}),
         std::out_of_range);
 }
+
+TEST_CASE("An unmarked block write changes the block and marks nothing")
+{
+    //Replay writes and restores blocks on every snapshot while edits are
+    //pending. If those writes marked chunks dirty, each snapshot would remesh
+    //about four chunks at ~6.4 ms each (docs/performance.md) - so this is a
+    //cost test in the shape of a correctness test.
+    World world = MakeWorld();
+    world.ClearDirty();
+
+    world.SetBlockUnmarked(20, 20, 20, BlockId{ 3 });
+
+    CHECK(world.GetBlock(20, 20, 20) == BlockId{ 3 });
+    CHECK(world.DirtyChunks().empty());
+}
