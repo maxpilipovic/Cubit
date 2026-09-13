@@ -371,6 +371,39 @@ TEST_CASE("Two clients editing the same block on the same tick converge")
     //it decides the same way every run.
     CHECK(WorldsMatch(first.Match().GetWorld(), server.Match().GetWorld()));
     CHECK(WorldsMatch(second.Match().GetWorld(), server.Match().GetWorld()));
+
+    //Both predicted, so both must also have nothing left waiting.
+    CHECK(first.PendingEditCount() == 0);
+    CHECK(second.PendingEditCount() == 0);
+
+    //And again, a tick apart, the second undoing the first while the first's
+    //result is still in flight to both.
+    first.RequestEdit(BlockEdit{ contested, BlockId{ 3 } });
+    first.SetInput(CharacterInput{});
+    second.SetInput(CharacterInput{});
+    first.Step(FrameClock::FixedStepSeconds);
+    second.Step(FrameClock::FixedStepSeconds);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    second.RequestEdit(BlockEdit{ contested, BlockId{ 0 } });
+
+    for (int i = 0; i < 40; ++i)
+    {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
+        first.Step(FrameClock::FixedStepSeconds);
+        second.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //All four edits reached the server, so the agreement below is about edits
+    //that happened.
+    CHECK(server.EditLog().size() == 4);
+
+    CHECK(WorldsMatch(first.Match().GetWorld(), server.Match().GetWorld()));
+    CHECK(WorldsMatch(second.Match().GetWorld(), server.Match().GetWorld()));
+    CHECK(first.PendingEditCount() == 0);
+    CHECK(second.PendingEditCount() == 0);
 }
 
 TEST_CASE("A client with the wrong map is refused at the handshake")

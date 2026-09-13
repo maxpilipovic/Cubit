@@ -125,6 +125,69 @@ namespace
         const CharacterController& self = client.Match().Player(client.LocalPlayer());
         return self.Position().y - self.Config().HalfExtents.y;
     }
+
+    struct PillarOutcome
+    {
+        int Placed = 0;
+        std::uint64_t Corrections = 0;
+        float MaxCorrection = 0.0f;
+        bool ServerHasPillar = false;
+        bool ClientHasPillar = false;
+        std::size_t PendingAfter = 0;
+    };
+
+    //Hold jump and fill the cell under the predicted feet each time they clear
+    //it, `height` blocks up, over a link shaped by `sim`.
+    PillarOutcome RunPillar(const NetworkSim& sim, int height)
+    {
+        LoopbackNetwork network;
+        SimulatedTransport serverNet(network.Server(), sim);
+
+        PeerId peer = InvalidPeer;
+        SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+        MatchServer server(TallWorld(), "tall.vox", MapHash, Spawn, serverNet);
+        MatchClient client(clientNet, TallLoader());
+
+        ConnectAndSettle(client, server);
+        REQUIRE(client.Connected());
+
+        const std::uint64_t correctionsBefore = client.Corrections().Count;
+
+        CharacterInput jumping;
+        jumping.Jump = true;
+
+        PillarOutcome outcome;
+
+        for (int tick = 0; tick < height * 60 && outcome.Placed < height; ++tick)
+        {
+            if (PredictedFeet(client) > static_cast<float>(outcome.Placed + 2))
+            {
+                ++outcome.Placed;
+                client.RequestEdit(BlockEdit{ glm::ivec3(8, outcome.Placed, 8), BlockId{ 2 } });
+            }
+
+            client.SetInput(jumping);
+            client.Step(FrameClock::FixedStepSeconds);
+            server.Step(FrameClock::FixedStepSeconds);
+        }
+
+        for (int i = 0; i < 120; ++i)
+            StepBoth(client, server);
+
+        outcome.ServerHasPillar = true;
+        outcome.ClientHasPillar = true;
+        for (int y = 1; y <= outcome.Placed; ++y)
+        {
+            outcome.ServerHasPillar = outcome.ServerHasPillar && ServerBlock(server, glm::ivec3(8, y, 8)) == BlockId{ 2 };
+            outcome.ClientHasPillar = outcome.ClientHasPillar && ClientBlock(client, glm::ivec3(8, y, 8)) == BlockId{ 2 };
+        }
+
+        outcome.Corrections = client.Corrections().Count - correctionsBefore;
+        outcome.MaxCorrection = client.Corrections().Max;
+        outcome.PendingAfter = client.PendingEditCount();
+        return outcome;
+    }
 }
 
 TEST_CASE("A client's own edit shows on the step it is made, before the server has heard of it")
@@ -292,66 +355,21 @@ TEST_CASE("Pillar-jumping at 166.7 ms costs no corrections")
     //The oracle is the correction count the player would see, plus the server's
     //world: a pillar that never reached the server would also cost no
     //corrections.
-    LoopbackNetwork network;
-
     NetworkSim sim;
     sim.Latency = OneWayLatency;
-    SimulatedTransport serverNet(network.Server(), sim);
 
-    PeerId peer = InvalidPeer;
-    SimulatedTransport clientNet(network.AddClient(peer), sim);
-
-    MatchServer server(TallWorld(), "tall.vox", MapHash, Spawn, serverNet);
-    MatchClient client(clientNet, TallLoader());
-
-    ConnectAndSettle(client, server);
-    REQUIRE(client.Connected());
-
-    const std::uint64_t correctionsBefore = client.Corrections().Count;
-
-    CharacterInput jumping;
-    jumping.Jump = true;
-
-    constexpr int Height = 30;
-    int placed = 0;          //Cells (8, 1..placed, 8) requested so far.
-
-    for (int tick = 0; tick < Height * 60 && placed < Height; ++tick)
-    {
-        //The next cell is y = placed + 1, whose top is placed + 2.
-        if (PredictedFeet(client) > static_cast<float>(placed + 2))
-        {
-            ++placed;
-            client.RequestEdit(BlockEdit{ glm::ivec3(8, placed, 8), BlockId{ 2 } });
-        }
-
-        client.SetInput(jumping);
-        client.Step(FrameClock::FixedStepSeconds);
-        server.Step(FrameClock::FixedStepSeconds);
-    }
-
-    //Let the last results and snapshots land, standing still.
-    for (int i = 0; i < 60; ++i)
-        StepBoth(client, server);
+    const PillarOutcome outcome = RunPillar(sim, 30);
 
     //Reported before anything is asserted, so a short pillar still says how
     //far it got and what it cost.
-    MESSAGE("pillar placed " << placed << " of " << Height << " in the tick budget, corrections "
-        << (client.Corrections().Count - correctionsBefore) << ", max " << client.Corrections().Max);
-    REQUIRE(placed == Height);
+    MESSAGE("pillar 30 blocks at 166.7 ms: placed " << outcome.Placed << ", corrections "
+        << outcome.Corrections << ", max " << outcome.MaxCorrection);
 
-    for (int y = 1; y <= Height; ++y)
-    {
-        CAPTURE(y);
-        CHECK(ServerBlock(server, glm::ivec3(8, y, 8)) == BlockId{ 2 });
-        CHECK(ClientBlock(client, glm::ivec3(8, y, 8)) == BlockId{ 2 });
-    }
-
-    CHECK(client.PendingEditCount() == 0);
-
-    const MatchClient::CorrectionStats stats = client.Corrections();
-    MESSAGE("pillar " << Height << " blocks at 166.7 ms: corrections " << (stats.Count - correctionsBefore)
-        << ", max " << stats.Max);
-    CHECK(stats.Count - correctionsBefore == 0);
+    REQUIRE(outcome.Placed == 30);
+    CHECK(outcome.ServerHasPillar);
+    CHECK(outcome.ClientHasPillar);
+    CHECK(outcome.PendingAfter == 0);
+    CHECK(outcome.Corrections == 0);
 }
 
 TEST_CASE("Digging straight down at 166.7 ms costs no corrections")
@@ -514,4 +532,97 @@ TEST_CASE("An edit that a correction puts out of reach stops showing, and the se
 
     CHECK(ClientBlock(client, edge) == BlockId{ 0 });
     CHECK(client.PendingEditCount() == 0);
+}
+
+TEST_CASE("Pillar-jumping under 5% loss and jitter: the correction count, measured")
+{
+    //THE RECORDED NUMBER UNDER A BAD LINK. The spec expects zero - an edit is
+    //lost only when its whole input is, and then the server does not step that
+    //tick either - but that is a prediction, and this case exists to find out.
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    sim.Jitter = FrameClock::FixedStepSeconds;
+    sim.Loss = 0.05f;
+    sim.Seed = 1;
+
+    const PillarOutcome outcome = RunPillar(sim, 30);
+
+    MESSAGE("pillar 30 blocks at 166.7 ms, 5% loss, jitter: corrections " << outcome.Corrections
+        << ", max " << outcome.MaxCorrection);
+
+    REQUIRE(outcome.Placed == 30);
+    CHECK(outcome.ServerHasPillar);
+    CHECK(outcome.ClientHasPillar);
+    CHECK(outcome.PendingAfter == 0);
+
+    //Zero, measured rather than hoped for: seeds 1, 2 and 3 each read 0 on
+    //2026-09-13. A non-zero count here is a finding to investigate - start
+    //with an EditResult erasing a prediction that a delayed older snapshot
+    //then replays past - never a threshold to raise.
+    CHECK(outcome.Corrections == 0);
+}
+
+TEST_CASE("A placement into a player this client has not seen yet is refused and put right")
+{
+    //The one way honest play mispredicts: the client checks other players at
+    //the positions it last saw them, and the server checks where they are. Here
+    //the other player has joined on the server but no snapshot has told this
+    //client yet, and they stand in the cell being filled.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId builderPeer = InvalidPeer;
+    SimulatedTransport builderNet(network.AddClient(builderPeer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient builder(builderNet, GoodLoader());
+
+    ConnectAndSettle(builder, server);
+    REQUIRE(builder.Connected());
+
+    //Off the spawn, so the builder's own box is clear of the cell. Yaw 0 faces +x.
+    CharacterInput walking;
+    walking.Move = glm::vec2(0.0f, 1.0f);
+    for (int i = 0; i < 60; ++i)
+    {
+        builder.SetInput(walking);
+        builder.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    for (int i = 0; i < 30; ++i)
+        StepBoth(builder, server);
+
+    PeerId arrivalPeer = InvalidPeer;
+    SimulatedTransport arrivalNet(network.AddClient(arrivalPeer), sim);
+    MatchClient arrival(arrivalNet, GoodLoader());
+
+    const glm::ivec3 spawnCell(8, 1, 8);
+    bool requested = false;
+
+    for (int i = 0; i < 200; ++i)
+    {
+        //The moment the server has the arrival and the builder does not.
+        if (!requested && server.Match().Players().size() == 2 && builder.Match().Players().size() == 1)
+        {
+            builder.RequestEdit(BlockEdit{ spawnCell, BlockId{ 2 } });
+            requested = true;
+        }
+
+        builder.SetInput(CharacterInput{});
+        arrival.SetInput(CharacterInput{});
+        builder.Step(FrameClock::FixedStepSeconds);
+        arrival.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+
+        if (requested && builder.PendingEditCount() == 0)
+            break;
+    }
+
+    REQUIRE(requested);
+    CHECK(builder.PendingEditCount() == 0);
+    CHECK(ServerBlock(server, spawnCell) == BlockId{ 0 });
+    CHECK(ClientBlock(builder, spawnCell) == BlockId{ 0 });
 }
