@@ -727,9 +727,11 @@ private:
         // BRANCH POINT 3 OF 3.
         if (m_Client)
         {
-            // Nothing happens locally. The block disappears when the server
-            // says so, one round trip later - which is the most legible
-            // demonstration of latency this app has.
+            // Predicted, not waited for. MatchClient checks the edit against
+            // the same rules the server runs and shows it on the next step if
+            // it is legal; the server applies it on the same tick and only a
+            // refusal ever takes it back. Single-player below still applies
+            // edits directly and keeps its undo stack.
             m_Client->RequestEdit(edit);
             return true;
         }
