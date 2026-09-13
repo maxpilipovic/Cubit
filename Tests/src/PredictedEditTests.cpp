@@ -6,8 +6,10 @@
 #include "Cubit/Net/MatchServer.h"
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/SimulatedTransport.h"
+#include "Cubit/Voxel/CharacterController.h"
 
 #include <glm/glm.hpp>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -68,6 +70,60 @@ namespace
     BlockId ServerBlock(const MatchServer& server, const glm::ivec3& at)
     {
         return server.Match().GetWorld().GetBlock(at.x, at.y, at.z);
+    }
+
+    //A world tall enough to pillar thirty blocks: 32 x 64 x 32, floor at y = 0.
+    World TallWorld()
+    {
+        World world(2, 4, 2);
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int x = 0; x < world.GetWidth(); ++x)
+                world.SetBlock(x, 0, z, BlockId{ 1 });
+
+        return world;
+    }
+
+    MatchClient::MapLoader TallLoader()
+    {
+        return [](const std::string&) -> std::optional<LoadedMap>
+        {
+            return LoadedMap{ TallWorld(), MapHash };
+        };
+    }
+
+    //A solid 4 x 4 column, 21 blocks deep, centred under the spawn corner.
+    //Spawn (8, 2, 8) is a block corner, so the player stands on the four cells
+    //x, z in {7, 8} and a dig has to take all four to drop them.
+    constexpr int ColumnTop = 20;
+    const glm::vec3 ColumnSpawn{ 8.0f, 23.0f, 8.0f };
+
+    World ColumnWorld()
+    {
+        World world(2, 2, 2);
+
+        for (int y = 0; y <= ColumnTop; ++y)
+            for (int z = 6; z <= 9; ++z)
+                for (int x = 6; x <= 9; ++x)
+                    world.SetBlock(x, y, z, BlockId{ 1 });
+
+        return world;
+    }
+
+    MatchClient::MapLoader ColumnLoader()
+    {
+        return [](const std::string&) -> std::optional<LoadedMap>
+        {
+            return LoadedMap{ ColumnWorld(), MapHash };
+        };
+    }
+
+    //The feet of the client's own predicted player - what the person playing
+    //sees, and so what they react to.
+    float PredictedFeet(const MatchClient& client)
+    {
+        const CharacterController& self = client.Match().Player(client.LocalPlayer());
+        return self.Position().y - self.Config().HalfExtents.y;
     }
 }
 
@@ -225,4 +281,237 @@ TEST_CASE("A quick place-then-break never shows the placed block again")
 
     CHECK(client.PendingEditCount() == 0);
     CHECK(ServerBlock(server, cell) == BlockId{ 0 });
+}
+
+TEST_CASE("Pillar-jumping at 166.7 ms costs no corrections")
+{
+    //THE STAGE'S GATE. Hold jump, and each time the predicted feet clear the
+    //top of the next cell up, place a block in it - the way a person pillars.
+    //Every edit is legal, so the bar is exactly zero.
+    //
+    //The oracle is the correction count the player would see, plus the server's
+    //world: a pillar that never reached the server would also cost no
+    //corrections.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(TallWorld(), "tall.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, TallLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    const std::uint64_t correctionsBefore = client.Corrections().Count;
+
+    CharacterInput jumping;
+    jumping.Jump = true;
+
+    constexpr int Height = 30;
+    int placed = 0;          //Cells (8, 1..placed, 8) requested so far.
+
+    for (int tick = 0; tick < Height * 60 && placed < Height; ++tick)
+    {
+        //The next cell is y = placed + 1, whose top is placed + 2.
+        if (PredictedFeet(client) > static_cast<float>(placed + 2))
+        {
+            ++placed;
+            client.RequestEdit(BlockEdit{ glm::ivec3(8, placed, 8), BlockId{ 2 } });
+        }
+
+        client.SetInput(jumping);
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //Let the last results and snapshots land, standing still.
+    for (int i = 0; i < 60; ++i)
+        StepBoth(client, server);
+
+    //Reported before anything is asserted, so a short pillar still says how
+    //far it got and what it cost.
+    MESSAGE("pillar placed " << placed << " of " << Height << " in the tick budget, corrections "
+        << (client.Corrections().Count - correctionsBefore) << ", max " << client.Corrections().Max);
+    REQUIRE(placed == Height);
+
+    for (int y = 1; y <= Height; ++y)
+    {
+        CAPTURE(y);
+        CHECK(ServerBlock(server, glm::ivec3(8, y, 8)) == BlockId{ 2 });
+        CHECK(ClientBlock(client, glm::ivec3(8, y, 8)) == BlockId{ 2 });
+    }
+
+    CHECK(client.PendingEditCount() == 0);
+
+    const MatchClient::CorrectionStats stats = client.Corrections();
+    MESSAGE("pillar " << Height << " blocks at 166.7 ms: corrections " << (stats.Count - correctionsBefore)
+        << ", max " << stats.Max);
+    CHECK(stats.Count - correctionsBefore == 0);
+}
+
+TEST_CASE("Digging straight down at 166.7 ms costs no corrections")
+{
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(ColumnWorld(), "column.vox", MapHash, ColumnSpawn, serverNet);
+    MatchClient client(clientNet, ColumnLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().Player(client.LocalPlayer()).Grounded());
+
+    const std::uint64_t correctionsBefore = client.Corrections().Count;
+    const float startFeet = PredictedFeet(client);
+
+    constexpr int Levels = 10;
+    int dug = 0;
+    int requestedLevel = -1;
+
+    for (int tick = 0; tick < Levels * 120 && dug < Levels; ++tick)
+    {
+        const CharacterController& self = client.Match().Player(client.LocalPlayer());
+
+        //Standing: take the four cells underfoot, one per tick through the queue.
+        if (self.Grounded())
+        {
+            const int level = static_cast<int>(std::floor(PredictedFeet(client) + 0.01f)) - 1;
+
+            if (level != requestedLevel && level > 0)
+            {
+                requestedLevel = level;
+                for (const glm::ivec2 xz : { glm::ivec2(7, 7), glm::ivec2(7, 8), glm::ivec2(8, 7), glm::ivec2(8, 8) })
+                    client.RequestEdit(BlockEdit{ glm::ivec3(xz.x, level, xz.y), BlockId{ 0 } });
+                ++dug;
+            }
+        }
+
+        StepBoth(client, server);
+    }
+
+    for (int i = 0; i < 120; ++i)
+        StepBoth(client, server);
+
+    REQUIRE(dug == Levels);
+    CHECK(PredictedFeet(client) <= startFeet - static_cast<float>(Levels) + 0.01f);
+    CHECK(client.PendingEditCount() == 0);
+
+    const MatchClient::CorrectionStats stats = client.Corrections();
+    MESSAGE("dig " << Levels << " levels at 166.7 ms: corrections " << (stats.Count - correctionsBefore)
+        << ", max " << stats.Max);
+    CHECK(stats.Count - correctionsBefore == 0);
+}
+
+TEST_CASE("Replaying a pending edit remeshes nothing")
+{
+    //Replay undoes and redoes pending edits on every snapshot. Through the
+    //ordinary write path that would mark chunks dirty sixty times a second.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    client.RequestEdit(BlockEdit{ glm::ivec3(4, 0, 4), BlockId{ 0 } });
+    StepBoth(client, server);
+    REQUIRE(client.PendingEditCount() == 1);
+
+    //The prediction itself remeshed, once. Everything from here is replay.
+    client.MatchForWrite().GetWorld().ClearDirty();
+    const std::uint64_t snapshotsBefore = client.Corrections().Snapshots;
+
+    for (int i = 0; i < 60 && client.PendingEditCount() > 0; ++i)
+    {
+        StepBoth(client, server);
+        CAPTURE(i);
+        CHECK(client.Match().GetWorld().DirtyChunks().empty());
+    }
+
+    CHECK(client.PendingEditCount() == 0);
+
+    //Replay actually ran while the edit was pending, or this proved nothing.
+    CHECK(client.Corrections().Snapshots >= snapshotsBefore + 5);
+}
+
+TEST_CASE("An edit that a correction puts out of reach stops showing, and the server's answer decides")
+{
+    //Replay re-checks the editor's own conditions. A snapshot that moves the
+    //player three blocks back puts a cell at the edge of reach out of it, so
+    //the replayed edit is withdrawn: this client stops showing a block it can
+    //no longer justify, and the server's EditResult settles the cell.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    //About 11.1 from the spawn eye, inside reach.
+    const glm::ivec3 edge(19, 0, 8);
+    client.RequestEdit(BlockEdit{ edge, BlockId{ 0 } });
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    const std::uint64_t predictedTick = client.Match().Tick();
+    REQUIRE(ClientBlock(client, edge) == BlockId{ 0 });
+
+    //The server says the player is at x = 5, and has not yet applied the tick
+    //the edit rode on. From x = 5 the cell is about 14 away.
+    PlayerSnapshot mine;
+    mine.Player = client.LocalPlayer();
+    mine.Position = glm::vec3(5.0f, client.Match().Player(client.LocalPlayer()).Position().y, 8.0f);
+    mine.Grounded = true;
+    mine.LastInputTick = predictedTick - 1;
+    mine.Health = StartingHealth;
+
+    SnapshotMessage snapshot;
+    snapshot.Tick = server.Match().Tick() + 100;
+    snapshot.Players = { mine };
+    network.Server().Send(peer, Encode(snapshot), Channel::Unreliable);
+
+    client.MatchForWrite().GetWorld().ClearDirty();
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(ClientBlock(client, edge) == BlockId{ 1 });
+    CHECK(client.PendingEditCount() == 1);
+
+    //Withdrawn is a real change on screen, so it does remesh.
+    CHECK_FALSE(client.Match().GetWorld().DirtyChunks().empty());
+
+    //The server accepted it anyway - from where it believed the player stood.
+    EditResultMessage accepted;
+    accepted.ClientTick = predictedTick;
+    accepted.Accepted = true;
+    accepted.Edit = BlockEdit{ edge, BlockId{ 0 } };
+    network.Server().Send(peer, Encode(accepted), Channel::Reliable);
+
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(ClientBlock(client, edge) == BlockId{ 0 });
+    CHECK(client.PendingEditCount() == 0);
 }

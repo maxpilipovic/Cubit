@@ -4,6 +4,7 @@
 
 #include "Cubit/Logger.h"
 #include "Cubit/Voxel/EditRules.h"
+#include "Cubit/Voxel/SkyLight.h"
 
 #include <algorithm>
 #include <cmath>
@@ -367,6 +368,21 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
     //again - and no test in this suite drives the client to that state at the
     //moment a correction lands. Recorded here per the plan rather than forcing
     //a contrived test to pin it.
+    World& world = m_Match.GetWorld();
+
+    //UNDO every edit this client predicted after the acknowledged tick, newest
+    //first, so replay starts from the world as it stood at that tick. Block
+    //writes only - no relight, nothing marked dirty - because the loop below
+    //puts every one of them back.
+    for (auto it = m_Predicted.rbegin(); it != m_Predicted.rend(); ++it)
+    {
+        if (it->Tick <= entry.LastInputTick || it->Withdrawn)
+            continue;
+
+        const glm::ivec3& at = it->Edit.Position;
+        world.SetBlockUnmarked(at.x, at.y, at.z, it->Beneath);
+    }
+
     character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded);
 
     //Everything the server has confirmed is history now.
@@ -376,8 +392,25 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
     //And everything it has not seen is applied on top. This is reconciliation
     //entire: the authoritative state plus the inputs it does not know about is
     //what this machine should be showing.
+    //REDO, tick by tick: each tick's edit, then that tick's step - the order
+    //the client predicted in and the server applies in.
+    std::vector<glm::ivec3> changed;
     for (const PendingInput& pending : m_Unacked)
+    {
+        if (pending.Edit.has_value())
+            ReplayEdit(pending.Tick, changed);
+
         m_Match.StepPlayer(m_LocalPlayer, pending.Input, m_StepSeconds);
+    }
+
+    //Every cell is back as it was, except those a withdrawal left different.
+    //Those really changed, so they get the relight and remesh ApplyBlockEdit
+    //would have given them.
+    for (const glm::ivec3& at : changed)
+    {
+        world.MarkChunkDirtyAt(at.x, at.y, at.z);
+        SkyLight::Repropagate(world, at.x, at.y, at.z);
+    }
 
     ++m_SnapshotsReconciled;
 
@@ -498,7 +531,7 @@ void MatchClient::ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block)
 {
     //The OLDEST prediction on this cell sits directly on the confirmed layer.
     const auto bottom = std::find_if(m_Predicted.begin(), m_Predicted.end(),
-        [&cell](const PredictedEdit& predicted) { return predicted.Edit.Position == cell; });
+        [&cell](const PredictedEdit& predicted) { return predicted.Edit.Position == cell && !predicted.Withdrawn; });
 
     if (bottom != m_Predicted.end())
     {
@@ -509,6 +542,33 @@ void MatchClient::ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block)
     //Nothing predicted here: the server's block is what shows. A no-op when it
     //already does, which is the accepted-prediction case.
     ApplyBlockEdit(m_Match.GetWorld(), BlockEdit{ cell, block });
+}
+
+void MatchClient::ReplayEdit(std::uint64_t tick, std::vector<glm::ivec3>& changed)
+{
+    const auto found = std::find_if(m_Predicted.begin(), m_Predicted.end(),
+        [tick](const PredictedEdit& predicted) { return predicted.Tick == tick && !predicted.Withdrawn; });
+
+    //Already resolved by its EditResult, which has written the server's block,
+    //or already withdrawn. Nothing to replay.
+    if (found == m_Predicted.end())
+        return;
+
+    const glm::ivec3& at = found->Edit.Position;
+
+    //The editor's own conditions only. Other players were checked once, when
+    //this was predicted; re-checking them against a newer snapshot could flip
+    //an edit the server will accept, hide it, and show it again when its
+    //result arrives - a flicker the server never caused.
+    if (IsEditLegal(m_Match, m_LocalPlayer, found->Edit, OtherPlayers::Ignore))
+    {
+        m_Match.GetWorld().SetBlockUnmarked(at.x, at.y, at.z, found->Edit.Block);
+        return;
+    }
+
+    //Left showing what was beneath it, which the undo pass already wrote.
+    found->Withdrawn = true;
+    changed.push_back(at);
 }
 
 void MatchClient::Reject(const char* reason)

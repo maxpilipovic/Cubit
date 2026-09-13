@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -227,6 +228,11 @@ private:
     //directly otherwise.
     void ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block);
 
+    //Re-applies the prediction made on `tick` during replay, as a block write
+    //only. If the editor's own conditions no longer hold, withdraws it instead
+    //and records the cell in `changed`, which needs a real relight and remesh.
+    void ReplayEdit(std::uint64_t tick, std::vector<glm::ivec3>& changed);
+
     //Writes the authoritative state in, replays what the server has not
     //acknowledged, and decides whether the difference is worth showing.
     void Reconcile(const PlayerSnapshot& entry);
@@ -309,6 +315,11 @@ private:
         //on a cell, the server-confirmed value; for a newer one, the older
         //prediction's block.
         BlockId Beneath = 0;
+
+        //Set when replay, after a correction, finds this edit no longer legal
+        //for the editor where the server now has them. A withdrawn prediction
+        //is not shown and not replayed, and waits only for its EditResult.
+        bool Withdrawn = false;
     };
 
     //Oldest first. Removed when their EditResult arrives, which can be after
