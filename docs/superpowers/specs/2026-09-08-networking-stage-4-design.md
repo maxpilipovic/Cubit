@@ -497,10 +497,23 @@ The two clients reconciled 21,590 and 21,515 snapshots and logged **12 and 41 co
 (0.56 and 1.91 per 1,000), mean 1.80 and 1.12 blocks, maximum 10.76 and 9.81. Stage 3's
 run had zero on both sides. This one is not the same experiment: every kill teleports the
 victim to the spawn, and its client, which predicted it standing where it died, can only be
-corrected there. Maxima of ten blocks fit that exactly. **What these numbers do not show is
-how many corrections were respawns and how many were anything else** — NETSTATS counts
-them together, and nothing logged the kills. They are recorded as unattributed rather
-than explained.
+corrected there. Maxima of ten blocks fit that exactly.
+
+**Attributed the same day, in a second run instrumented for it.** Every kill, every ruling
+each client received, every snapshot where a client's own health rose, every correction,
+every tick the server found a player's input queue empty, and every frame that dropped
+ticks was logged. Of 11 kills, 8 hit a victim standing exactly on the spawn point, freshly
+respawned, and respawning there again moved nobody; the other 3 produced exactly 3
+corrections, of 9.1, 27.4 and 52.6 blocks. The remaining **21 corrections were all one
+player's, in one 30-second stretch, 0.2 to 2 blocks and almost all vertical, while that
+player jumped and placed blocks as fast as they could** — the player described it as
+teleporting between blocks. Edits are not predicted: the server applies a placed block
+before its next step, and the placing client's world gains it only when EditApplied
+arrives a round trip later, so for that round trip the client predicts jumps and landings
+against a world without the block. 1,018 starved server ticks and every dropped frame,
+including a 204 ms stall, produced no correction at all. A stale swim state was ruled out
+by reading the step: `CharacterController::Step` recomputes both fluid flags from the world
+before it uses them, so a correction cannot leave them wrong.
 
 Single-player is unchanged: `POS 240.500000 26.900099 300.500000` and `FACES 1927774` once
 meshing settles, and a scripted middle click draws a tracer without moving the player or
@@ -558,7 +571,9 @@ is not a measurement of accuracy.**
   predicted movement, because the world the character collided against changed.
 - The edit log grows without bound.
 - The session death after about six seconds under `--loss 80/90`, still undiagnosed.
-- Attributing the live run's corrections between respawns and anything else.
+- A player's own edits are not predicted, and it shows: placing blocks while jumping at
+  150 ms produced 21 visible corrections in 30 seconds. Predicting them is the open
+  terrain-edit risk above, now with a measured cost.
 - The gate's rewind-off column resolves a retransmitted shot at its scheduled tick rather
   than the tick the server really handled it — about 5% of shots. The test now knows the
   real moment and could use it.
