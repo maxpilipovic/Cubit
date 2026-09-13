@@ -1564,3 +1564,45 @@ TEST_CASE("Edits taken on one step are applied in player-id order")
     CHECK(server.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
     CHECK(server.EditLog().size() == 2);
 }
+
+TEST_CASE("An input's edit waits in the queue with its input, and is not applied on arrival")
+{
+    //Applying an edit when its bundle arrives and applying it on the step that
+    //takes its input are the same thing whenever the input queue is empty -
+    //which on a clean link it always is, and which is why the pillar gate
+    //cannot tell the two apart. They differ when inputs back up, under jitter
+    //or after a client catches up from a stall. Here three ticks arrive at
+    //once with the edit on the third; the server takes one input per step, so
+    //the edit has to wait two steps, exactly as the input does.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+
+    const glm::ivec3 cell(4, 0, 4);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    InputMessage bundle;
+    bundle.FirstTick = 1;
+    bundle.Inputs.assign(3, CharacterInput{});
+    bundle.Edits = { std::nullopt, std::nullopt, BlockEdit{ cell, BlockId{ 0 } } };
+    client.Send(LoopbackNetwork::ServerPeer, Encode(bundle), Channel::Unreliable);
+
+    //Takes tick 1.
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    //Takes tick 2.
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    //Takes tick 3, and its edit with it.
+    server.Step(FrameClock::FixedStepSeconds);
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
+    CHECK(server.EditLog().size() == 1);
+}
