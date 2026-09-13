@@ -120,6 +120,63 @@ namespace
         client.Send(LoopbackNetwork::ServerPeer, Encode(message), Channel::Unreliable);
     }
 
+    void SendInputWithEdit(Transport& client, std::uint64_t tick, const CharacterInput& input,
+        const BlockEdit& edit)
+    {
+        InputMessage message;
+        message.FirstTick = tick;
+        message.Inputs.push_back(input);
+        message.Edits.push_back(edit);
+        client.Send(LoopbackNetwork::ServerPeer, Encode(message), Channel::Unreliable);
+    }
+
+    //Everything edit-shaped waiting on an endpoint. One drain for both kinds,
+    //because Poll consumes whatever it reads.
+    struct EditTraffic
+    {
+        std::vector<EditResultMessage> Results;
+        std::vector<EditMessage> Applied;
+    };
+
+    EditTraffic DrainEdits(Transport& transport)
+    {
+        EditTraffic heard;
+
+        NetEvent event;
+        while (transport.Poll(event))
+        {
+            if (event.Type != NetEventType::Message)
+                continue;
+
+            MessageId id = MessageId::Hello;
+            if (!PeekMessageId(event.Data, id))
+                continue;
+
+            if (id == MessageId::EditResult)
+            {
+                EditResultMessage result;
+                if (Decode(event.Data, result))
+                    heard.Results.push_back(result);
+            }
+            else if (id == MessageId::EditApplied)
+            {
+                EditMessage applied;
+                if (Decode(event.Data, applied))
+                    heard.Applied.push_back(applied);
+            }
+        }
+
+        return heard;
+    }
+
+    //Steps until the joined player is standing on the floor, so a test starts
+    //from rest rather than mid-fall.
+    void Settle(MatchServer& server, PlayerId player)
+    {
+        for (int i = 0; i < 60 && !server.Match().Player(player).Grounded(); ++i)
+            server.Step(FrameClock::FixedStepSeconds);
+    }
+
     //Fires one shot, claiming an instant and an aim.
     void SendFire(Transport& client, std::uint64_t clientTick, std::uint64_t renderTick,
         float renderAlpha, float yaw, float pitch)
@@ -1326,4 +1383,184 @@ TEST_CASE("Health arrives in the snapshot")
     server.Step(FrameClock::FixedStepSeconds);
 
     CHECK(healthInSnapshot(target) == 66);
+}
+
+TEST_CASE("An input's edit is applied on the step that takes that input, before anybody moves")
+{
+    //THE ORDER THE CLIENT WILL COPY. The client applies its edit and then
+    //steps; if the server stepped first and edited after, a player breaking
+    //the block underfoot would stand on it for one more server tick than on
+    //their own screen - a correction on every dig.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    REQUIRE(server.Match().Player(player).Grounded());
+    const float restingY = server.Match().Player(player).Position().y;
+
+    //Spawn (8, 2, 8) is a block corner, so the 0.6-wide box stands on FOUR
+    //floor cells. Breaking one would not drop it and this test would pass
+    //whichever order the server used. Three go first, on their own ticks,
+    //while the player is still held up by the fourth.
+    const glm::ivec3 supports[] = { { 7, 0, 7 }, { 7, 0, 8 }, { 8, 0, 7 } };
+    std::uint64_t tick = 1;
+    for (const glm::ivec3& cell : supports)
+    {
+        SendInputWithEdit(client, tick++, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(server.Match().Player(player).Grounded());
+    REQUIRE(server.Match().Player(player).Position().y == restingY);
+
+    //The last support.
+    SendInputWithEdit(client, tick, CharacterInput{}, BlockEdit{ glm::ivec3(8, 0, 8), BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().GetWorld().GetBlock(8, 0, 8) == BlockId{ 0 });
+
+    //Already falling on this very step: the floor went before the move. Had
+    //the move come first, the player would still be standing on it here.
+    CHECK(server.Match().Player(player).Position().y < restingY);
+}
+
+TEST_CASE("An accepted edit answers its editor with a result and everyone else with EditApplied")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    REQUIRE(Join(server, first) != InvalidPlayer);
+
+    PeerId secondPeer = InvalidPeer;
+    Transport& second = network.AddClient(secondPeer);
+    REQUIRE(Join(server, second) != InvalidPlayer);
+
+    DrainEdits(first);
+    DrainEdits(second);
+
+    const BlockEdit edit{ glm::ivec3(4, 0, 4), BlockId{ 0 } };
+    SendInputWithEdit(first, 1, CharacterInput{}, edit);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const EditTraffic editor = DrainEdits(first);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].ClientTick == 1);
+    CHECK(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Position == edit.Position);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 0 });
+
+    //Not its own EditApplied: the result is the editor's answer, and an
+    //untagged EditApplied arriving too would be applied over a newer
+    //prediction on the same cell.
+    CHECK(editor.Applied.empty());
+
+    const EditTraffic other = DrainEdits(second);
+    CHECK(other.Results.empty());
+    REQUIRE(other.Applied.size() == 1);
+    CHECK(other.Applied[0].Edit.Position == edit.Position);
+
+    REQUIRE(server.EditLog().size() == 1);
+    CHECK(server.EditLog()[0].Position == edit.Position);
+}
+
+TEST_CASE("An edit beyond reach is refused, changes nothing, and the input still moves the player")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    const PlayerId player = Join(server, first);
+    REQUIRE(player != InvalidPlayer);
+
+    PeerId secondPeer = InvalidPeer;
+    Transport& second = network.AddClient(secondPeer);
+    REQUIRE(Join(server, second) != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(first);
+    DrainEdits(second);
+
+    const glm::vec3 before = server.Match().Player(player).Position();
+
+    CharacterInput walking;
+    walking.Move = glm::vec2(0.0f, 1.0f);
+
+    //The far corner of a 32-block world from a spawn at (8, 2, 8): about 32
+    //blocks away, well past ReachDistance.
+    SendInputWithEdit(first, 1, walking, BlockEdit{ glm::ivec3(31, 0, 31), BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const EditTraffic editor = DrainEdits(first);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
+
+    CHECK(server.Match().GetWorld().GetBlock(31, 0, 31) == BlockId{ 1 });
+    CHECK(server.EditLog().empty());
+    CHECK(DrainEdits(second).Applied.empty());
+
+    CHECK(server.Match().Player(player).Position() != before);
+}
+
+TEST_CASE("A placement into a player's box is refused")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    const PlayerId player = Join(server, first);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(first);
+
+    //Cell (8,1,8) holds the standing player's legs.
+    SendInputWithEdit(first, 1, CharacterInput{}, BlockEdit{ glm::ivec3(8, 1, 8), BlockId{ 2 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const EditTraffic editor = DrainEdits(first);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 0 });
+    CHECK(server.Match().GetWorld().GetBlock(8, 1, 8) == BlockId{ 0 });
+}
+
+TEST_CASE("Edits taken on one step are applied in player-id order")
+{
+    //Arrival order is socket scheduling. Player-id order is the same every run,
+    //which is what lets every client predict and still converge.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    const PlayerId firstId = Join(server, first);
+
+    PeerId secondPeer = InvalidPeer;
+    Transport& second = network.AddClient(secondPeer);
+    const PlayerId secondId = Join(server, second);
+
+    REQUIRE(firstId != InvalidPlayer);
+    REQUIRE(secondId != InvalidPlayer);
+    REQUIRE(firstId < secondId);
+
+    const glm::ivec3 contested(4, 1, 4);
+
+    //The HIGHER id sends first, so arrival order and id order disagree.
+    SendInputWithEdit(second, 1, CharacterInput{}, BlockEdit{ contested, BlockId{ 3 } });
+    SendInputWithEdit(first, 1, CharacterInput{}, BlockEdit{ contested, BlockId{ 2 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    //Lower id first, higher id last: the higher id's block stands.
+    CHECK(server.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
+    CHECK(server.EditLog().size() == 2);
 }

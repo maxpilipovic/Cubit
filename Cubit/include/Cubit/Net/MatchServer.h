@@ -4,6 +4,7 @@
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/Transport.h"
 #include "Cubit/Voxel/BlockEdit.h"
+#include "Cubit/Voxel/EditRules.h"
 #include "Cubit/Voxel/HitboxHistory.h"
 #include "Cubit/Voxel/MatchState.h"
 #include "Cubit/Voxel/World.h"
@@ -11,6 +12,7 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -88,6 +90,11 @@ private:
         {
             std::uint64_t Tick = 0;
             CharacterInput Input;
+
+            //The edit made on this tick, if any. Queued with the input rather
+            //than applied on arrival, so it lands on exactly the step the
+            //client predicted it on.
+            std::optional<BlockEdit> Edit;
         };
 
         //Newest input tick APPLIED, not the newest received. This is what a
@@ -158,6 +165,11 @@ private:
     //about each one that actually changed the world.
     void ApplyPendingEdits();
 
+    //Rules on one client's edit, applies it if legal, answers the editor with
+    //EditResult and tells everyone else with EditApplied.
+    void ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
+        const BlockEdit& edit);
+
     //Resolves one shot against the world as the shooter saw it and tells
     //everybody the answer.
     void HandleFire(Client& shooter, const FireMessage& fire);
@@ -188,7 +200,11 @@ private:
     //client does not yet know which player is its own), and an EditApplied
     //before Welcome would be applied twice by a client that then reads the
     //edit log Welcome carries.
-    void SendToJoined(const std::vector<std::uint8_t>& payload, Channel channel);
+    //
+    //`except` skips one peer - the editor, for an edit it already knows the
+    //fate of. The default names no real peer, so it skips nobody.
+    void SendToJoined(const std::vector<std::uint8_t>& payload, Channel channel,
+        PeerId except = InvalidPeer);
 
     //Returns the client for a peer, or nullptr when it has gone.
     Client* Find(PeerId peer);

@@ -54,6 +54,16 @@ void MatchServer::Step(double seconds)
     std::vector<PlayerCommand> commands;
     commands.reserve(m_Clients.size());
 
+    //One client's edit, taken off the queue with its input.
+    struct TakenEdit
+    {
+        PlayerId Player = InvalidPlayer;
+        PeerId Peer = InvalidPeer;
+        std::uint64_t ClientTick = 0;
+        BlockEdit Edit;
+    };
+    std::vector<TakenEdit> takenEdits;
+
     for (Client& client : m_Clients)
     {
         //An empty queue means no input this tick, exactly as in Stage 2 when a
@@ -81,12 +91,25 @@ void MatchServer::Step(double seconds)
         client.Pitch = queued.Input.Pitch;
 
         commands.push_back(PlayerCommand{ client.Player, queued.Input });
+
+        if (queued.Edit.has_value())
+            takenEdits.push_back(TakenEdit{ client.Player, client.Peer, queued.Tick, *queued.Edit });
     }
 
     //Sorted by player id so the step order does not depend on connection order
     //or on how the transport happened to schedule this tick's packets.
     std::sort(commands.begin(), commands.end(),
         [](const PlayerCommand& a, const PlayerCommand& b) { return a.Player < b.Player; });
+
+    //BEFORE the step, and in player-id order - the order the client copies.
+    //A client predicts its edit and then steps; applying edits after the
+    //step here would leave a player standing on a block they have already
+    //broken on their own screen.
+    std::stable_sort(takenEdits.begin(), takenEdits.end(),
+        [](const TakenEdit& a, const TakenEdit& b) { return a.Player < b.Player; });
+
+    for (const TakenEdit& taken : takenEdits)
+        ApplyInputEdit(taken.Player, taken.Peer, taken.ClientTick, taken.Edit);
 
     m_Match.Step(commands, static_cast<float>(seconds));
 
@@ -227,7 +250,8 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
                 break;
             }
 
-            client->Queue.push_back(Client::QueuedInput{ tick, input.Inputs[i] });
+            client->Queue.push_back(Client::QueuedInput{ tick, input.Inputs[i],
+                i < input.Edits.size() ? input.Edits[i] : std::nullopt });
         }
 
         //The unreliable channel reorders, so a bundle can arrive carrying ticks
@@ -305,6 +329,31 @@ void MatchServer::ApplyPendingEdits()
     }
 
     m_PendingEdits.clear();
+}
+
+void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
+    const BlockEdit& edit)
+{
+    EditResultMessage result;
+    result.ClientTick = clientTick;
+    result.Edit.Position = edit.Position;
+
+    if (IsEditLegal(m_Match, player, edit, OtherPlayers::Check)
+        && ApplyBlockEdit(m_Match.GetWorld(), edit).has_value())
+    {
+        result.Accepted = true;
+        m_EditLog.push_back(edit);
+
+        EditMessage applied;
+        applied.Edit = edit;
+        SendToJoined(EncodeEditApplied(applied), Channel::Reliable, peer);
+    }
+
+    //The server's truth either way, so the client never has to work it out.
+    const glm::ivec3& at = edit.Position;
+    result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
+
+    m_Transport.Send(peer, Encode(result), Channel::Reliable);
 }
 
 void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
@@ -449,11 +498,12 @@ void MatchServer::SendSnapshots()
     SendToJoined(Encode(snapshot), Channel::Unreliable);
 }
 
-void MatchServer::SendToJoined(const std::vector<std::uint8_t>& payload, Channel channel)
+void MatchServer::SendToJoined(const std::vector<std::uint8_t>& payload, Channel channel,
+    PeerId except)
 {
     for (const Client& client : m_Clients)
     {
-        if (client.Player == InvalidPlayer)
+        if (client.Player == InvalidPlayer || client.Peer == except)
             continue;
 
         m_Transport.Send(client.Peer, payload, channel);
