@@ -259,3 +259,69 @@ bookkeeping.
   client already dropped — must change nothing but the confirmed value.
 - **The gate may pass while the live run does not**, as Stage 4's hit-rate gate passed with
   every rewind a tick short. The live check is part of acceptance, not a courtesy.
+
+## Shipped 2026-09-13
+
+_All ten tasks, `63c7966` to `101c2e5`, plus one test added after Task 6 (`efdec27`). The
+suite went 461 -> 487. Executed inline against
+`docs/superpowers/plans/2026-09-12-networking-stage-5.md`._
+
+### The measured result
+
+| Run, 166.7 ms RTT | Corrections before (replay against today's world) | After |
+| --- | --- | --- |
+| Pillar-jumping, 30 blocks | 21, and only 3 of 30 blocks placed | **0**, 30 of 30 |
+| Digging straight down, 10 levels | 21 | **0** |
+| Pillar-jumping, 5% loss, 1 tick of jitter | — | **0** on seeds 1, 2 and 3 |
+
+"Before" is the same gate run against replay that steps the unacknowledged inputs against
+the world as it now stands, with blocks placed on later ticks already in it — the code as
+it stood after Task 5. Under it the corrections kept knocking the pillar-jumper below the
+height of the next placement, which is why the pillar stalls at 3.
+
+### The application
+
+`Server.exe` plus two `Sandbox.exe --connect 127.0.0.1 --latency 150`, played by hand for
+about 100 seconds on 2026-09-13 with temporary per-correction logging. The player built and
+dug the way that produced 21 corrections in 30 seconds on 2026-09-12, and reported that it
+works perfectly. The clients reconciled 6,084 and 5,961 snapshots and logged **one
+correction each, and both were respawns** — a victim teleported to the spawn, 2.1 and 41.6
+blocks — with no predicted edit pending at either. **Zero corrections came from edits.**
+The logs do not count the edits made; that the player built and dug is their account, and
+the zero is the log's.
+
+Single-player is unchanged: `POS 240.500000 26.900099 300.500000` and `FACES 1927774` once
+meshing settled.
+
+### What turned out differently from the plan
+
+- **The plan chose `BlockId{ 513 }` to exercise the wire's 16-bit block field.** `BlockId` is
+  8 bits and 513 does not compile; the test uses 200, and no test can reach the field's high
+  byte while `BlockId` is 8 bits.
+- **Two WireOracle edit cases never set an input**, harmless while `RequestEdit` sent
+  immediately and fatal once edits ride inputs. The plan predicted both would fail without
+  inputs. Only one did: the same-block conflict case **passed vacuously**, because with no
+  edits ever sent the server and both clients kept an untouched world and agreed about it.
+  It now also requires the edits to reach the server's log.
+- **The server applying edits on arrival could not turn the pillar gate red**, though the plan
+  said it would. Arrival and "the step that takes the input" are the same moment whenever the
+  input queue is empty, and on a clean link it always is. The property is real — they differ
+  when inputs back up — so a server test now sends three ticks at once with the edit on the
+  third and requires the block to survive two steps. It goes red on arrival-time application.
+- **The confirmed layer cannot be proven by final agreement.** Switching it off left the
+  extended conflict case green: each client hears a cell's changes in the server's own order,
+  and the last one always carries the final block. The layer governs what shows in between,
+  and the place-then-break and hand-built layer cases, which do check that, go red without it.
+- **The pillar gate first aborted on its own assertion before printing its count**, hiding
+  that its red phase was 21 corrections rather than a broken test. It now reports how far it
+  got before asserting.
+- **The candidate the plan flagged for trouble under jitter** — an `EditResult` erasing a
+  prediction that a delayed older snapshot then replays past — did not appear on any seed.
+
+### Still open
+
+- Other players' edits still arrive a round trip late.
+- A placement right next to another player can still mispredict.
+- At most one edit per tick.
+- The edit log still grows without bound.
+- The session death after about six seconds under `--loss 80/90`, still undiagnosed.

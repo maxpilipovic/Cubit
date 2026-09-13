@@ -349,6 +349,18 @@ obvious, and better shaped, the moment something concretely needs it.
   round trip later. The measurement that mattered most was a failure of measurement:
   the hit-rate gate passed while every rewind was a tick short, because hits cannot
   see an error smaller than the target, so the gate now checks position as well.
+
+  **Stage 5 shipped 2026-09-13** (`63c7966` onward, suite 461 → 487). A player's own terrain
+  edits are predicted: a placed block appears the moment it is clicked, and the edit rides
+  inside that tick's input so the server applies it on exactly the step the client did.
+  Both ends run the same reach and overlap rules, so an illegal click does nothing rather
+  than being shown and taken back, and the client keeps the server's confirmed blocks
+  beneath its pending predictions so conflicting edits converge without flicker. Replay
+  undoes and redoes pending edits tick by tick as plain block writes, so it never remeshes.
+  At 166.7 ms, pillar-jumping 30 blocks went from 21 corrections to 0 and digging 10 levels
+  from 21 to 0, still 0 at 5% loss; played by hand at 150 ms, the only corrections were two
+  respawns. Other players' edits still arrive a round trip late, and the edit log still
+  grows without bound.
   **Predicted terrain edits and their rollback problem are still the
   arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
   because the world the character collided against changed underneath it, and that
