@@ -49,9 +49,6 @@ namespace
     //Centre the 128x48x128 map roughly on the origin for the view.
     const glm::vec3 WorldOffset{ -64.0f, -24.0f, -64.0f };
 
-    //How far the player can reach to edit terrain, in blocks.
-    constexpr float ReachDistance = 12.0f;
-
     //Near-black, so the outline reads against both lit terrain and sky.
     const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
 
