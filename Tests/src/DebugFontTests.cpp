@@ -53,8 +53,8 @@ TEST_CASE("The letters the HUD actually uses are all drawable")
     //this in step with the readout: a label added there and not here is
     //exactly the silent gap this exists to catch.
     const std::string_view labels =
-        "POS GND OCEAN FACES DRAWN PENDING STEPS UNDO FPS NOT CONNECTED NET "
-        "HEALTH HIT KILLED";
+        "POS GND OCEAN FACES DRAWN PENDING STEPS UNDO FPS NOT CONNECTED "
+        "DISCONNECTED NET HEALTH HIT KILLED";
 
     for (const char character : labels)
     {

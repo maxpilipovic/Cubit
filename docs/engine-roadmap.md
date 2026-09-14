@@ -363,6 +363,9 @@ obvious, and better shaped, the moment something concretely needs it.
   receives, which grew with every edit, became a diff from the map on 2026-09-14: one entry
   per cell that differs from the map, so a hole dug and filled again costs nothing and the
   log's size follows how much of the map has changed, not how long the match has run.
+  The same day the server learned to stop: Ctrl+C, closing its console, or `--duration`
+  ends the loop, logs what the match did, and disconnects every client, which shows
+  `DISCONNECTED` rather than a world that silently stopped moving.
   **Predicted terrain edits and their rollback problem are still the
   arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
   because the world the character collided against changed underneath it, and that

@@ -260,6 +260,7 @@ public:
 
             m_HudState->Connected = m_Client->Connected();
             m_HudState->Rejected = m_Client->Rejected();
+            m_HudState->Disconnected = m_Client->Disconnected();
             m_HudState->RoundTripMs = m_Client->RoundTripTime() * 1000.0;
             m_HudState->PlayersInMatch = Match_().Players().size();
             m_HudState->Health = m_Client->LocalHealth();

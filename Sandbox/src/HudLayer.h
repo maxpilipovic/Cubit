@@ -42,11 +42,12 @@ struct HudState
     std::size_t UndoDepth = 0;
 
     //Networking. All zero and false in single-player, and the overlay draws
-    //none of these lines when Connected and Rejected are both false - so the
-    //single-player readout is byte-for-byte what it was before the wire
-    //existed, which the acceptance check depends on.
+    //none of these lines when Connected, Rejected and Disconnected are all
+    //false - so the single-player readout is byte-for-byte what it was before
+    //the wire existed, which the acceptance check depends on.
     bool Connected = false;
     bool Rejected = false;
+    bool Disconnected = false;
     double RoundTripMs = 0.0;
     std::size_t PlayersInMatch = 0;
 
@@ -274,7 +275,7 @@ private:
 
         //Single-player draws nothing below this point, which is what keeps the
         //readout identical to the pre-networking one.
-        if (!m_State->Connected && !m_State->Rejected)
+        if (!m_State->Connected && !m_State->Rejected && !m_State->Disconnected)
             return;
 
         //A refused handshake has to be visible on screen, not only in the log:
@@ -291,6 +292,15 @@ private:
         if (m_State->Rejected)
         {
             DrawText("NOT CONNECTED", TextMargin, y);
+            return;
+        }
+
+        //The server stopped or the connection was lost. The world stays on
+        //screen as it last was, so without this a dead session looks exactly
+        //like a quiet one.
+        if (m_State->Disconnected)
+        {
+            DrawText("DISCONNECTED", TextMargin, y);
             return;
         }
 

@@ -62,7 +62,10 @@ void MatchClient::Step(double seconds)
             //After the welcome, a session that ended. The Sandbox has to say
             //so, or the player is left looking at a frozen screen.
             if (m_Connected)
+            {
                 m_Disconnected = true;
+                CB_WARN("Disconnected from the server");
+            }
 
             m_Connected = false;
             break;

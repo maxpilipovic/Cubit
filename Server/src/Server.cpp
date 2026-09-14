@@ -11,6 +11,7 @@
 
 #include <glm/glm.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -20,6 +21,14 @@
 #include <string>
 #include <thread>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <csignal>
+#endif
+
 namespace
 {
     constexpr std::uint16_t DefaultPort = 27015;
@@ -28,6 +37,45 @@ namespace
     //Matches the Sandbox's own hint, so a player spawns where they would in
     //single-player rather than somewhere unrelated.
     const glm::ivec2 SpawnHint{ 240, 300 };
+
+    //Set from a console handler on another thread; read by the loop every tick.
+    std::atomic<bool> StopRequested{ false };
+
+    //Set once the server and its transports have been destroyed - which is
+    //what tells every client the session is over - and the last line is logged.
+    std::atomic<bool> Stopped{ false };
+
+#ifdef _WIN32
+    //Ctrl+C, Ctrl+Break, and closing the console window.
+    //
+    //For a closed window Windows ends the process the moment this returns, and
+    //gives it only a few seconds regardless. Waiting here for Stopped is what
+    //lets the loop finish, disconnect its clients and log, instead of the
+    //process vanishing mid-tick the way a kill does.
+    BOOL WINAPI OnConsoleEvent(DWORD event)
+    {
+        switch (event)
+        {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            StopRequested = true;
+            for (int i = 0; i < 400 && !Stopped; ++i)
+                Sleep(10);
+            return TRUE;
+
+        default:
+            return FALSE;
+        }
+    }
+#else
+    void OnSignal(int)
+    {
+        StopRequested = true;
+    }
+#endif
 }
 
 //The authoritative server. No window, no Application, no Renderer, no GL
@@ -44,11 +92,18 @@ int main(int argc, char** argv)
     double latencyRtt = 0.0;
     float loss = 0.0f;
 
+    //Seconds to run before stopping exactly as a Ctrl+C would. Zero runs until
+    //asked. For scripted runs: a script cannot send Ctrl+C to this console, and
+    //killing the process skips the disconnect and the final log line.
+    double durationSeconds = 0.0;
+
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
 
-        if (arg == "--port" && i + 1 < argc)
+        if (arg == "--duration" && i + 1 < argc)
+            durationSeconds = std::atof(argv[++i]);
+        else if (arg == "--port" && i + 1 < argc)
             port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
         else if (arg == "--latency" && i + 1 < argc)
             latencyRtt = std::atof(argv[++i]);
@@ -57,6 +112,13 @@ int main(int argc, char** argv)
         else
             mapPath = arg;
     }
+
+#ifdef _WIN32
+    SetConsoleCtrlHandler(OnConsoleEvent, TRUE);
+#else
+    std::signal(SIGINT, OnSignal);
+    std::signal(SIGTERM, OnSignal);
+#endif
 
     try
     {
@@ -120,9 +182,10 @@ int main(int argc, char** argv)
         //delta into whole simulation steps, exactly as it does in the Sandbox;
         //Alpha() is meaningless here because nothing interpolates.
         FrameClock clock;
-        auto previous = std::chrono::steady_clock::now();
+        const auto started = std::chrono::steady_clock::now();
+        auto previous = started;
 
-        for (;;)
+        while (!StopRequested)
         {
             const auto now = std::chrono::steady_clock::now();
             const double elapsed =
@@ -133,16 +196,32 @@ int main(int argc, char** argv)
             for (int i = 0; i < steps; ++i)
                 server.Step(FrameClock::FixedStepSeconds);
 
+            if (durationSeconds > 0.0
+                && std::chrono::duration<double>(now - started).count() >= durationSeconds)
+                StopRequested = true;
+
             //Without this the loop spins a core flat out to do nothing. One
             //millisecond is far below the 16.7 ms step, so it costs no
             //simulation accuracy.
             if (steps == 0)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+
+        //Read before the server goes: leaving this scope destroys the server
+        //and then the transports, and EnetTransport's destructor is what
+        //disconnects every client.
+        CB_INFO("Stopping after " + std::to_string(server.Match().Tick()) + " ticks: "
+            + std::to_string(server.ClientCount()) + " clients connected, "
+            + std::to_string(server.AcceptedEditCount()) + " edits accepted");
     }
     catch (const std::exception& error)
     {
         CB_CRITICAL(std::string("Server failed: ") + error.what());
+        Stopped = true;
         return 1;
     }
+
+    CB_INFO("Server stopped");
+    Stopped = true;
+    return 0;
 }
