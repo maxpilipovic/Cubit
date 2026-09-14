@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-08-27_
+_Last updated: 2026-09-14_
 
 A living view of what the Cubit engine has, what it still needs to be a complete
 voxel engine, and the order we intend to finish it in. Most of it is scoped to
@@ -8,6 +8,118 @@ the *voxel* engine, with gameplay itself — teams, combat, networking — out o
 scope. The exception is "Beyond the voxel engine" below, which records the
 engine-side systems a multiplayer FPS will need and that a single-player voxel
 sandbox never asked for.
+
+## Before the game — engine punch list (2026-09-14)
+
+An audit on 2026-09-14 checked the engine against `Documentation/Cubit.pdf` and against
+this page, once the networking arc had nothing left open. **Everything here is to be done
+before the match-rules arc starts.** Tick items as they land and say how; do not delete
+them. Every item was checked in the code unless it says otherwise. References are as of
+`91a08e6`.
+
+### A. Wrong today — bugs and robustness
+
+- [ ] **A1. A server stall may add input delay for the rest of the session.** _Found by
+  reading, not by running — confirm before fixing._ `FrameClock` discards any surplus past
+  `MaxTicksPerFrame = 5` (`FrameClock.h:18`), so a server hitch longer than 83 ms loses
+  ticks. The client's tick free-runs from the welcome (`MatchClient.cpp:242`) and is never
+  resynchronised. The server applies one queued input per tick, holding at most
+  `MaxQueuedInputs = 8` (`MatchServer.cpp:21`). So inputs sent during a server stall pile
+  up, and afterwards one arrives for every one applied: the queue would stay deep and every
+  input up to 8 ticks (133 ms) late. A client-side stall is harmless — a 204 ms Alt+Tab was
+  measured at zero corrections in Stage 4. **Done when:** a `SimulatedTransport` test with
+  the server skipping steps shows what the queue does after a stall, and, if it stays deep,
+  a fix returns it to its pre-stall depth, pinned by that test failing without the fix.
+- [ ] **A2. A crash leaves no record.** `Application::Run` (`Application.cpp:76`) has no
+  try/catch, and nothing installs a terminate handler, an unhandled-exception filter or a
+  minidump writer. An exception thrown from any layer ends the process after whatever it
+  last logged. Scope doc TOL-05. **Done when:** an exception out of a layer is logged with
+  its message before the process exits, and a native crash leaves a dump or stack trace.
+- [ ] **A3. The cursor can never be released.** The Sandbox captures it once
+  (`Sandbox.cpp:132`) and nothing gives it back: no Escape binding, and the window's focus
+  events (`WindowsWindow.cpp:128`) are not used. Its visible cost: clicks meant for another
+  window land in the game as edits. **Done when:** Escape releases the cursor, a click
+  recaptures it, losing focus releases it, and a click that recaptures does not also edit
+  or fire.
+- [ ] **A4. Log lines have no timestamps and never reach a file.** `Logger.cpp:17–40`
+  writes channel, level and message to `std::cout` only. The 2026-09-14 loss investigation
+  had to timestamp lines from the outside. **Done when:** every line carries a time, and a
+  file sink exists.
+- [ ] **A5. A refused send is dropped without a word, and a join has a size ceiling.**
+  `EnetTransport::Send` destroys a packet ENet refuses (`EnetTransport.cpp:153`) and logs
+  nothing. The case that matters: a welcome carries 14 bytes per changed cell
+  (`Protocol.cpp:34`) against ENet's 32 MB packet limit (`enet.h:217`), so once about 2.4
+  million cells — roughly 14% of a 512x64x512 map — differ from the map, a joiner silently
+  never gets a welcome. **Done when:** a refused send is logged, and the ceiling is either
+  lifted (chunk-based join is the recorded answer) or written down as an accepted limit.
+- [ ] **A6. The docs describe an older engine.** `README.md` says the suite has 270 cases
+  (it has 495), says the window is OpenGL 3.3 (Debug builds request 4.3), and its "What's
+  next" lists shipped work (multi-model stitching) and puts networking in the future. This
+  page's "What Cubit is today" below still says "single-player" and "two-thirds of the way".
+  **Done when:** both describe the engine as it is.
+
+### B. Missing — systems the game will need
+
+- [ ] **B1. Multi-block edits.** `BlockEdit` is one block (`BlockEdit.h:17`) and the
+  protocol carries at most one edit per input, 60 a second (`Protocol.h:99`). Explosions,
+  grenades and digging more than one block at a time all need more.
+- [ ] **B2. Terrain collapse** — blocks left with no support fall. Nothing exists. It is
+  what makes a game Ace of Spades-like, but it is **not in the scope doc**, so the first
+  step is deciding whether it is in scope. If it is: it must be server-authoritative, and it
+  meets both predicted edits (Stage 5's confirmed layer) and relight cost.
+- [ ] **B3. A way to draw anything that is not a chunk.** There is no `Mesh` type and no
+  model loading; remote players are `DebugDraw` wireframe boxes (`DrawRemotePlayers`,
+  `Sandbox.cpp:570`). Player models, a held tool and team colours all need it.
+- [ ] **B4. Text and UI beyond the debug font.** `DebugFont` is a 5x7 bitmap with no
+  lowercase and no J, Q, X or Z (`DebugFont.h:24`). A scoreboard and menus need more.
+  Scope doc ENG-07, POL-03.
+- [ ] **B5. Lifetimes for subscriptions and layers.** `EventBus::Subscribe`
+  (`EventBus.h:14`) stores `this`-capturing callbacks with no way to remove them, and
+  `Publish` copies the callback vector on every call. `LayerStack` can push
+  (`LayerStack.h:26–29`) but never pop. Menus, map rotation and leaving a match all remove
+  things.
+- [ ] **B6. Configuration and settings.** Mouse sensitivity
+  (`PerspectiveCameraController.h:57`), field of view (`:49`), the map path
+  (`Sandbox.cpp:110`), the spawn hint (`Sandbox.cpp:87`, with a second copy in
+  `Server.cpp`) and the resolution are all compile-time constants. Scope doc ENG-06,
+  PLY-02, POL-04.
+- [ ] **B7. Audio.** No audio library in `vendor/` and no audio code. Scope doc POL-01,
+  which the doc puts in the prototype band.
+- [ ] **B8. A separate game target.** The projects are GLAD, GLFW, ENet, Cubit, Sandbox,
+  MapGen, Server and Tests; game code has grown inside `Sandbox.cpp` (1,069 lines). Scope
+  doc ENG-01 asks for engine, sandbox and game to build separately.
+- [ ] **B9. Crouch and step-up.** `CharacterController` has neither; the README already
+  notes there is no step-up assist. Scope doc PLY-01.
+
+### C. Known and parked — do each, or drop it on purpose
+
+- [ ] **C1. GPU buffers reallocated on every remesh** — P4 in
+  [performance.md](performance.md), low priority, open.
+- [ ] **C2. One draw call per chunk** — P5, low priority, open.
+- [ ] **C3. Threaded meshing** — about 5 s of debug meshing spread across frames; the last
+  performance item with real leverage.
+- [ ] **C4. Render targets.** No framebuffer objects anywhere, so no post-processing or
+  shadows; underwater fog tints geometry but not the sky.
+- [ ] **C5. An asset layer.** Shaders are string literals in Sandbox sources
+  (`Sandbox.cpp:189`), nothing decodes an image file, and paths are working-directory
+  relative.
+- [ ] **C6. Debug draw's two left-outs** from 2026-08-22: a `Frustum` helper and thick
+  lines.
+
+### D. Game-layer items raised in the same audit
+
+Not engine work, recorded here so they are not lost. They belong to the match-rules arc
+or just after it.
+
+- [ ] **D1. Match rules:** teams, spawn ownership, match state (warmup, active, end), one
+  objective, a scoreboard, and syncing all of it to joiners. Scope doc GAM-01–05, NET-06,
+  NET-07.
+- [ ] **D2. Tool slots.** Dig, place and fire are three mouse buttons; the scope doc wants a
+  shovel, a build tool and a weapon that switch cleanly. PLY-04, PLY-05, PLY-07.
+- [ ] **D3. Ammo, reload and spread** for the hitscan weapon. PLY-03.
+- [ ] **D4. Forts that scale with the map.** `FortEdgeOffset = 8` is absolute
+  (`TerrainGen.cpp:15`): on the 512-wide map the forts are 10-block specks at the edges.
+- [ ] **D5. Team-aware spawning.** One authored spawn column for everybody.
 
 ## What Cubit is today
 
