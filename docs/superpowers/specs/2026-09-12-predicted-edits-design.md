@@ -328,4 +328,18 @@ meshing settled.
   when the cell goes back to the map's block — so its size follows how much of the map has
   changed rather than how long the match has run. Its worst case is still every cell of the
   map, which a chunk-based join would be the answer to.
-- The session death after about six seconds under `--loss 80/90`, still undiagnosed.
+- ~~The session death after about six seconds under `--loss 80/90`, still undiagnosed.~~
+  **Closed as not reproduced, 2026-09-14.** Nothing about the original sighting was ever
+  written down beyond one sentence: no log, no command line, not even which process had the
+  loss. So it was retried across every reading of the flag. 48 client sessions of 40 seconds
+  each, with loss of 0, 80 or 90% on the client, the server or both, in four setups: the
+  current build and the build the fault was recorded against (`3a2b244`, rebuilt, 415 of 415
+  tests), each with one client and no latency and with two clients at `--latency 150`. Every
+  session lived the whole run, and every client's snapshot count matched a live session at its
+  loss rate — at 90% server loss, 217 to 238 snapshots where a session dead at six seconds
+  would hold about 35. The one thing not covered is a player actually moving, building or
+  shooting: keyboard input cannot be scripted into the window, so every run was an idle
+  client. ENet drops a peer only when a reliable command goes unacknowledged
+  (`enet_protocol_check_timeouts`, five seconds plus retry backoff, or thirty flat), which
+  input does not obviously touch, but that is a reading of the code rather than a run. If it
+  is ever seen again, write down the command line and which window went dark.

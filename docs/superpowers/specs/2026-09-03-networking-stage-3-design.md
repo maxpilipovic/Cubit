@@ -402,6 +402,9 @@ which tick anything landed on.
   loop. That points the next investigation at wall-clock instrumentation of the loop
   rather than at packet accounting, which is a much smaller search space than where this
   was left.
+  _(Closed as not reproduced 2026-09-14: 48 sessions under 80 and 90% loss, on this
+  stage's own build and the current one, never died — see "Still open" in
+  `2026-09-12-predicted-edits-design.md`.)_
 
 ## Risks
 

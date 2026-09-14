@@ -571,7 +571,9 @@ is not a measurement of accuracy.**
   predicted movement, because the world the character collided against changed.
 - The edit log grows without bound. _(Bounded 2026-09-14, after Stage 5: the log became a diff
   from the map.)_
-- The session death after about six seconds under `--loss 80/90`, still undiagnosed.
+- ~~The session death after about six seconds under `--loss 80/90`, still undiagnosed.~~
+  _(Closed as not reproduced 2026-09-14, after Stage 5 — see "Still open" in
+  `2026-09-12-predicted-edits-design.md`.)_
 - A player's own edits are not predicted, and it shows: placing blocks while jumping at
   150 ms produced 21 visible corrections in 30 seconds. Predicting them is the open
   terrain-edit risk above, now with a measured cost.
