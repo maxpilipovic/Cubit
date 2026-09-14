@@ -130,6 +130,52 @@ void MatchServer::Step(double seconds)
     SendSnapshots();
 }
 
+void MatchServer::SkipTicks(int ticks)
+{
+    if (ticks <= 0)
+        return;
+
+    for (Client& client : m_Clients)
+    {
+        const std::size_t skip = std::min(client.Queue.size(), static_cast<std::size_t>(ticks));
+        if (skip == 0)
+            continue;
+
+        for (std::size_t i = 0; i < skip; ++i)
+        {
+            const Client::QueuedInput skipped = client.Queue.front();
+            client.Queue.pop_front();
+
+            //Past this tick now, so a bundle that repeats it is not queued again.
+            client.LastInputTick = skipped.Tick;
+
+            if (skipped.Edit.has_value())
+                RefuseDiscardedEdit(client.Peer, skipped.Tick, *skipped.Edit);
+        }
+
+        CB_WARN("Skipped " + std::to_string(skip) + " queued inputs for player "
+            + std::to_string(client.Player) + ": the server lost "
+            + std::to_string(ticks) + " ticks");
+    }
+}
+
+void MatchServer::RefuseDiscardedEdit(PeerId peer, std::uint64_t clientTick, const BlockEdit& edit)
+{
+    //The client predicted this edit and keeps showing it until it hears the
+    //edit's fate, so an input thrown away with an edit on it still owes an
+    //answer. Refused with the server's block, exactly as an illegal edit is -
+    //the client already knows how to take one of those back.
+    EditResultMessage result;
+    result.ClientTick = clientTick;
+    result.Accepted = false;
+    result.Edit.Position = edit.Position;
+
+    const glm::ivec3& at = edit.Position;
+    result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
+
+    m_Transport.Send(peer, Encode(result), Channel::Reliable);
+}
+
 void MatchServer::HandleConnected(PeerId peer)
 {
     //A socket, not yet a player. The player is minted when Hello is accepted,
@@ -232,20 +278,6 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
             if (waiting)
                 continue;
 
-            if (client->Queue.size() >= MaxQueuedInputs)
-            {
-                //Once per overflow episode, not once per dropped input: a
-                //client that stays three ticks ahead drops up to three inputs
-                //a tick, and this loop runs every tick it stays that way.
-                if (!client->QueueOverflowWarned)
-                {
-                    CB_WARN("Dropping an input for player " + std::to_string(client->Player)
-                        + ": its queue is full");
-                    client->QueueOverflowWarned = true;
-                }
-                break;
-            }
-
             client->Queue.push_back(Client::QueuedInput{ tick, input.Inputs[i],
                 i < input.Edits.size() ? input.Edits[i] : std::nullopt });
         }
@@ -258,6 +290,38 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
             {
                 return a.Tick < b.Tick;
             });
+
+        //Over the cap, the OLDEST go, not the newest. A full queue means the
+        //server has fallen behind this client - a stall is the case that
+        //reaches it - and the newest inputs are the ones a caught-up server
+        //needs. Keeping the oldest instead leaves the gap the dropped newest
+        //inputs made, and the next bundle refills it with ticks the client sent
+        //before that bundle, standing in the queue as permanent delay.
+        if (client->Queue.size() > MaxQueuedInputs)
+        {
+            //Once per overflow episode, not once per dropped input: a client
+            //that stays three ticks ahead drops up to three inputs a tick, and
+            //this runs every tick it stays that way.
+            if (!client->QueueOverflowWarned)
+            {
+                CB_WARN("Dropping inputs for player " + std::to_string(client->Player)
+                    + ": its queue is full");
+                client->QueueOverflowWarned = true;
+            }
+
+            while (client->Queue.size() > MaxQueuedInputs)
+            {
+                const Client::QueuedInput dropped = client->Queue.front();
+                client->Queue.pop_front();
+
+                //Past this tick now, as if taken, so a bundle that repeats it is
+                //not queued again.
+                client->LastInputTick = dropped.Tick;
+
+                if (dropped.Edit.has_value())
+                    RefuseDiscardedEdit(client->Peer, dropped.Tick, *dropped.Edit);
+            }
+        }
 
         return;
     }

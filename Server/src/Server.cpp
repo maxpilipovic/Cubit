@@ -196,6 +196,12 @@ int main(int argc, char** argv)
             for (int i = 0; i < steps; ++i)
                 server.Step(FrameClock::FixedStepSeconds);
 
+            //After the steps, which are what read the inputs clients sent during
+            //a stall. Ticks FrameClock would not repay each had an input waiting;
+            //left queued, those inputs make every later one late for the rest of
+            //the match.
+            server.SkipTicks(clock.DiscardedTicks());
+
             if (durationSeconds > 0.0
                 && std::chrono::duration<double>(now - started).count() >= durationSeconds)
                 StopRequested = true;

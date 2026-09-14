@@ -73,6 +73,32 @@ TEST_CASE("A frame owing exactly the cap keeps its leftover fraction")
     CHECK(clock.Alpha() == doctest::Approx(0.5f));
 }
 
+TEST_CASE("A stall reports how many whole steps it discarded")
+{
+    // Twelve and a half steps owed: five run, seven whole steps dropped, and the
+    // half is not a step. A server needs the seven - each is a tick its clients
+    // sent an input for that no step will ever take.
+    FrameClock clock;
+
+    CHECK(clock.Advance(Step * 12.5) == FrameClock::MaxTicksPerFrame);
+    CHECK(clock.DiscardedTicks() == 7);
+}
+
+TEST_CASE("Discarded steps are reported for one frame, not accumulated")
+{
+    // A frame inside the cap discards nothing, including the frame straight after
+    // a stall: a count that carried over would have a server skip the same stall's
+    // inputs twice.
+    FrameClock clock;
+
+    clock.Advance(Step * 2.5);
+    CHECK(clock.DiscardedTicks() == 0);
+
+    clock.Advance(Step * 12.5);
+    clock.Advance(Step);
+    CHECK(clock.DiscardedTicks() == 0);
+}
+
 TEST_CASE("The frame after a stall carries no debt")
 {
     FrameClock clock;

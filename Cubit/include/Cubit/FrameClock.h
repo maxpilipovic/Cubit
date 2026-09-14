@@ -25,9 +25,16 @@ public:
     //in [0, 1]. Rendering interpolates by this.
     float Alpha() const;
 
+    //Whole steps the most recent Advance owed but did not run, because they were
+    //past MaxTicksPerFrame. Zero for any frame inside the cap. A renderer can
+    //ignore it; a server cannot, since every one is a tick its clients sent an
+    //input for.
+    int DiscardedTicks() const { return m_Discarded; }
+
     //The duration every fixed step advances the simulation by.
     static constexpr Timestep Step() { return Timestep(FixedStepSeconds); }
 
 private:
     double m_Accumulator = 0.0;
+    int m_Discarded = 0;
 };

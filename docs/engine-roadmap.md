@@ -19,8 +19,22 @@ them. Every item was checked in the code unless it says otherwise. References ar
 
 ### A. Wrong today — bugs and robustness
 
-- [ ] **A1. A server stall may add input delay for the rest of the session.** _Found by
-  reading, not by running — confirm before fixing._ `FrameClock` discards any surplus past
+- [x] **A1. A server stall may add input delay for the rest of the session.** **Confirmed
+  and fixed 2026-09-14.** A test measuring what other players see — ticks from the client
+  starting to walk until the server's copy of the player moves — read 4 before a 500 ms
+  stall and 9 five seconds after it. `FrameClock::DiscardedTicks` now reports the whole
+  ticks a frame dropped, `Server.exe` passes them to `MatchServer::SkipTicks`, and that
+  skips as many of each client's oldest queued inputs; the test reads 4 and 4. Two more
+  changes turned out to be needed: an overflowing queue now drops its oldest inputs rather
+  than refusing the newest (keeping the oldest left a gap the next bundle refilled with two
+  stale ticks, a measured lasting 2-tick remainder), and any edit on a thrown-away input is
+  refused (see A7). **Tried first and rejected:** trimming whenever the queue stayed deep
+  for a window. A jittery link normally holds two queued inputs, and cutting that buffer
+  broke three passing tests — the lag-compensation precision oracle, the pillar gate and
+  the 5% loss correction count — so the skip fires only when the server actually lost
+  time, and clock drift is left to A8. Jitter alone was measured not to build a backlog:
+  6 ticks at the start of 2,000 ticks at 5% loss and 1-tick jitter, 7 at the end.
+  The original entry follows. `FrameClock` discards any surplus past
   `MaxTicksPerFrame = 5` (`FrameClock.h:18`), so a server hitch longer than 83 ms loses
   ticks. The client's tick free-runs from the welcome (`MatchClient.cpp:242`) and is never
   resynchronised. The server applies one queued input per tick, holding at most
@@ -57,6 +71,40 @@ them. Every item was checked in the code unless it says otherwise. References ar
   next" lists shipped work (multi-model stitching) and puts networking in the future. This
   page's "What Cubit is today" below still says "single-player" and "two-thirds of the way".
   **Done when:** both describe the engine as it is.
+- [ ] **A7. An input dropped for a full queue never answers its edit.** _Found by reading
+  while working on A1, 2026-09-14 — not yet run._ When a client's queue is full,
+  `MatchServer` discards the incoming input (`MatchServer.cpp:235–246`) and sends nothing
+  about any edit it carried. The client keeps a predicted edit until that edit's
+  `EditResult` arrives (Stage 5 spec, "Replay"), and its bookkeeping bound forgets the
+  record but not the block (`MatchClient.cpp:137–140`). So a dropped input more than one
+  bundle old leaves a block on that client the server never placed — a desync, not a
+  correction. **Done when:** a test sends an edit on an input that overflows the queue and
+  shows the client ends with the server's block, and every input the server discards, for
+  any reason, has its edit refused rather than ignored.
+  **Partly done 2026-09-14, with A1.** Both paths A1 touched now refuse the edit on an input
+  they throw away: `SkipTicks` after a stall, and the queue overflow, which now drops its
+  oldest inputs. Each has a test that went red without the refusal ("An edit on an input
+  skipped after a stall is refused, not ignored" and "... dropped from a full queue ...").
+  **Still open:** an input whose tick is at or below the last one applied is ignored as a
+  repeat (`HandleMessage`, `tick <= client->LastInputTick`). Normally it is one, and its edit
+  was answered the first time. But if reordering and loss hold back every bundle carrying a
+  tick until a newer tick has been taken, that input was never seen, and its edit is dropped
+  unanswered. Older than today's change and rare — each tick rides in three bundles — and
+  telling a never-seen input from a repeat needs the server to remember which ticks it has
+  had.
+- [ ] **A8. A client whose clock runs fast fills its queue over a long match.** _Reasoned
+  2026-09-14, not measured on real machines._ Each end counts ticks on its own wall clock
+  through `FrameClock`, and nothing synchronises the two. A client clock just 0.01% faster
+  than the server's sends one extra input about every 10,000 ticks — under three minutes.
+  The server takes one input per tick, so each extra input stays queued as a tick of
+  delay until the queue cap (8) starts dropping inputs, which costs corrections and, until
+  A7 is done, can orphan an edit. A1's fix deliberately does not cover this: it skips
+  inputs only when the server itself loses time, because trimming by watching queue depth
+  was built first and cut the ordinary jitter buffer, breaking three passing tests. The
+  answer the Stage 3 spec already names is approach C, an adaptive clock offset.
+  **Done when:** a test with the client stepping slightly faster than the server measures
+  what input delay does over a long run, and either shows it stays bounded or a fix keeps
+  it bounded without cutting a healthy jitter buffer.
 
 ### B. Missing — systems the game will need
 

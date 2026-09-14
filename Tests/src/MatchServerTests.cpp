@@ -1580,6 +1580,82 @@ TEST_CASE("An input's edit waits in the queue with its input, and is not applied
     CHECK(server.EditLog().size() == 1);
 }
 
+TEST_CASE("An edit on an input skipped after a stall is refused, not ignored")
+{
+    //SkipTicks throws away inputs a server stall made stale, and an input can
+    //carry an edit. The client has already predicted that edit and shows it, and
+    //holds the prediction until the edit's EditResult arrives - so an edit
+    //dropped without an answer leaves a block on that client the server never
+    //placed. A refusal is what makes it take the block back.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    InputMessage bundle;
+    bundle.FirstTick = 1;
+    bundle.Inputs.assign(3, CharacterInput{});
+    bundle.Edits = { std::nullopt, std::nullopt, BlockEdit{ cell, BlockId{ 0 } } };
+    client.Send(LoopbackNetwork::ServerPeer, Encode(bundle), Channel::Unreliable);
+
+    //The frame that ends a stall: one step reads the bundle and takes tick 1,
+    //and the ticks that would have taken 2 and 3 were lost.
+    server.Step(FrameClock::FixedStepSeconds);
+    server.SkipTicks(2);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    const EditTraffic editor = DrainEdits(client);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].ClientTick == 3);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
+}
+
+TEST_CASE("An edit on an input dropped from a full queue is refused, not ignored")
+{
+    //A7 on the pre-game punch list, the same hazard from the other way the
+    //server discards inputs. Nine inputs with no step between them: the queue
+    //holds eight, so the oldest - tick 1, carrying the edit - is dropped.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    for (std::uint64_t tick = 2; tick <= 9; ++tick)
+        SendInput(client, tick, CharacterInput{});
+
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    const EditTraffic editor = DrainEdits(client);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].ClientTick == 1);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
+}
+
 TEST_CASE("Repeated edits to one cell leave one log entry holding the latest block")
 {
     //The log is what a late joiner replays, so it only has to say what each

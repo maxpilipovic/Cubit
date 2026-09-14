@@ -60,6 +60,17 @@ public:
     //match, send a snapshot to each joined client.
     void Step(double seconds);
 
+    //Tells the server it lost `ticks` steps it will never run - a stall longer
+    //than FrameClock repays. Each of those steps would have taken one input from
+    //every client, so up to that many of each client's oldest queued inputs are
+    //skipped. Left queued they would never drain, since a step takes one input
+    //and a client sends one, and every later input would be applied that many
+    //ticks late for the rest of the session.
+    //
+    //Call after the frame's steps have run: the first of them is what reads the
+    //inputs sent during the stall off the transport.
+    void SkipTicks(int ticks);
+
     const MatchState& Match() const { return m_Match; }
 
     //Every cell whose block differs from the loaded map, each with the block it
@@ -171,6 +182,10 @@ private:
     //EditResult and tells everyone else with EditApplied.
     void ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
         const BlockEdit& edit);
+
+    //Answers an edit whose input the server threw away - skipped after a stall
+    //or dropped from a full queue - with a refusal carrying the server's block.
+    void RefuseDiscardedEdit(PeerId peer, std::uint64_t clientTick, const BlockEdit& edit);
 
     //Brings the log up to date with an edit just applied. `previous` is the
     //block the cell held immediately before it.

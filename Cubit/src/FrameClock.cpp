@@ -4,6 +4,8 @@
 
 int FrameClock::Advance(double frameSeconds)
 {
+    m_Discarded = 0;
+
     // A backwards or absent delta owes nothing. Subtracting it would hand back
     // time the simulation has already run.
     if (frameSeconds > 0.0)
@@ -21,7 +23,10 @@ int FrameClock::Advance(double frameSeconds)
     // one. Tested against the remainder rather than against the tick count, so a
     // frame that happens to owe exactly the cap keeps its legitimate fraction.
     if (m_Accumulator >= FixedStepSeconds)
+    {
+        m_Discarded = static_cast<int>(m_Accumulator / FixedStepSeconds);
         m_Accumulator = 0.0;
+    }
 
     return ticks;
 }

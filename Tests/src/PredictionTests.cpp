@@ -1028,3 +1028,116 @@ TEST_CASE("A client's own health follows what its snapshots report")
 
     CHECK(client.LocalHealth() == 37);
 }
+
+namespace
+{
+    //Walks the client from a standstill and counts lockstep ticks until the
+    //server's copy of its player moves. That is the input delay everybody else
+    //sees: other clients draw this player where the server has them.
+    //
+    //Returns -1 if the server has not moved the player within the window.
+    int TicksUntilServerMoves(MatchServer& server, MatchClient& client)
+    {
+        const PlayerId local = client.LocalPlayer();
+        const glm::vec3 start = server.Match().Player(local).Position();
+
+        CharacterInput walk;
+        walk.Move = glm::vec2(0.0f, 1.0f);
+
+        for (int tick = 1; tick <= 60; ++tick)
+        {
+            client.SetInput(walk);
+            client.Step(FrameClock::FixedStepSeconds);
+            server.Step(FrameClock::FixedStepSeconds);
+
+            if (glm::distance(server.Match().Player(local).Position(), start) > 1e-4f)
+                return tick;
+        }
+
+        return -1;
+    }
+
+    //Both ends stepping in lockstep with no input.
+    void StandStill(MatchServer& server, MatchClient& client, int ticks)
+    {
+        for (int tick = 0; tick < ticks; ++tick)
+        {
+            client.SetInput(CharacterInput{});
+            client.Step(FrameClock::FixedStepSeconds);
+            server.Step(FrameClock::FixedStepSeconds);
+        }
+    }
+}
+
+TEST_CASE("A server stall does not leave input delay behind it")
+{
+    //A1 on the pre-game punch list in docs/engine-roadmap.md. A server process
+    //that stops for longer than FrameClock's cap - a debugger, a page fault, a
+    //starved core - gets at most MaxTicksPerFrame steps when it comes back and
+    //loses the rest. The client never stopped, and nothing resynchronises its
+    //tick with the server's. So the inputs it sent during the stall arrive as a
+    //backlog, and if the server only ever takes one queued input per step, the
+    //backlog never drains: every input afterwards is applied as many ticks late
+    //as the backlog is deep, for the rest of the session.
+    //
+    //Measured the way everybody else sees it - how long after the client starts
+    //walking the SERVER'S copy of the player moves - rather than by reading the
+    //queue, which a test could get right while what players see stays wrong.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    StandStill(server, client, 120);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    const int before = TicksUntilServerMoves(server, client);
+    REQUIRE(before > 0);
+    StandStill(server, client, 120);
+
+    //Half a second with no server at all. The client keeps predicting and
+    //sending into a socket nobody is reading.
+    constexpr int StallTicks = 30;
+    for (int tick = 0; tick < StallTicks; ++tick)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //The frame that ends the stall. The server's step count comes from a real
+    //FrameClock, so it gets back exactly what Server.exe would, not a copy of
+    //the cap written out here.
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    FrameClock serverClock;
+    const int catchUp = serverClock.Advance((StallTicks + 1) * FrameClock::FixedStepSeconds);
+    REQUIRE(serverClock.DiscardedTicks() > 0);   //The stall really did lose ticks.
+
+    for (int step = 0; step < catchUp; ++step)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    //What Server.exe does next: tell the server how many ticks the stall cost,
+    //so it can skip the inputs those ticks would have taken.
+    server.SkipTicks(serverClock.DiscardedTicks());
+
+    //Five seconds on. A transient would be gone by now; a backlog the server
+    //never drains would not.
+    constexpr int SettleTicks = 300;
+    StandStill(server, client, SettleTicks);
+
+    const int after = TicksUntilServerMoves(server, client);
+
+    MESSAGE("input delay before a " << StallTicks << "-tick server stall = " << before
+        << " ticks; " << SettleTicks << " ticks after it = " << after << " ticks");
+
+    CHECK(after == before);
+}
