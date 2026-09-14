@@ -323,5 +323,9 @@ meshing settled.
 - Other players' edits still arrive a round trip late.
 - A placement right next to another player can still mispredict.
 - At most one edit per tick.
-- The edit log still grows without bound.
+- ~~The edit log still grows without bound.~~ **Bounded 2026-09-14:** the log a joiner receives
+  is now a diff from the map — one entry per cell that differs, updated in place and removed
+  when the cell goes back to the map's block — so its size follows how much of the map has
+  changed rather than how long the match has run. Its worst case is still every cell of the
+  map, which a chunk-based join would be the answer to.
 - The session death after about six seconds under `--loss 80/90`, still undiagnosed.

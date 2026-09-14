@@ -1535,7 +1535,7 @@ TEST_CASE("Edits taken on one step are applied in player-id order")
 
     //Lower id first, higher id last: the higher id's block stands.
     CHECK(server.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
-    CHECK(server.EditLog().size() == 2);
+    CHECK(server.AcceptedEditCount() == 2);
 }
 
 TEST_CASE("An input's edit waits in the queue with its input, and is not applied on arrival")
@@ -1578,4 +1578,137 @@ TEST_CASE("An input's edit waits in the queue with its input, and is not applied
     server.Step(FrameClock::FixedStepSeconds);
     CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
     CHECK(server.EditLog().size() == 1);
+}
+
+TEST_CASE("Repeated edits to one cell leave one log entry holding the latest block")
+{
+    //The log is what a late joiner replays, so it only has to say what each
+    //changed cell holds now. A log that appended every edit would grow with the
+    //length of the match rather than with how much of the map differs.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    const glm::ivec3 cell(4, 1, 4);
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ cell, BlockId{ 2 } });
+    server.Step(FrameClock::FixedStepSeconds);
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ cell, BlockId{ 3 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
+    REQUIRE(server.EditLog().size() == 1);
+    CHECK(server.EditLog()[0].Position == cell);
+    CHECK(server.EditLog()[0].Block == BlockId{ 3 });
+}
+
+TEST_CASE("An edit that puts a cell back to the map's block removes it from the log")
+{
+    //Digging a hole and filling it again leaves the world as the map has it, so
+    //there is nothing for a joiner to replay. Keeping the entry would make a
+    //dig-and-refill cost log space for ever.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    //Floor is block 1 in the map.
+    const glm::ivec3 hole(4, 0, 4);
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ hole, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+    REQUIRE(server.EditLog().size() == 1);
+
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ hole, BlockId{ 1 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+    CHECK(server.EditLog().empty());
+}
+
+TEST_CASE("Removing one cell from the log leaves every other logged cell findable and correct")
+{
+    //Three cells logged, the first put back to the map, then the third edited
+    //again. Removing an entry moves another into its place; if the log's index
+    //still pointed at the old slot, the third cell's update would land on the
+    //wrong entry, or on no entry at all.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    const glm::ivec3 first(2, 1, 4);
+    const glm::ivec3 second(3, 1, 4);
+    const glm::ivec3 third(4, 1, 4);
+
+    std::uint64_t tick = 1;
+    auto edit = [&](const glm::ivec3& at, BlockId block)
+    {
+        SendInputWithEdit(client, tick++, CharacterInput{}, BlockEdit{ at, block });
+        server.Step(FrameClock::FixedStepSeconds);
+    };
+
+    edit(first, BlockId{ 2 });
+    edit(second, BlockId{ 2 });
+    edit(third, BlockId{ 2 });
+    REQUIRE(server.EditLog().size() == 3);
+
+    //Air is the map's block above the floor.
+    edit(first, BlockId{ 0 });
+    REQUIRE(server.EditLog().size() == 2);
+
+    edit(third, BlockId{ 3 });
+
+    REQUIRE(server.EditLog().size() == 2);
+
+    BlockId loggedSecond = BlockId{ 0 };
+    BlockId loggedThird = BlockId{ 0 };
+    int seenFirst = 0;
+    for (const BlockEdit& entry : server.EditLog())
+    {
+        if (entry.Position == second)
+            loggedSecond = entry.Block;
+        else if (entry.Position == third)
+            loggedThird = entry.Block;
+        else if (entry.Position == first)
+            ++seenFirst;
+    }
+
+    CHECK(seenFirst == 0);
+    CHECK(loggedSecond == BlockId{ 2 });
+    CHECK(loggedThird == BlockId{ 3 });
+}
+
+TEST_CASE("Accepted edits are counted even when the log collapses them, and refused ones are not")
+{
+    //The log no longer says how many edits happened, so a test that needs to
+    //know an edit really went through counts it here instead. A refused edit
+    //must not count, or such a test could pass on edits the server threw away.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+
+    const glm::ivec3 cell(4, 1, 4);
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ cell, BlockId{ 2 } });
+    server.Step(FrameClock::FixedStepSeconds);
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    //Beyond reach from the spawn: refused.
+    SendInputWithEdit(client, 3, CharacterInput{}, BlockEdit{ glm::ivec3(31, 0, 31), BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.EditLog().empty());
+    CHECK(server.AcceptedEditCount() == 2);
 }

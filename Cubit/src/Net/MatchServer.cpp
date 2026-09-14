@@ -289,11 +289,18 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
     result.ClientTick = clientTick;
     result.Edit.Position = edit.Position;
 
-    if (IsEditLegal(m_Match, player, edit, OtherPlayers::Check)
-        && ApplyBlockEdit(m_Match.GetWorld(), edit).has_value())
+    std::optional<BlockEdit> inverse;
+    if (IsEditLegal(m_Match, player, edit, OtherPlayers::Check))
+        inverse = ApplyBlockEdit(m_Match.GetWorld(), edit);
+
+    if (inverse.has_value())
     {
         result.Accepted = true;
-        m_EditLog.push_back(edit);
+        ++m_AcceptedEditCount;
+
+        //The inverse holds what the cell held just before - which, the first
+        //time this cell changes, is the map's own block.
+        RecordInLog(edit, inverse->Block);
 
         EditMessage applied;
         applied.Edit = edit;
@@ -305,6 +312,49 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
     result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
 
     m_Transport.Send(peer, Encode(result), Channel::Reliable);
+}
+
+void MatchServer::RecordInLog(const BlockEdit& edit, BlockId previous)
+{
+    const glm::ivec3& cell = edit.Position;
+
+    //Only inserts on the cell's first change, so this is the map's block for
+    //every later edit too.
+    const BlockId mapBlock = m_MapBlock.try_emplace(cell, previous).first->second;
+    const auto indexed = m_LogIndex.find(cell);
+
+    if (edit.Block == mapBlock)
+    {
+        //Back to the map: nothing left for a joiner to replay here.
+        if (indexed != m_LogIndex.end())
+        {
+            //Move the last entry into this one's slot, so removal does not shift
+            //every entry after it - and repoint that entry's index, which is
+            //the one thing a swap can leave stale.
+            const std::size_t slot = indexed->second;
+            const std::size_t last = m_EditLog.size() - 1;
+            if (slot != last)
+            {
+                m_EditLog[slot] = m_EditLog[last];
+                m_LogIndex[m_EditLog[slot].Position] = slot;
+            }
+
+            m_EditLog.pop_back();
+            m_LogIndex.erase(cell);
+        }
+
+        m_MapBlock.erase(cell);
+        return;
+    }
+
+    if (indexed != m_LogIndex.end())
+    {
+        m_EditLog[indexed->second].Block = edit.Block;
+        return;
+    }
+
+    m_LogIndex.emplace(cell, m_EditLog.size());
+    m_EditLog.push_back(edit);
 }
 
 void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)

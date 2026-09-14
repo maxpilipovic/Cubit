@@ -569,7 +569,8 @@ is not a measurement of accuracy.**
 
 - Predicted terrain edits, and the rollback risk: undoing a rejected edit can invalidate
   predicted movement, because the world the character collided against changed.
-- The edit log grows without bound.
+- The edit log grows without bound. _(Bounded 2026-09-14, after Stage 5: the log became a diff
+  from the map.)_
 - The session death after about six seconds under `--loss 80/90`, still undiagnosed.
 - A player's own edits are not predicted, and it shows: placing blocks while jumping at
   150 ms produced 21 visible corrections in 30 seconds. Predicting them is the open

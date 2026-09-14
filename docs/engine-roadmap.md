@@ -359,8 +359,10 @@ obvious, and better shaped, the moment something concretely needs it.
   undoes and redoes pending edits tick by tick as plain block writes, so it never remeshes.
   At 166.7 ms, pillar-jumping 30 blocks went from 21 corrections to 0 and digging 10 levels
   from 21 to 0, still 0 at 5% loss; played by hand at 150 ms, the only corrections were two
-  respawns. Other players' edits still arrive a round trip late, and the edit log still
-  grows without bound.
+  respawns. Other players' edits still arrive a round trip late. The edit log a joiner
+  receives, which grew with every edit, became a diff from the map on 2026-09-14: one entry
+  per cell that differs from the map, so a hole dug and filled again costs nothing and the
+  log's size follows how much of the map has changed, not how long the match has run.
   **Predicted terrain edits and their rollback problem are still the
   arc's open risk**: rolling back a rejected edit can invalidate predicted movement,
   because the world the character collided against changed underneath it, and that

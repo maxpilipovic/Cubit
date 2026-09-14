@@ -12,6 +12,7 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -61,9 +62,21 @@ public:
 
     const MatchState& Match() const { return m_Match; }
 
-    //Every edit applied since construction, in application order. Sent to
-    //joiners so a client arriving after somebody dug a hole sees the hole.
+    //Every cell whose block differs from the loaded map, each with the block it
+    //holds now. Sent to joiners so a client arriving after somebody dug a hole
+    //sees the hole.
+    //
+    //A diff, not a history: editing a cell again replaces its entry, and putting
+    //it back to the map's block removes it. So its size follows how much of the
+    //map differs, not how long the match has run. In no particular order - each
+    //entry sets a different cell, so the order a joiner replays them in cannot
+    //change the world it ends up with.
     const std::vector<BlockEdit>& EditLog() const { return m_EditLog; }
+
+    //How many edits have been accepted since construction. For tests and
+    //diagnostics: the log no longer says how many edits happened, because it
+    //collapses repeated edits to one cell and drops cells put back to the map.
+    std::uint64_t AcceptedEditCount() const { return m_AcceptedEditCount; }
 
     //Where everybody has recently been, which is what a shot is resolved
     //against. Exposed for tests and for nothing else: the rewind happens in
@@ -159,6 +172,10 @@ private:
     void ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
         const BlockEdit& edit);
 
+    //Brings the log up to date with an edit just applied. `previous` is the
+    //block the cell held immediately before it.
+    void RecordInLog(const BlockEdit& edit, BlockId previous);
+
     //Resolves one shot against the world as the shooter saw it and tells
     //everybody the answer.
     void HandleFire(Client& shooter, const FireMessage& fire);
@@ -206,6 +223,17 @@ private:
 
     std::vector<Client> m_Clients;
     std::vector<BlockEdit> m_EditLog;
+
+    //The map's own block for each cell in the log, recorded the first time the
+    //cell changes - the one moment it is known without keeping a copy of the
+    //whole map. Dropped again when the cell goes back to it.
+    std::map<glm::ivec3, BlockId, IVec3Less> m_MapBlock;
+
+    //Where each logged cell's entry sits in m_EditLog, so an update or a
+    //removal does not search the log.
+    std::map<glm::ivec3, std::size_t, IVec3Less> m_LogIndex;
+
+    std::uint64_t m_AcceptedEditCount = 0;
     HitboxHistory m_History;
 };
 

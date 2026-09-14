@@ -365,7 +365,7 @@ TEST_CASE("Two clients editing the same block on the same tick converge")
     //edit is ever sent - three untouched worlds agree with each other - which
     //is exactly how it passed on 2026-09-13 once edits started riding inputs
     //and this case had not yet been given any.
-    CHECK(server.EditLog().size() == 2);
+    CHECK(server.AcceptedEditCount() == 2);
 
     //Both agree with the server, whichever won. Player-id order decides, and
     //it decides the same way every run.
@@ -398,7 +398,7 @@ TEST_CASE("Two clients editing the same block on the same tick converge")
 
     //All four edits reached the server, so the agreement below is about edits
     //that happened.
-    CHECK(server.EditLog().size() == 4);
+    CHECK(server.AcceptedEditCount() == 4);
 
     CHECK(WorldsMatch(first.Match().GetWorld(), server.Match().GetWorld()));
     CHECK(WorldsMatch(second.Match().GetWorld(), server.Match().GetWorld()));
@@ -731,4 +731,118 @@ TEST_CASE("Being welcomed is not the same as being in the roster")
 
     CHECK(client.Match().HasPlayer(client.LocalPlayer()));
     CHECK(client.Match().Player(client.LocalPlayer()).Position() == glm::vec3(1.0f, 2.0f, 3.0f));
+}
+
+TEST_CASE("A client joining after a hole is dug and filled again gets the same world, and the log is empty")
+{
+    //The log a joiner receives is a diff from the map, so a change that has
+    //been undone costs it nothing - and the joiner's world must still match.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId firstPeer = InvalidPeer;
+    SimulatedTransport firstNet(network.AddClient(firstPeer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient first(firstNet, GoodLoader());
+
+    auto stepFirst = [&](int ticks)
+    {
+        for (int i = 0; i < ticks; ++i)
+        {
+            first.SetInput(CharacterInput{});
+            first.Step(FrameClock::FixedStepSeconds);
+            server.Step(FrameClock::FixedStepSeconds);
+        }
+    };
+
+    stepFirst(30);
+    REQUIRE(first.Connected());
+
+    const glm::ivec3 hole(4, 0, 4);
+
+    first.RequestEdit(BlockEdit{ hole, BlockId{ 0 } });
+    stepFirst(20);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
+
+    first.RequestEdit(BlockEdit{ hole, BlockId{ 1 } });
+    stepFirst(40);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    CHECK(server.EditLog().empty());
+
+    PeerId secondPeer = InvalidPeer;
+    SimulatedTransport secondNet(network.AddClient(secondPeer), sim);
+    MatchClient second(secondNet, GoodLoader());
+
+    for (int i = 0; i < 40; ++i)
+    {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
+        first.Step(FrameClock::FixedStepSeconds);
+        second.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(second.Connected());
+    CHECK(WorldsMatch(second.Match().GetWorld(), server.Match().GetWorld()));
+}
+
+TEST_CASE("A client joining after two placements on one cell sees the second")
+{
+    //Passes with a full history too, since replaying both in order leaves the
+    //second. It guards the diff against keeping a cell's FIRST block when a
+    //later edit changes it again.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId firstPeer = InvalidPeer;
+    SimulatedTransport firstNet(network.AddClient(firstPeer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient first(firstNet, GoodLoader());
+
+    auto stepFirst = [&](int ticks)
+    {
+        for (int i = 0; i < ticks; ++i)
+        {
+            first.SetInput(CharacterInput{});
+            first.Step(FrameClock::FixedStepSeconds);
+            server.Step(FrameClock::FixedStepSeconds);
+        }
+    };
+
+    stepFirst(30);
+    REQUIRE(first.Connected());
+
+    const glm::ivec3 cell(4, 1, 4);
+
+    first.RequestEdit(BlockEdit{ cell, BlockId{ 2 } });
+    stepFirst(20);
+    first.RequestEdit(BlockEdit{ cell, BlockId{ 3 } });
+    stepFirst(40);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
+
+    PeerId secondPeer = InvalidPeer;
+    SimulatedTransport secondNet(network.AddClient(secondPeer), sim);
+    MatchClient second(secondNet, GoodLoader());
+
+    for (int i = 0; i < 40; ++i)
+    {
+        first.SetInput(CharacterInput{});
+        second.SetInput(CharacterInput{});
+        first.Step(FrameClock::FixedStepSeconds);
+        second.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(second.Connected());
+    CHECK(second.Match().GetWorld().GetBlock(4, 1, 4) == BlockId{ 3 });
+    CHECK(WorldsMatch(second.Match().GetWorld(), server.Match().GetWorld()));
 }
