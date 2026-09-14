@@ -59,6 +59,11 @@ void MatchClient::Step(double seconds)
             if (!m_Connected && !m_Rejected)
                 Reject("the server ended the connection before the welcome");
 
+            //After the welcome, a session that ended. The Sandbox has to say
+            //so, or the player is left looking at a frozen screen.
+            if (m_Connected)
+                m_Disconnected = true;
+
             m_Connected = false;
             break;
         }

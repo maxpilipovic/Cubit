@@ -118,6 +118,11 @@ public:
     //Terminal.
     bool Rejected() const { return m_Rejected; }
 
+    //True once a session that had been welcomed has ended - the server stopped,
+    //or the connection was lost. Never true for a handshake that failed, which
+    //is Rejected. Terminal, like Rejected: this client does not reconnect.
+    bool Disconnected() const { return m_Disconnected; }
+
     PlayerId LocalPlayer() const { return m_LocalPlayer; }
 
     const MatchState& Match() const { return m_Match; }
@@ -253,6 +258,7 @@ private:
     bool m_SaidHello = false;
     bool m_Connected = false;
     bool m_Rejected = false;
+    bool m_Disconnected = false;
 
     CharacterInput m_Input;
     bool m_HasInput = false;

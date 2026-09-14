@@ -850,6 +850,67 @@ TEST_CASE("A shot fired before the interpolation delay has anything behind it de
     CHECK(fire->RenderAlpha == 0.0f);
 }
 
+TEST_CASE("A client whose server goes away reports that it was disconnected, not refused")
+{
+    //A session that ended and a handshake that failed are different things to
+    //show a player. Without telling them apart the Sandbox has nothing to say
+    //when the server stops, and draws a frozen screen.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    CHECK_FALSE(client.Disconnected());
+
+    for (int i = 0; i < 30 && !client.Connected(); ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    REQUIRE(client.Connected());
+    CHECK_FALSE(client.Disconnected());
+
+    network.RemoveClient(peer);
+
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK_FALSE(client.Connected());
+    CHECK(client.Disconnected());
+    CHECK_FALSE(client.Rejected());
+}
+
+TEST_CASE("A client refused at the handshake is not reported as disconnected")
+{
+    //Refusal already has its own name. Reporting it as a lost session as well
+    //would put two contradictory lines on the HUD.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+
+    //The right map name with the wrong bytes behind it.
+    MatchClient client(raw,
+        [](const std::string&) -> std::optional<LoadedMap>
+        {
+            return LoadedMap{ FlatWorld(), MapHash + 1 };
+        });
+
+    for (int i = 0; i < 30 && !client.Rejected(); ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    REQUIRE(client.Rejected());
+    CHECK_FALSE(client.Disconnected());
+}
+
 TEST_CASE("A shot resolution is reported to the caller")
 {
     //LastShot exists so the Sandbox can draw a hit marker for as many frames
