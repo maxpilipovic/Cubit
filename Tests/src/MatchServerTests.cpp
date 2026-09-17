@@ -1,5 +1,7 @@
 #include <doctest.h>
 
+#include "CaptureConsole.h"
+
 #include "Cubit/FrameClock.h"
 #include "Cubit/Net/LoopbackTransport.h"
 #include "Cubit/Net/MatchServer.h"
@@ -2087,4 +2089,116 @@ TEST_CASE("A queue whose depth moves keeps one input in reserve")
     }
 
     CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(1));
+}
+
+namespace
+{
+    //Carries messages up to a size the test chooses. Everything else is the
+    //inner transport's.
+    class CappedTransport : public Transport
+    {
+    public:
+        CappedTransport(Transport& inner, std::size_t maxBytes) : m_Inner(inner), m_MaxBytes(maxBytes) {}
+
+        std::size_t MaxMessageBytes() const override { return m_MaxBytes; }
+
+        void Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Send(peer, data, channel);
+        }
+
+        void Broadcast(std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Broadcast(data, channel);
+        }
+
+        void Disconnect(PeerId peer) override { m_Inner.Disconnect(peer); }
+        bool Poll(NetEvent& out) override { return m_Inner.Poll(out); }
+        void Advance(double seconds) override { m_Inner.Advance(seconds); }
+        double RoundTripTime(PeerId peer) const override { return m_Inner.RoundTripTime(peer); }
+
+    private:
+        Transport& m_Inner;
+        std::size_t m_MaxBytes;
+    };
+
+    //The encoded size of a welcome to this file's flat map carrying `edits`
+    //logged cells - the number the server compares against the transport.
+    std::size_t WelcomeBytes(std::size_t edits)
+    {
+        WelcomeMessage welcome;
+        welcome.MapName = "flat.vox";
+        welcome.Edits.assign(edits, BlockEdit{});
+        return Encode(welcome).size();
+    }
+
+    //Joins a first client and has it place two blocks, so the log holds two
+    //cells and a welcome carries both.
+    void JoinAndPlaceTwo(MatchServer& server, Transport& first)
+    {
+        REQUIRE(Join(server, first) != InvalidPlayer);
+
+        SendInputWithEdit(first, 1, CharacterInput{}, BlockEdit{ glm::ivec3(4, 1, 4), BlockId{ 1 } });
+        server.Step(FrameClock::FixedStepSeconds);
+        SendInputWithEdit(first, 2, CharacterInput{}, BlockEdit{ glm::ivec3(5, 1, 4), BlockId{ 1 } });
+        server.Step(FrameClock::FixedStepSeconds);
+
+        REQUIRE(server.EditLog().size() == 2);
+    }
+}
+
+TEST_CASE("A joiner whose welcome is too big for the transport is refused out loud")
+{
+    //A5 on the pre-game punch list. A welcome carries 14 bytes per changed cell,
+    //so past about 2.4 million of them it exceeds ENet's 32 MB and the send was
+    //dropped without a word, leaving the joiner waiting for ever. Kept as an
+    //accepted limit, but loud: logged, and the joiner disconnected the way a
+    //wrong protocol version is. Here the transport carries a one-cell welcome
+    //and the log holds two.
+    LoopbackNetwork network;
+    CappedTransport capped(network.Server(), WelcomeBytes(1));
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, capped);
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    JoinAndPlaceTwo(server, first);
+
+    PeerId latePeer = InvalidPeer;
+    Transport& late = network.AddClient(latePeer);
+    late.Send(LoopbackNetwork::ServerPeer, Encode(HelloMessage{}), Channel::Reliable);
+
+    std::string log;
+    {
+        CaptureConsole console;
+        server.Step(FrameClock::FixedStepSeconds);
+        log = console.Text();
+    }
+
+    CHECK_FALSE(FindWelcome(late).has_value());
+    CHECK(server.ClientCount() == 1);
+    CHECK(server.Match().Players().size() == 1);
+    CHECK(log.find("Refusing a joiner: the welcome carries 2 changed cells") != std::string::npos);
+}
+
+TEST_CASE("A welcome exactly as big as the transport carries is still sent")
+{
+    //The other side of the line, so the refusal is known to be a comparison and
+    //not a refusal of every welcome with edits in it.
+    LoopbackNetwork network;
+    CappedTransport capped(network.Server(), WelcomeBytes(2));
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, capped);
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    JoinAndPlaceTwo(server, first);
+
+    PeerId latePeer = InvalidPeer;
+    Transport& late = network.AddClient(latePeer);
+    late.Send(LoopbackNetwork::ServerPeer, Encode(HelloMessage{}), Channel::Reliable);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const std::optional<WelcomeMessage> welcome = FindWelcome(late);
+    REQUIRE(welcome.has_value());
+    CHECK(welcome->Edits.size() == 2);
+    CHECK(server.ClientCount() == 2);
 }

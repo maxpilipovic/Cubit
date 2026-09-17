@@ -1,5 +1,7 @@
 #include <doctest.h>
 
+#include "CaptureConsole.h"
+
 #include "Cubit/Logger.h"
 
 #include <algorithm>
@@ -15,21 +17,6 @@
 
 namespace
 {
-    //Everything written to std::cout while alive, and std::cout back as it was
-    //afterwards.
-    class CaptureConsole
-    {
-    public:
-        CaptureConsole() : m_Previous(std::cout.rdbuf(m_Captured.rdbuf())) {}
-        ~CaptureConsole() { std::cout.rdbuf(m_Previous); }
-
-        std::string Text() const { return m_Captured.str(); }
-
-    private:
-        std::stringstream m_Captured;
-        std::streambuf* m_Previous;
-    };
-
     std::string ReadFile(const std::filesystem::path& path)
     {
         std::ifstream file(path);

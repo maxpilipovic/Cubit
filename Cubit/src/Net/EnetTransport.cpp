@@ -135,23 +135,56 @@ EnetTransport::~EnetTransport()
 
 void EnetTransport::Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel)
 {
-    ENetPeer* target = PeerFor(peer);
-    if (target == nullptr)
+    PeerSlot* slot = SlotFor(peer);
+    if (slot == nullptr)
         return;
+
+    ENetPeer* target = slot->Peer;
+    const char* lane = channel == Channel::Reliable ? "reliable" : "unreliable";
+
+    //Refusals ENet would make in silence, named here first. Oversize is logged
+    //every time: nothing sends one routinely, and the one message that can grow
+    //that large - a Welcome carrying the edit log - is a join that will never
+    //complete.
+    if (data.size() > m_Host->maximumPacketSize)
+    {
+        CB_ERROR("Dropped a " + std::to_string(data.size()) + "-byte " + lane + " message to peer "
+            + std::to_string(peer) + ": ENet carries at most "
+            + std::to_string(m_Host->maximumPacketSize) + " bytes");
+        return;
+    }
+
+    //Not yet connected, or already disconnecting. Once per peer: a caller that
+    //sends every tick would otherwise log sixty lines a second about one peer.
+    if (target->state != ENET_PEER_STATE_CONNECTED)
+    {
+        if (!slot->NotConnectedWarned)
+        {
+            CB_WARN("Dropping messages to peer " + std::to_string(peer) + ": it is not connected");
+            slot->NotConnectedWarned = true;
+        }
+        return;
+    }
 
     ENetPacket* packet = enet_packet_create(data.data(), data.size(), FlagsFor(channel));
     if (packet == nullptr)
+    {
+        CB_ERROR("Dropped a " + std::to_string(data.size()) + "-byte " + lane + " message to peer "
+            + std::to_string(peer) + ": ENet could not allocate the packet");
         return;
+    }
 
-    //enet_peer_send returns -1 WITHOUT taking ownership of the packet - when
-    //the peer is not in the connected state, the channel is out of range, or
-    //the payload exceeds the host's maximum. The first of those is on the
-    //normal path rather than an error case, because Connect() deliberately
-    //registers its peer before the handshake completes, so anything sent in
-    //that window would leak without this. enet_host_broadcast needs no
-    //equivalent: it destroys the packet itself when nobody took a reference.
+    //enet_peer_send returns -1 WITHOUT taking ownership of the packet, so a
+    //refusal must destroy it here or leak. The checks above cover the reasons
+    //this transport can hit; anything else is logged rather than guessed at.
+    //enet_host_broadcast needs no equivalent: it destroys the packet itself
+    //when nobody took a reference.
     if (enet_peer_send(target, static_cast<enet_uint8>(channel), packet) < 0)
+    {
+        CB_ERROR("ENet refused a " + std::to_string(data.size()) + "-byte " + lane
+            + " message to peer " + std::to_string(peer));
         enet_packet_destroy(packet);
+    }
 }
 
 void EnetTransport::Broadcast(std::span<const std::uint8_t> data, Channel channel)
@@ -269,6 +302,22 @@ double EnetTransport::RoundTripTime(PeerId peer) const
 
     //ENet reports milliseconds; this interface promises seconds.
     return target == nullptr ? 0.0 : static_cast<double>(target->roundTripTime) / 1000.0;
+}
+
+std::size_t EnetTransport::MaxMessageBytes() const
+{
+    return m_Host == nullptr ? ENET_HOST_DEFAULT_MAXIMUM_PACKET_SIZE : m_Host->maximumPacketSize;
+}
+
+EnetTransport::PeerSlot* EnetTransport::SlotFor(PeerId id)
+{
+    for (PeerSlot& slot : m_Peers)
+    {
+        if (slot.Id == id)
+            return &slot;
+    }
+
+    return nullptr;
 }
 
 PeerId EnetTransport::IdFor(_ENetPeer* peer) const

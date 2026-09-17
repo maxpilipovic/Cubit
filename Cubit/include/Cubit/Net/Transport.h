@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -71,4 +73,10 @@ public:
 
     //Round-trip time in seconds, for the HUD. Zero when unknown.
     virtual double RoundTripTime(PeerId peer) const = 0;
+
+    //The largest payload one Send can deliver, in bytes; anything bigger is
+    //refused. The default is no limit of its own. Asked by a sender whose message
+    //can grow without bound - a Welcome carrying the edit log - so it can refuse
+    //out loud instead of having its send dropped where nobody sees.
+    virtual std::size_t MaxMessageBytes() const { return std::numeric_limits<std::size_t>::max(); }
 };

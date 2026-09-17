@@ -61,6 +61,9 @@ public:
 
     double RoundTripTime(PeerId peer) const override;
 
+    //ENet's maximum packet size, 32 MB unless the host was configured otherwise.
+    std::size_t MaxMessageBytes() const override;
+
 private:
     EnetTransport() = default;
 
@@ -72,10 +75,15 @@ private:
     {
         PeerId Id = InvalidPeer;
         _ENetPeer* Peer = nullptr;
+
+        //Set once a send to this peer has been refused for not being connected,
+        //so a caller sending every tick logs one warning, not sixty a second.
+        bool NotConnectedWarned = false;
     };
 
     PeerId IdFor(_ENetPeer* peer) const;
     _ENetPeer* PeerFor(PeerId id) const;
+    PeerSlot* SlotFor(PeerId id);
 
     _ENetHost* m_Host = nullptr;
     std::vector<PeerSlot> m_Peers;

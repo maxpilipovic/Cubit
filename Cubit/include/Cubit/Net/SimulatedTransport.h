@@ -56,6 +56,10 @@ public:
     void Advance(double seconds) override;
     double RoundTripTime(PeerId peer) const override;
 
+    //The inner transport's: simulating a network adds delay and loss, not a
+    //size limit.
+    std::size_t MaxMessageBytes() const override { return m_Inner.MaxMessageBytes(); }
+
 private:
     //A packet waiting out its delay.
     struct Pending

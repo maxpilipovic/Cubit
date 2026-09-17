@@ -1,11 +1,14 @@
 #include <doctest.h>
 
+#include "CaptureConsole.h"
+
 #include "Cubit/FrameClock.h"
 #include "Cubit/Net/EnetTransport.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 TEST_CASE("A server and two clients talk over a real socket")
@@ -182,4 +185,67 @@ TEST_CASE("A transport that closes tells the other end instead of leaving a ghos
     }
 
     CHECK(departed);
+}
+
+TEST_CASE("A send too big for ENet is logged, not dropped in silence")
+{
+    //A5 on the pre-game punch list. ENet refuses a packet over its maximum size,
+    //and Send used to destroy it without a word - the way a welcome carrying a
+    //large edit log would have vanished.
+    constexpr std::uint16_t Port = 27962;
+
+    std::unique_ptr<EnetTransport> server = EnetTransport::Listen(Port, 1);
+    REQUIRE(server != nullptr);
+    std::unique_ptr<EnetTransport> client = EnetTransport::Connect("127.0.0.1", Port);
+    REQUIRE(client != nullptr);
+
+    bool connected = false;
+    for (int attempt = 0; attempt < 600 && !connected; ++attempt)
+    {
+        server->Advance(FrameClock::FixedStepSeconds);
+        client->Advance(FrameClock::FixedStepSeconds);
+
+        NetEvent event;
+        while (client->Poll(event))
+            connected = connected || event.Type == NetEventType::Connected;
+    }
+    REQUIRE(connected);
+
+    const std::vector<std::uint8_t> tooBig(client->MaxMessageBytes() + 1, 0);
+
+    std::string log;
+    {
+        CaptureConsole console;
+        client->Send(EnetTransport::EnetServerPeer, tooBig, Channel::Reliable);
+        log = console.Text();
+    }
+
+    CHECK(client->MaxMessageBytes() == 32u * 1024u * 1024u);
+    CHECK(log.find("Dropped a 33554433-byte reliable message to peer 1: ENet carries at most 33554432 bytes")
+        != std::string::npos);
+}
+
+TEST_CASE("Sends to a peer that is not connected yet are logged once, not every time")
+{
+    //Connect registers its peer before the handshake completes, so a send in
+    //that window is refused. Worth a line; not worth sixty a second.
+    constexpr std::uint16_t Port = 27963;
+
+    std::unique_ptr<EnetTransport> client = EnetTransport::Connect("127.0.0.1", Port);
+    REQUIRE(client != nullptr);
+
+    const std::vector<std::uint8_t> payload{ 1, 2, 3 };
+
+    std::string log;
+    {
+        CaptureConsole console;
+        client->Send(EnetTransport::EnetServerPeer, payload, Channel::Unreliable);
+        client->Send(EnetTransport::EnetServerPeer, payload, Channel::Unreliable);
+        log = console.Text();
+    }
+
+    const std::string warning = "Dropping messages to peer 1: it is not connected";
+    const std::size_t first = log.find(warning);
+    REQUIRE(first != std::string::npos);
+    CHECK(log.find(warning, first + 1) == std::string::npos);
 }

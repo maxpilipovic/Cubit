@@ -93,7 +93,24 @@ them. Every item was checked in the code unless it says otherwise. References ar
   writes channel, level and message to `std::cout` only. The 2026-09-14 loss investigation
   had to timestamp lines from the outside. **Done when:** every line carries a time, and a
   file sink exists.
-- [ ] **A5. A refused send is dropped without a word, and a join has a size ceiling.**
+- [x] **A5. A refused send is dropped without a word, and a join has a size ceiling.**
+  **Fixed 2026-09-16, the ceiling kept as an accepted limit.** `EnetTransport::Send` now
+  names each refusal before ENet makes it silently. Oversize logs an error every time,
+  with the size and ENet's limit. A peer not yet (or no longer) connected logs a warning
+  once per peer, because a caller sending every tick would otherwise log sixty lines a
+  second. A failed allocation and any other `enet_peer_send` refusal are logged too.
+  `Transport` gained `MaxMessageBytes()`: no limit by default, ENet's 32 MB for
+  `EnetTransport`, forwarded by `SimulatedTransport`. **The ceiling is not lifted.** A
+  welcome over the transport's limit (about 2.4 million changed cells) makes `MatchServer`
+  log an error and disconnect the joiner, the way a wrong protocol version does, so the
+  joiner sees a refusal instead of waiting forever. Lifting it means a chunked join (a
+  protocol change) for a case where sending the welcome is already impractical: 32 MB
+  takes minutes at ordinary upload speeds. Chunked join stays the recorded answer if a
+  match ever needs it. **Tests:** the server refuses a welcome one cell over a capped
+  transport's limit (logged, no welcome, joiner dropped) and still sends one exactly at
+  it; over real ENet, an oversize send logs its size and the limit, and two sends before
+  the handshake log one warning. Each went red under a mutation. The original entry
+  follows.
   `EnetTransport::Send` destroys a packet ENet refuses (`EnetTransport.cpp:153`) and logs
   nothing. The case that matters: a welcome carries 14 bytes per changed cell
   (`Protocol.cpp:34`) against ENet's 32 MB packet limit (`enet.h:217`), so once about 2.4

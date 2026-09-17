@@ -307,7 +307,32 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         welcome.MapHash = m_MapHash;
         welcome.Tick = m_Match.Tick();
         welcome.Edits = m_EditLog;
-        m_Transport.Send(peer, Encode(welcome), Channel::Reliable);
+
+        const std::vector<std::uint8_t> payload = Encode(welcome);
+
+        //The one message with no size bound: 14 bytes for every cell that
+        //differs from the map. Past what the transport carries - 32 MB over
+        //ENet, about 2.4 million changed cells, or 14% of a 512x64x512 map - the
+        //send would be dropped and the joiner left waiting on a Welcome that
+        //never comes. An accepted limit rather than a solved one: sending that
+        //much before a player can move is its own problem well before it gets
+        //here, and a join split into chunks is the recorded answer if a match
+        //ever needs one. So the joiner is refused out loud, the way a wrong
+        //protocol version is, and the client reports a refusal.
+        if (payload.size() > m_Transport.MaxMessageBytes())
+        {
+            CB_ERROR("Refusing a joiner: the welcome carries " + std::to_string(m_EditLog.size())
+                + " changed cells in " + std::to_string(payload.size()) + " bytes, and the transport carries at most "
+                + std::to_string(m_Transport.MaxMessageBytes()));
+
+            m_Transport.Disconnect(peer);
+
+            //`client` dangles from here on, as in the version refusal above.
+            HandleDisconnected(peer);
+            return;
+        }
+
+        m_Transport.Send(peer, payload, Channel::Reliable);
         return;
     }
 
