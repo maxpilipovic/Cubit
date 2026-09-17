@@ -85,6 +85,7 @@ namespace
 int main(int argc, char** argv)
 {
     CrashHandler::Install("Server");
+    Logger::OpenFile("Server");
 
     std::string mapPath = DefaultMap;
     std::uint16_t port = DefaultPort;

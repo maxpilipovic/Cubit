@@ -3,6 +3,7 @@
 #include "CrashProbe.h"
 
 #include "Cubit/CrashHandler.h"
+#include "Cubit/Logger.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -49,6 +50,7 @@ int RunCrashProbe(std::string_view kind, int argc, char** argv)
     }
 
     CrashHandler::Install("probe", directory);
+    Logger::OpenFile("probe", directory);
 
     if (kind == "exception")
         ThrowFromProbe();
@@ -69,6 +71,9 @@ namespace
         int ExitCode = 0;
         std::string Log;
         std::vector<std::filesystem::path> Dumps;
+
+        //What the child wrote to its log file, which sits beside the dumps.
+        std::string FileLog;
     };
 
     //Runs this executable as a child that crashes the way `kind` names, and
@@ -106,6 +111,14 @@ namespace
         {
             for (const auto& entry : std::filesystem::directory_iterator(dumpDirectory))
             {
+                if (entry.path().extension() == ".log")
+                {
+                    std::ifstream file(entry.path());
+                    std::stringstream fileText;
+                    fileText << file.rdbuf();
+                    run.FileLog += fileText.str();
+                }
+
                 if (entry.path().extension() == ".dmp" && entry.file_size() > 0)
                     run.Dumps.push_back(entry.path());
             }
@@ -136,6 +149,9 @@ TEST_CASE("An exception nobody catches is logged with its type and message, and 
     CHECK(Contains(run.Log, "ThrowFromProbe"));
 
     CHECK(Contains(run.Log, "Wrote crash dump"));
+
+    //The crash reaches the log file too, not only a console that may be gone.
+    CHECK(Contains(run.FileLog, "[CORE] [Critical] Terminating: uncaught exception class std::runtime_error"));
     CHECK(run.Dumps.size() == 1);
 }
 
@@ -162,5 +178,6 @@ TEST_CASE("A native crash is logged with where it happened and a stack, and leav
     CHECK(Contains(run.Log, "WriteThroughNullFromProbe"));
     CHECK(Contains(run.Log, "CrashHandlerTests.cpp:"));
     CHECK(Contains(run.Log, "Wrote crash dump"));
+    CHECK(Contains(run.FileLog, "[CORE] [Critical] Crashed: access violation writing 0x0"));
     CHECK(run.Dumps.size() == 1);
 }

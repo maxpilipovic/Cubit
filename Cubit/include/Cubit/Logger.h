@@ -2,6 +2,7 @@
 
 #include "Cubit/Core.h"
 
+#include <string>
 #include <string_view>
 
 //Client/game logging macros.
@@ -23,6 +24,21 @@ public:
 
 	//Shuts down the client logging channel.
 	static void Shutdown();
+
+	//Copies every line, from both channels, to
+	//`<directory>/<program>-<yyyymmdd-hhmmss>-<pid>.log` from here on, creating
+	//the directory if needed. Lines already written are not copied. False, and a
+	//warning on the console, if the file cannot be created.
+	//
+	//Every line carries a wall-clock time either way; the file is what survives
+	//a closed console window.
+	static bool OpenFile(const std::string& program, const std::string& directory = "logs");
+
+	//Stops copying to the file and closes it.
+	static void CloseFile();
+
+	//The open log file's path, or empty.
+	static std::string FilePath();
 
 	//Writes a trace-level client message.
 	static void Trace(std::string_view message);

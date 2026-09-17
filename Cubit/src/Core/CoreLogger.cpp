@@ -2,42 +2,28 @@
 
 #include "Core/CoreLogger.h"
 
+#include "Core/LogSink.h"
+
 void CoreLogger::Init()
 {
-	std::cout << "[CORE] Logger initialized" << std::endl;
+	Log("CORE", LogLevel::Info, "Logger initialized");
 }
 
 void CoreLogger::Shutdown()
 {
-	std::cout << "[CORE] Logger shutdown" << std::endl;
+	Log("CORE", LogLevel::Info, "Logger shutdown");
 }
 
 void CoreLogger::Log(std::string_view channel, LogLevel level, std::string_view message)
 {
-	std::cout << '[' << channel << "] ";
-
 	switch (level)
 	{
-	case LogLevel::Trace:
-		std::cout << "[Trace] ";
-		break;
-	case LogLevel::Info:
-		std::cout << "[Info] ";
-		break;
-	case LogLevel::Warn:
-		std::cout << "[Warn] ";
-		break;
-	case LogLevel::Error:
-		std::cout << "[Error] ";
-		break;
-	case LogLevel::Critical:
-		std::cout << "[Critical] ";
-		break;
+	case LogLevel::Trace:    LogSink::Write(channel, "Trace", message); break;
+	case LogLevel::Info:     LogSink::Write(channel, "Info", message); break;
+	case LogLevel::Warn:     LogSink::Write(channel, "Warn", message); break;
+	case LogLevel::Error:    LogSink::Write(channel, "Error", message); break;
+	case LogLevel::Critical: LogSink::Write(channel, "Critical", message); break;
 	}
-
-	//Flush every message. std::cout is fully buffered when redirected to a file
-	//or pipe, so an unflushed crash loses exactly the output needed to diagnose it.
-	std::cout << message << std::endl;
 }
 
 void CoreLogger::Trace(std::string_view message)

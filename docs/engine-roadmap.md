@@ -74,7 +74,22 @@ them. Every item was checked in the code unless it says otherwise. References ar
   window land in the game as edits. **Done when:** Escape releases the cursor, a click
   recaptures it, losing focus releases it, and a click that recaptures does not also edit
   or fire.
-- [ ] **A4. Log lines have no timestamps and never reach a file.** `Logger.cpp:17–40`
+- [x] **A4. Log lines have no timestamps and never reach a file.** **Fixed 2026-09-16.**
+  `Logger` and `CoreLogger` now write through one internal `LogSink`, so both channels share
+  a clock, a lock and a file, and interleave in the order things happened. Every line
+  reads `HH:MM:SS.mmm [CHANNEL] [Level] message`. The time is wall-clock local time, not
+  time since start, because lining a client's log up against the server's is what it is
+  for, and two processes share only the wall clock. `Logger::OpenFile(program)` copies
+  every later line to `logs/<program>-<yyyymmdd-hhmmss>-<pid>.log`, flushed per line;
+  Sandbox and Server call it at the top of `main`, and MapGen, an offline tool that prints
+  with `std::cout`, does not. A file that cannot be created is a console warning, not a
+  failure. The crash handler's lines reach the file too, which the crash-probe tests check.
+  **Tests:** the timestamp is checked against the clock (within 2 s), not just for its
+  shape; a file gets lines written while open and none before or after; an uncreatable
+  file leaves the console working. Each went red under a mutation (no timestamp, no file
+  write, no directory creation). **Not done:** server lines still say `[CLIENT]`, because
+  `CB_INFO` is the client channel (recorded in the Stage 2 ledger); log files are never
+  deleted. The original entry follows. `Logger.cpp:17–40`
   writes channel, level and message to `std::cout` only. The 2026-09-14 loss investigation
   had to timestamp lines from the outside. **Done when:** every line carries a time, and a
   file sink exists.

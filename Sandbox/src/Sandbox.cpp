@@ -1044,6 +1044,7 @@ public:
 int main(int argc, char** argv)
 {
     CrashHandler::Install("Sandbox");
+    Logger::OpenFile("Sandbox");
 
     SandboxOptions options;
 
