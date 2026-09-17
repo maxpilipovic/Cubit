@@ -1,6 +1,6 @@
 #include <doctest.h>
 
-#include "CursorCapture.h"
+#include "Cubit/CursorCapture.h"
 
 TEST_CASE("The game starts with the cursor")
 {

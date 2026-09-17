@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Cubit/Cubit.h"
+#include "Cubit/Renderer/Texture2D.h"
 
 #include <cstdint>
 #include <memory>

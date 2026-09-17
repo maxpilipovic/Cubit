@@ -265,6 +265,17 @@ git push origin master
 
 ### Task 2: Debug text and cursor capture into the engine
 
+**Done 2026-09-17, with two deviations.** Step 1's new label test was redundant:
+`DebugFontTests` already checks every HUD label against the font, `HEALTH` included, so
+there was nothing to add and nothing that could fail. And Step 4 planned to move the text
+loop into a free function, which cannot work — drawing a glyph needs the pixel-space camera,
+the unit quad, the shader and the font atlas that `HudLayer` owned. So the whole of that
+plumbing moved instead, as `ScreenOverlay` (`Begin`, `End`, `DrawText`, `DrawQuad`,
+`DrawCrosshair`, `FillScreen`, `Resize`, `LineHeight`, `TopLine`, `FormatOneDecimal`).
+`HudLayer` is now 210 lines of labels over the engine's drawing, which is the split Task 3
+and Task 5 need. Verified by screenshot rather than by test, since it is all GL: the readout,
+crosshair and block outline all draw as before.
+
 **Files:**
 - Create: `Cubit/include/Cubit/Renderer/DebugFont.h` (moved from `Sandbox/src/DebugFont.h`),
   `Cubit/include/Cubit/Renderer/DebugText.h`, `Cubit/src/Renderer/DebugText.cpp`
@@ -283,7 +294,7 @@ git push origin master
   which draws with `Renderer` quads and requires a scene to be open;
   `CursorCapture` (unchanged API, new header path).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `Tests/src/DebugFontTests.cpp`:
 
@@ -306,13 +317,13 @@ TEST_CASE("The font covers every label both apps draw")
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: the Debug build.
 Expected: FAIL — `HEALTH` is not among today's HUD labels, so this is the first test that
 asks for it, and any letter the font lacks shows up here.
 
-- [ ] **Step 3: Move the font and the cursor rules**
+- [x] **Step 3: Move the font and the cursor rules**
 
 `git mv Sandbox/src/DebugFont.h Cubit/include/Cubit/Renderer/DebugFont.h` and
 `git mv Sandbox/src/CursorCapture.h Cubit/include/Cubit/CursorCapture.h`. Fix the include in
@@ -320,7 +331,7 @@ asks for it, and any letter the font lacks shows up here.
 `Cubit/...` paths. Add both to `Cubit/include/Cubit/Cubit.h`. Remove `"Sandbox/src"` from the
 `Tests` project's `includedirs` in `premake5.lua:414-423`, with its comment.
 
-- [ ] **Step 4: Lift the text drawing out of the HUD**
+- [x] **Step 4: Lift the text drawing out of the HUD**
 
 `Sandbox/src/HudLayer.h` draws strings by walking `DebugFont` and emitting quads. Move that
 loop verbatim into `DrawDebugText` in `Cubit/src/Renderer/DebugText.cpp`, taking the text,
@@ -328,12 +339,12 @@ pixel position, scale and colour, and have `HudLayer::DrawText` call it. Documen
 `DebugText.h` that a scene must already be open, because the function draws quads and does
 not manage the camera.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: the Debug build, then Release.
 Expected: green, including the new label case.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A

@@ -417,9 +417,6 @@ project "Tests"
         "vendor/GLM",
         "vendor/doctest/doctest",
 
-        -- For header-only Sandbox code worth testing on its own: DebugFont,
-        -- whose glyph table and Order string fail silently when they drift.
-        "Sandbox/src"
     }
 
     links

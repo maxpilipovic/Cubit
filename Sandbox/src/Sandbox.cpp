@@ -8,7 +8,6 @@
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
-#include "CursorCapture.h"
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>

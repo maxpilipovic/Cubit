@@ -1,6 +1,6 @@
 #include <doctest.h>
 
-#include "DebugFont.h"
+#include "Cubit/Renderer/DebugFont.h"
 
 #include <cstdint>
 #include <set>
