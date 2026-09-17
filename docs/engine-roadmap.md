@@ -71,7 +71,23 @@ them. Every item was checked in the code unless it says otherwise. References ar
   next" lists shipped work (multi-model stitching) and puts networking in the future. This
   page's "What Cubit is today" below still says "single-player" and "two-thirds of the way".
   **Done when:** both describe the engine as it is.
-- [ ] **A7. An input dropped for a full queue never answers its edit.** _Found by reading
+- [x] **A7. An input dropped for a full queue never answers its edit.** **Confirmed and
+  fixed 2026-09-16.** Every way the server discards an input now refuses the edit on it,
+  and two client-level tests show the client ends with the server's block: one overflows
+  the queue, the other holds back all three bundles carrying the edit's tick until the
+  server has moved past it. The second was run before the fix and showed the desync the
+  entry below predicted: the server kept the block, the client showed air, and the
+  prediction never resolved. The server now keeps `Client::SeenInputs`, a 64-bit mask of
+  which ticks at or below `LastInputTick` it has had. `PassInput` moves `LastInputTick`
+  for all three paths (taken, skipped, dropped), shifting in zeros for the ticks it jumps
+  over. The queue is sorted, so any jumped-over tick really was never received. A late
+  input on a clear bit has its edit refused and the bit set, so its two repeat bundles stay
+  silent. Past the 64-tick window (over a second) the server cannot tell, and refuses
+  anyway: a refusal carries the server's current block, which is true whether or not the
+  edit was answered before, and nothing on the client reads `Accepted`. Two guard tests,
+  one for an applied input and one for a skipped input repeated by a later bundle, pin that
+  a repeat is not answered twice. Each went red under a mutation of the design it guards.
+  The original entry follows. _Found by reading
   while working on A1, 2026-09-14 — not yet run._ When a client's queue is full,
   `MatchServer` discards the incoming input (`MatchServer.cpp:235–246`) and sends nothing
   about any edit it carried. The client keeps a predicted edit until that edit's

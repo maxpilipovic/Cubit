@@ -19,6 +19,11 @@ namespace
     //buffered. Overflow is dropped and logged: absorbing it silently would
     //show up as unexplained corrections much later.
     constexpr std::size_t MaxQueuedInputs = 8;
+
+    //How far behind its newest input the server remembers which ticks a client
+    //has sent it - the width of Client::SeenInputs. 64 ticks is over a second;
+    //an input arriving later than that has its edit refused without checking.
+    constexpr std::uint64_t RememberedInputTicks = 64;
 }
 
 MatchServer::MatchServer(World world, std::string mapName, std::uint64_t mapHash,
@@ -82,7 +87,7 @@ void MatchServer::Step(double seconds)
         if (client.Queue.size() < MaxQueuedInputs)
             client.QueueOverflowWarned = false;
 
-        client.LastInputTick = queued.Tick;
+        PassInput(client, queued.Tick);
         client.Yaw = queued.Input.Yaw;
         client.Pitch = queued.Input.Pitch;
 
@@ -147,7 +152,7 @@ void MatchServer::SkipTicks(int ticks)
             client.Queue.pop_front();
 
             //Past this tick now, so a bundle that repeats it is not queued again.
-            client.LastInputTick = skipped.Tick;
+            PassInput(client, skipped.Tick);
 
             if (skipped.Edit.has_value())
                 RefuseDiscardedEdit(client.Peer, skipped.Tick, *skipped.Edit);
@@ -174,6 +179,19 @@ void MatchServer::RefuseDiscardedEdit(PeerId peer, std::uint64_t clientTick, con
     result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
 
     m_Transport.Send(peer, Encode(result), Channel::Reliable);
+}
+
+void MatchServer::PassInput(Client& client, std::uint64_t tick)
+{
+    //Only ever forward: the queue admits nothing at or below LastInputTick.
+    const std::uint64_t advance = tick - client.LastInputTick;
+
+    //Shifting in zeros marks every tick jumped over as never received, which
+    //is right: the queue is sorted, so any of them that had arrived would have
+    //been taken before this one.
+    client.SeenInputs = advance >= RememberedInputTicks ? 0 : client.SeenInputs << advance;
+    client.SeenInputs |= 1;
+    client.LastInputTick = tick;
 }
 
 void MatchServer::HandleConnected(PeerId peer)
@@ -266,11 +284,33 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         {
             const std::uint64_t tick = input.FirstTick + i;
 
-            //Already applied. Bundles repeat, so this is the common case
-            //rather than an anomaly, and dropping it here is what makes the
-            //redundancy free instead of a rewind.
+            //Behind the server. Never stepped, whichever case it is: applying
+            //it now would rewind the player.
             if (tick <= client->LastInputTick)
+            {
+                const std::uint64_t age = client->LastInputTick - tick;
+                const std::uint64_t bit = age < RememberedInputTicks ? std::uint64_t{ 1 } << age : 0;
+
+                //Already had. Bundles repeat, so this is the common case rather
+                //than an anomaly, and dropping it here is what makes the
+                //redundancy free instead of a rewind.
+                if ((client->SeenInputs & bit) != 0)
+                    continue;
+
+                //Never had: reordering held back every bundle carrying it until
+                //the server had taken a newer tick. Its edit has had no answer,
+                //and the client shows it until one comes.
+                //
+                //Past the window the server cannot tell, and refuses anyway. A
+                //refusal carries the server's block, which is true whether or not
+                //this edit was answered before; silence is the desync.
+                client->SeenInputs |= bit;
+
+                if (i < input.Edits.size() && input.Edits[i].has_value())
+                    RefuseDiscardedEdit(client->Peer, tick, *input.Edits[i]);
+
                 continue;
+            }
 
             const bool waiting = std::any_of(client->Queue.begin(), client->Queue.end(),
                 [tick](const Client::QueuedInput& queued) { return queued.Tick == tick; });
@@ -316,7 +356,7 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
 
                 //Past this tick now, as if taken, so a bundle that repeats it is
                 //not queued again.
-                client->LastInputTick = dropped.Tick;
+                PassInput(*client, dropped.Tick);
 
                 if (dropped.Edit.has_value())
                     RefuseDiscardedEdit(client->Peer, dropped.Tick, *dropped.Edit);

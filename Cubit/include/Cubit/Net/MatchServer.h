@@ -127,6 +127,15 @@ private:
         //server has not stepped yet.
         std::uint64_t LastInputTick = 0;
 
+        //Which ticks at or below LastInputTick this server has had - taken,
+        //skipped or dropped. Bit k is tick LastInputTick - k.
+        //
+        //What tells a repeat apart from an input that arrives after the server
+        //moved past its tick. Both are behind LastInputTick, but only the repeat
+        //has been answered: the other was never received, so an edit on it is
+        //still owed a refusal.
+        std::uint64_t SeenInputs = 0;
+
         //Oldest first. Inputs arrive bundled and out of order on an unordered
         //channel; a step takes the front.
         //
@@ -183,9 +192,15 @@ private:
     void ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
         const BlockEdit& edit);
 
-    //Answers an edit whose input the server threw away - skipped after a stall
-    //or dropped from a full queue - with a refusal carrying the server's block.
+    //Answers an edit whose input the server threw away - skipped after a stall,
+    //dropped from a full queue, or arrived after the server moved past its tick
+    //- with a refusal carrying the server's block.
     void RefuseDiscardedEdit(PeerId peer, std::uint64_t clientTick, const BlockEdit& edit);
+
+    //Moves a client's LastInputTick forward to an input just taken off the
+    //front of its queue, recording that input as had and every tick it jumped
+    //over as never received.
+    static void PassInput(Client& client, std::uint64_t tick);
 
     //Brings the log up to date with an edit just applied. `previous` is the
     //block the cell held immediately before it.

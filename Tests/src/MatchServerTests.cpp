@@ -1656,6 +1656,157 @@ TEST_CASE("An edit on an input dropped from a full queue is refused, not ignored
     CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
 }
 
+TEST_CASE("An edit on an input that arrives after the server has moved past its tick is refused, not ignored")
+{
+    //The third way the server discards an input, and the last of A7. Reordering
+    //holds back every bundle carrying tick 2 until tick 3 has been taken, so
+    //tick 2 arrives already in the past. It is not a repeat - the server never
+    //had it - so the edit on it has had no answer.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+    REQUIRE(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    SendInput(client, 1, CharacterInput{});
+    SendInput(client, 3, CharacterInput{});
+    server.Step(FrameClock::FixedStepSeconds);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    const EditTraffic editor = DrainEdits(client);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].ClientTick == 2);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
+
+    //Answered once. The same input rides two more bundles, and those really
+    //are repeats now.
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(DrainEdits(client).Results.empty());
+}
+
+TEST_CASE("An edit on an input already applied is not answered again when a bundle repeats it")
+{
+    //The other half of telling the two apart. Every input rides three bundles,
+    //so a repeat is the common case; answering each copy would send a refusal
+    //for an edit the server accepted.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    const EditTraffic first = DrainEdits(client);
+    REQUIRE(first.Results.size() == 1);
+    REQUIRE(first.Results[0].Accepted);
+
+    SendInput(client, 2, CharacterInput{});
+    server.Step(FrameClock::FixedStepSeconds);
+
+    SendInputWithEdit(client, 1, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(DrainEdits(client).Results.empty());
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
+}
+
+TEST_CASE("An edit on an input skipped after a stall is not refused again when a bundle repeats it")
+{
+    //A skipped input was seen, and answered when it was skipped. Only the ticks
+    //the server passed over without ever receiving count as unanswered.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+
+    InputMessage bundle;
+    bundle.FirstTick = 1;
+    bundle.Inputs.assign(3, CharacterInput{});
+    bundle.Edits = { std::nullopt, std::nullopt, BlockEdit{ cell, BlockId{ 0 } } };
+    client.Send(LoopbackNetwork::ServerPeer, Encode(bundle), Channel::Unreliable);
+
+    server.Step(FrameClock::FixedStepSeconds);
+    server.SkipTicks(2);
+
+    REQUIRE(DrainEdits(client).Results.size() == 1);
+
+    client.Send(LoopbackNetwork::ServerPeer, Encode(bundle), Channel::Unreliable);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(DrainEdits(client).Results.empty());
+}
+
+TEST_CASE("An edit on an input too old for the server to tell apart from a repeat is refused")
+{
+    //The server remembers which ticks it has had for a bounded window. Past it,
+    //an input carrying an edit is answered with a refusal anyway: a refusal
+    //carries the server's block, which is true whether or not the edit was
+    //already answered, and staying silent is the desync this guards against.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(client);
+
+    const glm::ivec3 cell(4, 0, 4);
+
+    SendInput(client, 1, CharacterInput{});
+    server.Step(FrameClock::FixedStepSeconds);
+
+    //Well past any window worth keeping: 200 ticks is more than three seconds.
+    SendInput(client, 201, CharacterInput{});
+    server.Step(FrameClock::FixedStepSeconds);
+
+    SendInputWithEdit(client, 2, CharacterInput{}, BlockEdit{ cell, BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+
+    const EditTraffic editor = DrainEdits(client);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].ClientTick == 2);
+    CHECK_FALSE(editor.Results[0].Accepted);
+    CHECK(editor.Results[0].Edit.Block == BlockId{ 1 });
+}
+
 TEST_CASE("Repeated edits to one cell leave one log entry holding the latest block")
 {
     //The log is what a late joiner replays, so it only has to say what each

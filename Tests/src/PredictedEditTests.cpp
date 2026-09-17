@@ -12,7 +12,9 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -625,4 +627,147 @@ TEST_CASE("A placement into a player this client has not seen yet is refused and
     CHECK(builder.PendingEditCount() == 0);
     CHECK(ServerBlock(server, spawnCell) == BlockId{ 0 });
     CHECK(ClientBlock(builder, spawnCell) == BlockId{ 0 });
+}
+
+namespace
+{
+    //Holds back every input bundle carrying the first tick that has an edit on
+    //it, until released - reordering at its most unlucky, which on an
+    //unsequenced channel is rare but allowed.
+    class EditTickHoldBack : public Transport
+    {
+    public:
+        explicit EditTickHoldBack(Transport& inner) : m_Inner(inner) {}
+
+        std::size_t HeldCount() const { return m_Held.size(); }
+
+        void Release()
+        {
+            for (const Held& held : m_Held)
+                m_Inner.Send(held.Peer, held.Data, held.Lane);
+
+            m_Held.clear();
+            m_Releasing = true;
+        }
+
+        void Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel) override
+        {
+            MessageId id = MessageId::Hello;
+            InputMessage input;
+            if (!m_Releasing && PeekMessageId(data, id) && id == MessageId::Input && Decode(data, input))
+            {
+                for (std::size_t i = 0; i < input.Edits.size() && !m_Tick.has_value(); ++i)
+                {
+                    if (input.Edits[i].has_value())
+                        m_Tick = input.FirstTick + i;
+                }
+
+                if (m_Tick.has_value() && *m_Tick >= input.FirstTick
+                    && *m_Tick < input.FirstTick + input.Inputs.size())
+                {
+                    m_Held.push_back(Held{ peer, std::vector<std::uint8_t>(data.begin(), data.end()), channel });
+                    return;
+                }
+            }
+
+            m_Inner.Send(peer, data, channel);
+        }
+
+        void Broadcast(std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Broadcast(data, channel);
+        }
+
+        void Disconnect(PeerId peer) override { m_Inner.Disconnect(peer); }
+        bool Poll(NetEvent& out) override { return m_Inner.Poll(out); }
+        void Advance(double seconds) override { m_Inner.Advance(seconds); }
+        double RoundTripTime(PeerId peer) const override { return m_Inner.RoundTripTime(peer); }
+
+    private:
+        struct Held
+        {
+            PeerId Peer = InvalidPeer;
+            std::vector<std::uint8_t> Data;
+            Channel Lane = Channel::Unreliable;
+        };
+
+        Transport& m_Inner;
+        std::optional<std::uint64_t> m_Tick;
+        std::vector<Held> m_Held;
+        bool m_Releasing = false;
+    };
+}
+
+TEST_CASE("An edit whose every bundle arrives after the server moved past its tick is taken back")
+{
+    //A7's last path, seen from where it matters: the client. The server never
+    //had this input, so it never applied the edit - and the client, which
+    //predicted it, shows it until it hears otherwise.
+    LoopbackNetwork network;
+
+    PeerId peer = InvalidPeer;
+    EditTickHoldBack clientNet(network.AddClient(peer));
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(clientNet, GoodLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    const glm::ivec3 cell(4, 0, 4);
+    client.RequestEdit(BlockEdit{ cell, BlockId{ 0 } });
+
+    //Three bundles carry the tick; the fourth does not, and the server takes the
+    //tick after it. A few more for good measure.
+    for (int i = 0; i < 10; ++i)
+        StepBoth(client, server);
+
+    //Not vacuous: the edit was predicted, and all three of its bundles are held.
+    REQUIRE(clientNet.HeldCount() == InputBundleSize);
+    CHECK(ClientBlock(client, cell) == BlockId{ 0 });
+
+    clientNet.Release();
+    for (int i = 0; i < 30; ++i)
+        StepBoth(client, server);
+
+    CHECK(ServerBlock(server, cell) == BlockId{ 1 });
+    CHECK(client.PendingEditCount() == 0);
+    CHECK(ClientBlock(client, cell) == BlockId{ 1 });
+}
+
+TEST_CASE("An edit on an input dropped from a full queue is taken back on the client")
+{
+    //A7's done-when, the overflow half, seen from the client. The server does
+    //not step while the client makes ten, so ten inputs wait for one step that
+    //keeps eight - and the two oldest, the first carrying the edit, are dropped.
+    LoopbackNetwork network;
+
+    PeerId peer = InvalidPeer;
+    Transport& clientNet = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(clientNet, GoodLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    const glm::ivec3 cell(4, 0, 4);
+    client.RequestEdit(BlockEdit{ cell, BlockId{ 0 } });
+
+    for (int i = 0; i < 10; ++i)
+    {
+        client.SetInput(CharacterInput{});
+        client.Step(FrameClock::FixedStepSeconds);
+    }
+
+    //Not vacuous: the edit was predicted.
+    REQUIRE(client.PendingEditCount() == 1);
+    CHECK(ClientBlock(client, cell) == BlockId{ 0 });
+
+    for (int i = 0; i < 30; ++i)
+        StepBoth(client, server);
+
+    CHECK(ServerBlock(server, cell) == BlockId{ 1 });
+    CHECK(client.PendingEditCount() == 0);
+    CHECK(ClientBlock(client, cell) == BlockId{ 1 });
 }
