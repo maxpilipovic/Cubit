@@ -105,6 +105,15 @@ client appearing on the server.
 
 ### Task 1: Game rules out of the engine
 
+**Done 2026-09-17, with one deviation.** Step 6 planned a `TestRules` in every test file and
+a rules argument at every construction site. There are 105 of those, all in engine tests that
+have nothing to say about tuning, so the rules parameter is **defaulted** on both
+constructors and on `IsEditLegal` instead: engine tests construct as before, and a game
+states its rules explicitly. `TestRules` still went into the five test files that named the
+old constants. The weaker boundary this leaves — a caller can forget to pass rules and
+silently get the placeholders — is worth the 100 untouched call sites, and Task 3's test pins
+that the game passes its own.
+
 **Files:**
 - Create: `Cubit/include/Cubit/MatchRules.h`
 - Modify: `Cubit/include/Cubit/Voxel/EditRules.h` (drop `ReachDistance`, take reach as an
@@ -132,7 +141,7 @@ client appearing on the server.
   `MatchClient(Transport& transport, MapLoader loadMap, const MatchRules& rules)`;
   `const MatchRules& MatchServer::Rules() const`.
 
-- [ ] **Step 1: Write the failing test** — rules reach the behaviour, not just the struct.
+- [x] **Step 1: Write the failing test** — rules reach the behaviour, not just the struct.
   Append to `Tests/src/EditRulesTests.cpp`:
 
 ```cpp
@@ -191,20 +200,20 @@ TEST_CASE("A weaker shot from the rules takes more hits to kill")
 }
 ```
 
-- [ ] **Step 2: Run the tests and watch them fail to compile**
+- [x] **Step 2: Run the tests and watch them fail to compile**
 
 Run: `MSBuild.exe C:\dev\Cubit\Cubit.slnx /p:Configuration=Debug /p:Platform=x64`
 Expected: compile errors — `MatchRules` is undeclared, `IsCellWithinReach` takes two
 arguments, `MatchServer`'s constructor takes five.
 
-- [ ] **Step 3: Add the rules header**
+- [x] **Step 3: Add the rules header**
 
 Create `Cubit/include/Cubit/MatchRules.h` with the struct from the Design section above.
 Comment it: the numbers are placeholders so nothing reads uninitialised memory, and the game
 states its own; the file exists so the engine can be told the rules rather than hold them.
 Include it from `Cubit/include/Cubit/Cubit.h` beside the other top-level headers.
 
-- [ ] **Step 4: Thread reach through the edit rules**
+- [x] **Step 4: Thread reach through the edit rules**
 
 In `EditRules.h`, delete `constexpr float ReachDistance` and add `float reach` as the last
 parameter of `IsCellWithinReach`, and `const MatchRules& rules` as the last parameter of
@@ -212,7 +221,7 @@ parameter of `IsCellWithinReach`, and `const MatchRules& rules` as the last para
 about why one number serves the aim ray, the prediction and the ruling — it is now about one
 *value*, not one constant, so reword that sentence rather than deleting it.
 
-- [ ] **Step 5: Give the server and the client their rules**
+- [x] **Step 5: Give the server and the client their rules**
 
 `MatchServer`: drop the four constants, take `const MatchRules&` as the last constructor
 parameter, store it as `m_Rules`, add `const MatchRules& Rules() const`, and read
@@ -223,7 +232,7 @@ client is admitted.
 
 `MatchClient`: take `const MatchRules&`, store it, and pass it to both `IsEditLegal` calls.
 
-- [ ] **Step 6: Update the callers and the tests**
+- [x] **Step 6: Update the callers and the tests**
 
 `Sandbox.cpp`: one `const MatchRules SandboxRules{};` in its anonymous namespace, used for
 the aim ray's reach, the tracer's range and the `MatchClient` constructor.
@@ -232,19 +241,19 @@ Tests: every `MatchServer`/`MatchClient` construction gains a rules argument. Ad
 `const MatchRules TestRules{};` in each test file's anonymous namespace and pass that, so a
 later change to a rule does not touch fifty call sites.
 
-- [ ] **Step 7: Run the tests in both configurations**
+- [x] **Step 7: Run the tests in both configurations**
 
 Run the Debug build, then
 `MSBuild.exe C:\dev\Cubit\Cubit.slnx /p:Configuration=Release /p:Platform=x64`.
 Expected: both green, with two more cases than before.
 
-- [ ] **Step 8: Prove the new tests can fail**
+- [x] **Step 8: Prove the new tests can fail**
 
 Change `IsCellWithinReach` to ignore its `reach` argument and use `12.0f`; rebuild; expect
 the reach test red. Restore. Change the damage site to a literal `34`; rebuild; expect the
 damage test red. Restore, rebuild, green.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A

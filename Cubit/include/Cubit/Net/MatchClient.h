@@ -2,6 +2,7 @@
 
 #include "Cubit/Core.h"
 #include "Cubit/FrameClock.h"
+#include "Cubit/MatchRules.h"
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/Transport.h"
 #include "Cubit/Voxel/BlockEdit.h"
@@ -97,7 +98,8 @@ public:
     using MapLoader = std::function<std::optional<LoadedMap>(const std::string& mapName)>;
 
     //`transport` must outlive this.
-    MatchClient(Transport& transport, MapLoader loadMap);
+    MatchClient(Transport& transport, MapLoader loadMap,
+        const MatchRules& rules = MatchRules{});
 
     //Records this step's length for replay to use, drains the transport
     //(applying whatever arrived, which includes reconciling against any
@@ -258,6 +260,10 @@ private:
 
     Transport& m_Transport;
     MapLoader m_LoadMap;
+
+    //The numbers this match is played by, which must be the ones the server
+    //holds: reach decides which edits this client predicts.
+    MatchRules m_Rules;
 
     //A placeholder until Welcome arrives with the real map, matching what the
     //Sandbox already does. MatchState needs a World to exist at all.

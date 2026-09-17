@@ -39,6 +39,10 @@ namespace
     //single-player rather than somewhere unrelated.
     const glm::ivec2 SpawnHint{ 240, 300 };
 
+    //The numbers this server's matches are played by. The engine holds none of
+    //them: see MatchRules.
+    const MatchRules ServerRules{};
+
     //Set from a console handler on another thread; read by the loop every tick.
     std::atomic<bool> StopRequested{ false };
 
@@ -178,7 +182,10 @@ int main(int argc, char** argv)
         const std::string mapName =
             mapPath.substr(mapPath.find_last_of("/\\") + 1);
 
-        MatchServer server(std::move(world), mapName, mapHash, *spawn, transport);
+        //The Server plays by the same rules its clients do. They come from one
+        //build, which is what keeps reach agreeing between the two.
+        MatchServer server(std::move(world), mapName, mapHash, *spawn, transport,
+            ServerRules);
 
         CB_INFO("Listening on port " + std::to_string(port));
 

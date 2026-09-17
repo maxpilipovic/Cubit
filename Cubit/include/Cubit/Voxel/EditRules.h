@@ -1,19 +1,11 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/MatchRules.h"
 #include "Cubit/Voxel/BlockEdit.h"
 #include "Cubit/Voxel/MatchState.h"
 
 #include <glm/glm.hpp>
-
-//How far a player can reach to edit a block, in blocks, measured from the eye
-//to the nearest point of the cell.
-//
-//One number for the Sandbox's aim ray, the client's prediction and the server's
-//ruling. Copies would drift, and a client whose reach is a hair longer than the
-//server's predicts edits the server refuses - a correction on every click at
-//the edge of reach.
-constexpr float ReachDistance = 12.0f;
 
 //Whether the overlap rule looks at players other than the editor.
 //
@@ -26,8 +18,9 @@ enum class OtherPlayers
     Ignore
 };
 
-//True when the nearest point of the unit cell is within ReachDistance of the eye.
-CB_API bool IsCellWithinReach(const glm::vec3& eye, const glm::ivec3& cell);
+//True when the nearest point of the unit cell is within `reach` of the eye.
+//Pass `MatchRules::ReachDistance`; the caller holds the rules, not this.
+CB_API bool IsCellWithinReach(const glm::vec3& eye, const glm::ivec3& cell, float reach);
 
 //True when the box and the unit cell share volume. Touching is not overlapping,
 //which is what lets a player place the cell their feet rest on top of.
@@ -40,5 +33,9 @@ CB_API bool BoxOverlapsCell(const glm::vec3& centre, const glm::vec3& halfExtent
 //predicts one - identical code, so identical answers for identical state. The
 //match passed in must be in the state it has at the start of the step that
 //carries the edit.
+//
+//`rules` is where reach comes from, and both ends must pass the same one or a
+//client predicts edits the server refuses. It defaults so the engine's own tests
+//can ask about state rather than tuning; a game always passes its own.
 CB_API bool IsEditLegal(const MatchState& match, PlayerId editor, const BlockEdit& edit,
-    OtherPlayers others);
+    OtherPlayers others, const MatchRules& rules = MatchRules{});

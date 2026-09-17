@@ -19,6 +19,11 @@
 
 namespace
 {
+    //The engine's own placeholder rules. Tests ask about mechanisms, not about
+    //a game's tuning, so they all read one instance rather than repeating
+    //numbers that now live in the game.
+    constexpr MatchRules TestRules{};
+
     constexpr int LatencyTicks = 3;
     constexpr double OneWayLatency = LatencyTicks * FrameClock::FixedStepSeconds;
     constexpr std::uint64_t MapHash = 0xFEEDFACEull;
@@ -1006,7 +1011,7 @@ TEST_CASE("A client's own health follows what its snapshots report")
     REQUIRE(client.Connected());
     REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
 
-    CHECK(client.LocalHealth() == StartingHealth);
+    CHECK(client.LocalHealth() == TestRules.StartingHealth);
 
     //Newer than anything the server has sent, including the snapshot from its
     //last Step that this client has not drained yet - so this one is applied
@@ -1159,7 +1164,7 @@ namespace
         mine.Player = local;
         mine.Position = client.Match().Player(local).Position();
         mine.Grounded = true;
-        mine.Health = StartingHealth;
+        mine.Health = TestRules.StartingHealth;
         mine.LastInputTick = ack;
         mine.SpareInputs = spare;
 

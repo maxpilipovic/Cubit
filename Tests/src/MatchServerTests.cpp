@@ -15,6 +15,11 @@
 
 namespace
 {
+    //The engine's own placeholder rules. Tests ask about mechanisms, not about
+    //a game's tuning, so they all read one instance rather than repeating
+    //numbers that now live in the game.
+    constexpr MatchRules TestRules{};
+
     World FlatWorld()
     {
         World world(2, 2, 2);
@@ -1010,7 +1015,7 @@ TEST_CASE("A shot claiming an ancient instant is clamped into the window")
     const std::optional<ShotResolvedMessage> honest = LastShotResolved(shooter, honestCount);
     REQUIRE(honest.has_value());
 
-    for (int tick = 0; tick < TicksBetweenShots; ++tick)
+    for (int tick = 0; tick < TestRules.TicksBetweenShots; ++tick)
         server.Step(FrameClock::FixedStepSeconds);
 
     //A claim from before the match had any history at all.
@@ -1069,7 +1074,7 @@ TEST_CASE("The fire rate accepts a shot exactly TicksBetweenShots after the last
     //A shot is handled inside Step's poll, before the match advances, so the
     //tick it is charged to is Tick() as it reads just before that Step.
     const std::uint64_t firstTick = server.Match().Tick();
-    const std::uint64_t limit = static_cast<std::uint64_t>(TicksBetweenShots);
+    const std::uint64_t limit = static_cast<std::uint64_t>(TestRules.TicksBetweenShots);
 
     SendFire(shooter, 1, firstTick, 0.0f, 0.0f, 0.0f);
     server.Step(FrameClock::FixedStepSeconds);
@@ -1232,7 +1237,7 @@ TEST_CASE("Three hits kill, and the third respawns the victim")
     //ray beginning inside a box hits it at distance zero. What this case tests
     //is the arithmetic of damage, not the geometry of aiming - the geometry is
     //Task 2's and Task 9's.
-    CHECK(server.HealthOf(targetId) == StartingHealth);
+    CHECK(server.HealthOf(targetId) == TestRules.StartingHealth);
 
     const auto fireOnce = [&]() -> ShotResolvedMessage
     {
@@ -1247,7 +1252,7 @@ TEST_CASE("Three hits kill, and the third respawns the victim")
         REQUIRE(resolved.has_value());
 
         //Wait out the fire rate so the next call is not silently dropped.
-        for (int tick = 0; tick < TicksBetweenShots; ++tick)
+        for (int tick = 0; tick < TestRules.TicksBetweenShots; ++tick)
             server.Step(FrameClock::FixedStepSeconds);
 
         return *resolved;
@@ -1272,7 +1277,7 @@ TEST_CASE("Three hits kill, and the third respawns the victim")
 
     //Alive again, standing where they started. Only x and z are checked: the
     //steps that waited out the fire rate have applied gravity since.
-    CHECK(server.HealthOf(targetId) == StartingHealth);
+    CHECK(server.HealthOf(targetId) == TestRules.StartingHealth);
     CHECK(server.Match().Player(targetId).Position().x == doctest::Approx(Spawn.x));
     CHECK(server.Match().Player(targetId).Position().z == doctest::Approx(Spawn.z));
 }
@@ -1311,7 +1316,7 @@ TEST_CASE("A kill forgets the victim's history")
         SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
         server.Step(FrameClock::FixedStepSeconds);
 
-        for (int tick = 0; tick < TicksBetweenShots; ++tick)
+        for (int tick = 0; tick < TestRules.TicksBetweenShots; ++tick)
             server.Step(FrameClock::FixedStepSeconds);
     }
 
@@ -1351,7 +1356,7 @@ TEST_CASE("Health arrives in the snapshot")
         return 0;
     };
 
-    CHECK(healthInSnapshot(target) == StartingHealth);
+    CHECK(healthInSnapshot(target) == TestRules.StartingHealth);
 
     SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
     server.Step(FrameClock::FixedStepSeconds);
@@ -2421,4 +2426,36 @@ TEST_CASE("Digging the floor brings nothing down")
         BlockEdit{ glm::ivec3(5, 0, 5), BlockId{ 0 } } }) == 2);
 
     CHECK(server.EditLog().size() == 2);
+}
+
+TEST_CASE("A weaker shot from the rules takes more hits to kill")
+{
+    //The server reads damage from the rules it was given, so a game can tune a
+    //weapon without the engine changing.
+    LoopbackNetwork network;
+
+    MatchRules weak;
+    weak.ShotDamage = 10;
+
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server(), weak);
+
+    PeerId shooterPeer = InvalidPeer;
+    Transport& shooter = network.AddClient(shooterPeer);
+    const PlayerId shooterId = Join(server, shooter);
+
+    PeerId targetPeer = InvalidPeer;
+    Transport& target = network.AddClient(targetPeer);
+    const PlayerId targetId = Join(server, target);
+
+    REQUIRE(shooterId != InvalidPlayer);
+    REQUIRE(targetId != InvalidPlayer);
+    CHECK(server.HealthOf(targetId) == weak.StartingHealth);
+
+    //Both stand on the spawn, so the shot is point blank and its aim does not
+    //matter - the same standing this file's damage cases have always used.
+    SendFire(shooter, 1, server.Match().Tick(), 0.0f, 0.0f, 0.0f);
+    server.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(server.HealthOf(targetId) == 90);
+    CHECK(server.Rules().ShotDamage == 10);
 }

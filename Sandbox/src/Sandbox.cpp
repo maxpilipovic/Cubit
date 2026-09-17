@@ -119,6 +119,11 @@ namespace
     //battlefield.vox there would vanish without warning. Promoting a save into
     //Sandbox/assets stays a deliberate copy.
     constexpr const char* SavePath = "assets/maps/saved.vox";
+
+    //The numbers this app plays by. The engine holds none of them: see
+    //MatchRules. The Sandbox states them here rather than reading a game's,
+    //because it is the engine's harness and answers to nobody's balance.
+    const MatchRules SandboxRules{};
 }
 
 class SandboxLayer final : public Layer
@@ -508,7 +513,8 @@ private:
                 //vertex colours.
                 SkyLight::PropagateAll(world);
                 return LoadedMap{ std::move(world), HashMapFile(path) };
-            });
+            },
+            SandboxRules);
     }
 
     //Returns held movement keys in the character's own frame: x strafes, y
@@ -569,7 +575,7 @@ private:
             World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
-            ReachDistance,
+            SandboxRules.ReachDistance,
             true);
 
         if (!hit.Hit)
@@ -645,8 +651,8 @@ private:
         }
 
         // Solid only, like an edit: water does not stop a shot.
-        const VoxelRayHit hit = VoxelRaycast::Cast(World_(), eye, forward, ShotRange, true);
-        const float length = hit.Hit ? hit.Distance : ShotRange;
+        const VoxelRayHit hit = VoxelRaycast::Cast(World_(), eye, forward, SandboxRules.ShotRange, true);
+        const float length = hit.Hit ? hit.Distance : SandboxRules.ShotRange;
 
         // Pitch is clamped short of straight up or down, so forward is never
         // parallel to the world's up and this cross product never vanishes.
@@ -729,7 +735,7 @@ private:
             World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
-            ReachDistance,
+            SandboxRules.ReachDistance,
             true);
 
         if (!hit.Hit)
@@ -852,7 +858,7 @@ private:
             World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
-            ReachDistance,
+            SandboxRules.ReachDistance,
             true);
 
         if (!hit.Hit)

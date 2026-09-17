@@ -18,6 +18,11 @@
 
 namespace
 {
+    //The engine's own placeholder rules. Tests ask about mechanisms, not about
+    //a game's tuning, so they all read one instance rather than repeating
+    //numbers that now live in the game.
+    constexpr MatchRules TestRules{};
+
     constexpr std::uint64_t MapHash = 0xFEEDFACEull;
     const glm::vec3 Spawn{ 8.0f, 2.0f, 8.0f };
 
@@ -505,7 +510,7 @@ TEST_CASE("An edit that a correction puts out of reach stops showing, and the se
     mine.Position = glm::vec3(5.0f, client.Match().Player(client.LocalPlayer()).Position().y, 8.0f);
     mine.Grounded = true;
     mine.LastInputTick = predictedTick - 1;
-    mine.Health = StartingHealth;
+    mine.Health = TestRules.StartingHealth;
 
     SnapshotMessage snapshot;
     snapshot.Tick = server.Match().Tick() + 100;

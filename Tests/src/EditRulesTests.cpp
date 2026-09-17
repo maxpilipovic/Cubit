@@ -9,6 +9,11 @@
 
 namespace
 {
+    //The engine's own placeholder rules. Tests ask about mechanisms, not about
+    //a game's tuning, so they all read one instance rather than repeating
+    //numbers that now live in the game.
+    constexpr MatchRules TestRules{};
+
     World FloorWorld()
     {
         World world(2, 2, 2);
@@ -25,18 +30,18 @@ TEST_CASE("Reach includes a cell whose nearest point is exactly ReachDistance aw
 {
     //Nearest point of cell (12,0,0) to this eye is (12, 0.5, 0.5): exactly 12.
     const glm::vec3 eye(0.0f, 0.5f, 0.5f);
-    CHECK(IsCellWithinReach(eye, glm::ivec3(12, 0, 0)));
+    CHECK(IsCellWithinReach(eye, glm::ivec3(12, 0, 0), TestRules.ReachDistance));
 
     //One cell further is 13 away.
-    CHECK_FALSE(IsCellWithinReach(eye, glm::ivec3(13, 0, 0)));
+    CHECK_FALSE(IsCellWithinReach(eye, glm::ivec3(13, 0, 0), TestRules.ReachDistance));
 }
 
 TEST_CASE("Reach measures to the nearest point of the cell, not its centre")
 {
     //Centre of cell (12,0,0) is 12.5 away; its near face is 12.
     const glm::vec3 eye(0.0f, 0.5f, 0.5f);
-    CHECK(glm::distance(eye, glm::vec3(12.5f, 0.5f, 0.5f)) > ReachDistance);
-    CHECK(IsCellWithinReach(eye, glm::ivec3(12, 0, 0)));
+    CHECK(glm::distance(eye, glm::vec3(12.5f, 0.5f, 0.5f)) > TestRules.ReachDistance);
+    CHECK(IsCellWithinReach(eye, glm::ivec3(12, 0, 0), TestRules.ReachDistance));
 }
 
 TEST_CASE("A box overlapping a cell overlaps, and one only touching it does not")
@@ -87,4 +92,45 @@ TEST_CASE("A placement into another player is checked only when asked to, and br
 
     //The floor under the other player: breaking has no overlap rule.
     CHECK(IsEditLegal(match, editor, BlockEdit{ glm::ivec3(11, 0, 8), BlockId{ 0 } }, OtherPlayers::Check));
+}
+
+TEST_CASE("Reach comes from the rules, not from the engine")
+{
+    //The point of taking reach as a value: a game with different arms gets
+    //different answers out of the same engine.
+    const glm::vec3 eye(0.0f, 0.5f, 0.5f);
+
+    MatchRules shortArms;
+    shortArms.ReachDistance = 4.0f;
+
+    CHECK(IsCellWithinReach(eye, glm::ivec3(3, 0, 0), shortArms.ReachDistance));
+    CHECK_FALSE(IsCellWithinReach(eye, glm::ivec3(5, 0, 0), shortArms.ReachDistance));
+
+    MatchRules longArms;
+    longArms.ReachDistance = 20.0f;
+
+    CHECK(IsCellWithinReach(eye, glm::ivec3(5, 0, 0), longArms.ReachDistance));
+    CHECK(IsCellWithinReach(eye, glm::ivec3(19, 0, 0), longArms.ReachDistance));
+}
+
+TEST_CASE("An edit beyond the rules' reach is illegal, and inside it is legal")
+{
+    MatchState match(FloorWorld());
+    const PlayerId editor = match.AddPlayer(glm::vec3(8.0f, 2.0f, 8.0f));
+
+    MatchRules shortArms;
+    shortArms.ReachDistance = 2.0f;
+
+    //The cell under the player's feet is within two blocks of the eye; one six
+    //blocks away is not.
+    CHECK(IsEditLegal(match, editor, BlockEdit{ glm::ivec3(8, 0, 8), BlockId{ 0 } },
+        OtherPlayers::Check, shortArms));
+    CHECK_FALSE(IsEditLegal(match, editor, BlockEdit{ glm::ivec3(14, 0, 8), BlockId{ 0 } },
+        OtherPlayers::Check, shortArms));
+
+    MatchRules longArms;
+    longArms.ReachDistance = 20.0f;
+
+    CHECK(IsEditLegal(match, editor, BlockEdit{ glm::ivec3(14, 0, 8), BlockId{ 0 } },
+        OtherPlayers::Check, longArms));
 }

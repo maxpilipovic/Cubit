@@ -25,24 +25,6 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Minimum ticks between one client's shots. Ten is six shots a second.
-//
-//It is the weapon's rate of fire and, at the same time, the flood answer for a
-//new reliable client-to-server message: a client that spams Fire has its extras
-//dropped rather than queued.
-constexpr int TicksBetweenShots = 10;
-
-//How far a shot carries, in blocks.
-constexpr float ShotRange = 128.0f;
-
-//Health a player starts and respawns with.
-constexpr std::uint8_t StartingHealth = 100;
-
-//Damage one shot does. Three shots kill, with the third overshooting by two -
-//health is clamped at zero rather than wrapping, which an unsigned type makes
-//worth stating.
-constexpr std::uint8_t ShotDamage = 34;
-
 //The authority. Owns the only MatchState anybody is entitled to believe.
 //
 //Holds no window, no renderer and no GL context, so it runs anywhere a World
@@ -53,9 +35,13 @@ public:
     //`mapName` and `mapHash` are what joining clients are told to load and
     //check against. `spawn` is where every joining player is placed - players
     //do not collide with each other in this stage, so one point is enough.
-    //`transport` must outlive this.
+    //`transport` must outlive this. `rules` are the numbers this match is played
+    //by - damage, health, range, fire rate, reach - which the game states and
+    //the engine only applies. It defaults so the engine's own tests can raise a
+    //server without stating tuning they are not testing.
     MatchServer(World world, std::string mapName, std::uint64_t mapHash,
-        const glm::vec3& spawn, Transport& transport);
+        const glm::vec3& spawn, Transport& transport,
+        const MatchRules& rules = MatchRules{});
 
     //One authoritative tick: service the transport, admit joiners, collect this
     //tick's inputs and edits, apply the edits in player-id order, step the
@@ -119,6 +105,9 @@ public:
 
     //A player's current health, or zero if nobody holds that id.
     std::uint8_t HealthOf(PlayerId player) const;
+
+    //The rules this match is played by.
+    const MatchRules& Rules() const { return m_Rules; }
 
 private:
     //One connected participant. A peer exists from the moment the socket
@@ -208,7 +197,10 @@ private:
         //whole SIMULATED state and health is not simulated by Step - it changes
         //only when a game rule fires. MatchState::PlayerForWrite exists for
         //exactly this kind of caller, and says so in its own comment.
-        std::uint8_t Health = StartingHealth;
+        //
+        //Not defaulted from the rules: a Client is made before the rules are in
+        //reach of this struct, so whoever admits a client sets it.
+        std::uint8_t Health = 0;
     };
 
     void HandleConnected(PeerId peer);
@@ -299,6 +291,9 @@ private:
     std::uint64_t m_MapHash = 0;
     glm::vec3 m_Spawn{ 0.0f };
     Transport& m_Transport;
+
+    //The numbers this match is played by. See MatchRules.
+    MatchRules m_Rules;
 
     std::vector<Client> m_Clients;
     std::vector<BlockEdit> m_EditLog;

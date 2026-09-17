@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-MatchClient::MatchClient(Transport& transport, MapLoader loadMap)
-    : m_Transport(transport), m_LoadMap(std::move(loadMap))
+MatchClient::MatchClient(Transport& transport, MapLoader loadMap, const MatchRules& rules)
+    : m_Transport(transport), m_LoadMap(std::move(loadMap)), m_Rules(rules)
 {
 }
 
@@ -140,7 +140,7 @@ void MatchClient::Step(double seconds)
         const BlockEdit requested = m_EditQueue.front();
         m_EditQueue.pop_front();
 
-        if (IsEditLegal(m_Match, m_LocalPlayer, requested, OtherPlayers::Check))
+        if (IsEditLegal(m_Match, m_LocalPlayer, requested, OtherPlayers::Check, m_Rules))
         {
             World& world = m_Match.GetWorld();
             const glm::ivec3& at = requested.Position;
@@ -592,7 +592,7 @@ void MatchClient::ReplayEdit(std::uint64_t tick, std::vector<glm::ivec3>& change
     //this was predicted; re-checking them against a newer snapshot could flip
     //an edit the server will accept, hide it, and show it again when its
     //result arrives - a flicker the server never caused.
-    if (IsEditLegal(m_Match, m_LocalPlayer, found->Edit, OtherPlayers::Ignore))
+    if (IsEditLegal(m_Match, m_LocalPlayer, found->Edit, OtherPlayers::Ignore, m_Rules))
     {
         m_Match.GetWorld().SetBlockUnmarked(at.x, at.y, at.z, found->Edit.Block);
         return;

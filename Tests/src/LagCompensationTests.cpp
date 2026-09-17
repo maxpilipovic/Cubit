@@ -23,6 +23,11 @@
 
 namespace
 {
+    //The engine's own placeholder rules. Tests ask about mechanisms, not about
+    //a game's tuning, so they all read one instance rather than repeating
+    //numbers that now live in the game.
+    constexpr MatchRules TestRules{};
+
     const glm::vec3 PlayerHalfExtents{ 0.3f, 0.9f, 0.3f };
 
     World EmptyWorld()
@@ -522,7 +527,7 @@ namespace
                     self.Position() + glm::vec3(0.0f, self.Config().EyeOffset, 0.0f);
 
                 const ShotResult result = ResolveShot(
-                    server.Match().GetWorld(), candidates, eye, shot.Direction, ShotRange);
+                    server.Match().GetWorld(), candidates, eye, shot.Direction, TestRules.ShotRange);
 
                 presentPositions.push_back(live.Position());
 

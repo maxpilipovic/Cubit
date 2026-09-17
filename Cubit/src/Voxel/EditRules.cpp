@@ -5,11 +5,11 @@
 #include "Cubit/Voxel/CharacterController.h"
 #include "Cubit/Voxel/World.h"
 
-bool IsCellWithinReach(const glm::vec3& eye, const glm::ivec3& cell)
+bool IsCellWithinReach(const glm::vec3& eye, const glm::ivec3& cell, float reach)
 {
     const glm::vec3 min(cell);
     const glm::vec3 nearest = glm::clamp(eye, min, min + glm::vec3(1.0f));
-    return glm::distance(eye, nearest) <= ReachDistance;
+    return glm::distance(eye, nearest) <= reach;
 }
 
 bool BoxOverlapsCell(const glm::vec3& centre, const glm::vec3& halfExtents,
@@ -28,7 +28,7 @@ bool BoxOverlapsCell(const glm::vec3& centre, const glm::vec3& halfExtents,
 }
 
 bool IsEditLegal(const MatchState& match, PlayerId editor, const BlockEdit& edit,
-    OtherPlayers others)
+    OtherPlayers others, const MatchRules& rules)
 {
     if (!match.HasPlayer(editor))
         return false;
@@ -44,7 +44,7 @@ bool IsEditLegal(const MatchState& match, PlayerId editor, const BlockEdit& edit
     const CharacterController& character = match.Player(editor);
     const glm::vec3 eye = character.Position() + glm::vec3(0.0f, character.Config().EyeOffset, 0.0f);
 
-    if (!IsCellWithinReach(eye, at))
+    if (!IsCellWithinReach(eye, at, rules.ReachDistance))
         return false;
 
     //Breaking never traps anybody.

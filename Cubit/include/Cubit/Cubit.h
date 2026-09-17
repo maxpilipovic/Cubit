@@ -13,6 +13,7 @@
 #include "Cubit/Layer/Layer.h"
 #include "Cubit/Layer/LayerStack.h"
 #include "Cubit/Logger.h"
+#include "Cubit/MatchRules.h"
 #include "Cubit/MouseCodes.h"
 #include "Cubit/Profiler.h"
 #include "Cubit/Renderer/GraphicsContext.h"

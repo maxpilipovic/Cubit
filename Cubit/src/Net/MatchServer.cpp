@@ -27,12 +27,13 @@ namespace
 }
 
 MatchServer::MatchServer(World world, std::string mapName, std::uint64_t mapHash,
-    const glm::vec3& spawn, Transport& transport)
+    const glm::vec3& spawn, Transport& transport, const MatchRules& rules)
     : m_Match(std::move(world)),
       m_MapName(std::move(mapName)),
       m_MapHash(mapHash),
       m_Spawn(spawn),
-      m_Transport(transport)
+      m_Transport(transport),
+      m_Rules(rules)
 {
 }
 
@@ -300,6 +301,7 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
             return;
 
         client->Player = m_Match.AddPlayer(m_Spawn);
+        client->Health = m_Rules.StartingHealth;
 
         WelcomeMessage welcome;
         welcome.You = client->Player;
@@ -605,7 +607,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     const std::uint64_t now = m_Match.Tick();
 
     //The fire rate, which is also the flood guard.
-    if (shooter.HasFired && now - shooter.LastShotTick < static_cast<std::uint64_t>(TicksBetweenShots))
+    if (shooter.HasFired && now - shooter.LastShotTick < static_cast<std::uint64_t>(m_Rules.TicksBetweenShots))
     {
         if (!shooter.FireRateWarned)
         {
@@ -659,7 +661,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     const glm::vec3 direction = AimDirection(fire.Yaw, fire.Pitch);
 
     const ShotResult shot = ResolveShot(
-        m_Match.GetWorld(), candidates, eye, direction, ShotRange);
+        m_Match.GetWorld(), candidates, eye, direction, m_Rules.ShotRange);
 
     ShotResolvedMessage resolved;
     resolved.Shooter = shooter.Player;
@@ -680,9 +682,9 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
             //Clamped rather than allowed to wrap. Health is unsigned, so
             //34 subtracted from 32 is not -2, it is 254 - a dead player at
             //more than full health.
-            victim.Health = victim.Health <= ShotDamage
+            victim.Health = victim.Health <= m_Rules.ShotDamage
                 ? std::uint8_t{ 0 }
-                : static_cast<std::uint8_t>(victim.Health - ShotDamage);
+                : static_cast<std::uint8_t>(victim.Health - m_Rules.ShotDamage);
 
             resolved.VictimHealth = victim.Health;
             resolved.Killed = victim.Health == 0;
@@ -691,7 +693,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
             {
                 m_Match.TeleportPlayer(victim.Player, m_Spawn);
                 m_Match.PlayerForWrite(victim.Player).SetVerticalVelocity(0.0f);
-                victim.Health = StartingHealth;
+                victim.Health = m_Rules.StartingHealth;
 
                 //THE HISTORY GOES TOO. Without this, a shot already in flight
                 //could rewind to before the death, find the victim standing
