@@ -180,8 +180,8 @@ TEST_CASE("A spawn on the shipped 512 battlefield is standable")
     //silently skips looks green while proving nothing.
     std::filesystem::path path;
     for (const char* candidate : {
-            "Sandbox/assets/maps/battlefield512.vox",
-            "../Sandbox/assets/maps/battlefield512.vox" })
+            "game/assets/maps/battlefield512.vox",
+            "../game/assets/maps/battlefield512.vox" })
         if (std::filesystem::exists(candidate))
         {
             path = candidate;

@@ -1,10 +1,5 @@
 #include "Cubit/Cubit.h"
-#include "Cubit/Net/EnetTransport.h"
-#include "Cubit/Net/MapHash.h"
-#include "Cubit/Net/MatchClient.h"
-#include "Cubit/Net/SimulatedTransport.h"
 #include "Cubit/Voxel/SkyLight.h"
-#include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
@@ -20,300 +15,139 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <vector>
 
-//How this Sandbox was launched. Default-constructed means single-player, which
-//must stay byte-for-byte the app it was before networking existed: the
-//project's rendering verification is scripted screenshots and POS/FACES probes
-//run against it, and none of that may start depending on a socket.
-struct SandboxOptions
-{
-    bool Connect = false;
-    std::string Host = "127.0.0.1";
-    std::uint16_t Port = 27015;
-
-    //Round-trip milliseconds. Halved into NetworkSim's one-way latency.
-    double LatencyRtt = 0.0;
-    float Loss = 0.0f;
-};
-
-struct PlayerDiedEvent
-{
-    int Player;
-    int Killer;
-};
-
+//The engine's harness: a map, a free camera, and the voxel systems put through
+//their paces.
+//
+//No player, no shooting and no socket - those are a game's, and Cubit's lives
+//under game/. What is here is what the engine can be judged by on screen:
+//loading a map, meshing and lighting it, digging and building in it, watching
+//unsupported blocks fall, and reading what all of that costs.
 namespace
 {
-    //Centre the 128x48x128 map roughly on the origin for the view.
+    //Centre the map roughly on the origin for the view.
     const glm::vec3 WorldOffset{ -64.0f, -24.0f, -64.0f };
 
     //Near-black, so the outline reads against both lit terrain and sky.
     const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
-
-    //Remote players, as wireframe boxes at their real half extents. Not a
-    //character model: modelling is gameplay, and a model chosen now would be a
-    //guess. Warm, so it separates from the near-black edit outline.
-    const glm::vec4 RemotePlayerColor{ 0.9f, 0.3f, 0.2f, 1.0f };
-
-    //The local tracer, drawn the instant the fire button goes down.
-    const glm::vec4 TracerColor{ 1.0f, 0.9f, 0.4f, 1.0f };
-
-    //The server's ruling, drawn where the shot stopped: red where it named a
-    //victim, grey where it did not.
-    const glm::vec4 ImpactHitColor{ 1.0f, 0.15f, 0.15f, 1.0f };
-    const glm::vec4 ImpactMissColor{ 0.6f, 0.6f, 0.6f, 1.0f };
-    constexpr float ImpactHalfSize = 0.1f;
-
-    //How long a tracer and a ruling stay on screen, in simulation ticks rather
-    //than frames. Debug renders at 144 fps and Release faster, so "a few
-    //frames" would be a different - and nearly invisible - length on each.
-    constexpr std::uint64_t TracerTicks = 12;
-    constexpr std::uint64_t ShotMarkerTicks = 45;
-
-    //Where the tracer is drawn FROM, relative to the eye, in blocks. A line
-    //from the eye along the view direction projects onto a single point under
-    //the crosshair, so the player who fired it could never see it. Purely
-    //visual: the shot itself leaves from the eye, on both ends of the wire.
-    constexpr float TracerMuzzleRight = 0.25f;
-    constexpr float TracerMuzzleDown = 0.2f;
-
-    //Roughly where to start. Only a column: the height, and whether this exact
-    //column is usable at all, are resolved against the loaded map. A hint over
-    //a hill or the river moves to the nearest spot that can hold the player
-    //rather than burying the camera in terrain — which used to render as a
-    //black screen and read as a rendering bug.
-    const glm::ivec2 SpawnHintXZ{ 240, 300 };
 
     //Underwater haze. Roughly half strength at the 12-block reach distance and
     //83% at 30, which reads as murk without hiding what you are aiming at.
     const glm::vec3 FogColor{ 0.10f, 0.30f, 0.55f };
     constexpr float FogDensity = 0.06f;
 
-    //Below the map floor: a fallen player is returned to spawn.
-    constexpr float FallResetHeight = -8.0f;
+    //The map the harness loads, resolved against the working directory - the
+    //executable's own, where the build puts a copy of the game's assets.
+    constexpr const char* MapPath = "assets/maps/battlefield512.vox";
+
+    //Where F5 writes the edited world. Deliberately not the map that was
+    //loaded: the assets directory beside the exe is a build artifact that the
+    //next build overwrites, so a save written over battlefield512.vox there
+    //would vanish without warning. Promoting a save into game/assets stays a
+    //deliberate copy.
+    constexpr const char* SavePath = "assets/maps/saved.vox";
+
+    //Where the camera starts, over the same column the game spawns on, so a
+    //screenshot of the harness frames the same ground.
+    const glm::vec3 CameraStart{ 240.5f, 26.9f, 300.5f };
 
     //Palette indices selectable with the number keys, in order. Water (7) is
     //deliberately absent: it cannot be broken, so being able to place it would
-    //hand the player a block they can create and never remove. The list is
-    //indexed off KeyCode::D1, not off the palette id, so removing water shifts
-    //everything after it back one key: 7 now selects Wood and 8 selects
-    //nothing. That is intentional, not an off-by-one to "fix".
+    //hand the user a block they can create and never remove.
     constexpr BlockId PlaceableBlocks[] = { 1, 2, 3, 4, 5, 6, 8 };
 
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
 
-    //The map the sandbox starts on, resolved against the working directory like
-    //SavePath below.
-    constexpr const char* MapPath = "assets/maps/battlefield512.vox";
+    //How far the harness reaches to edit a block. The engine holds no such
+    //number any more - see MatchRules - and the harness answers to nobody's
+    //balance, so it takes the placeholder.
+    const MatchRules HarnessRules{};
 
-    //Where F5 writes the edited world, resolved against the current working
-    //directory (the project launches from the target directory, so in practice
-    //that's beside the executable). Deliberately not the map that was loaded:
-    //the assets directory beside the exe is a build
-    //artifact that the next Sandbox build overwrites, so a save written over
-    //battlefield.vox there would vanish without warning. Promoting a save into
-    //Sandbox/assets stays a deliberate copy.
-    constexpr const char* SavePath = "assets/maps/saved.vox";
+    //The debug blast's radius: 123 cells, about what a grenade would take.
+    constexpr int BlastRadius = 3;
 
-    //The numbers this app plays by. The engine holds none of them: see
-    //MatchRules. The Sandbox states them here rather than reading a game's,
-    //because it is the engine's harness and answers to nobody's balance.
-    const MatchRules SandboxRules{};
+    //Operations the undo stack keeps. Capped so a long session cannot creep.
+    constexpr std::size_t MaxUndoDepth = 256;
 }
 
 class SandboxLayer final : public Layer
 {
 public:
-    //Subscribes the Sandbox layer to typed gameplay notifications.
-    SandboxLayer(EventBus& eventBus, std::shared_ptr<HudState> hudState,
-        const SandboxOptions& options)
+    explicit SandboxLayer(std::shared_ptr<HudState> hudState)
         : m_HudState(std::move(hudState)),
-          m_Options(options),
           m_CameraController(16.0f / 9.0f)
     {
         Input::SetCursorCaptured(m_Cursor.Captured());
 
-        //Held as a member: the callback captures `this`, so the subscription must
-        //end when this layer does.
-        m_DeathSubscription = eventBus.Subscribe<PlayerDiedEvent>(
-            [this](const PlayerDiedEvent& event)
-            {
-                OnPlayerDied(event);
-            });
-
-        //The world starts with every chunk dirty, so the first render meshes it.
-        //A sandbox that cannot load its map has nothing to do, so unlike F9 this
-        //does not catch — the failure propagates out of the constructor.
+        //A harness that cannot load its map has nothing to do, so unlike F9
+        //this does not catch - the failure propagates out of the constructor.
         //Load is the phase worth a capture: it is one-shot, it is the largest
-        //remaining cost in the engine, and it is what docs/performance.md P8
+        //remaining cost in the engine, and it is what docs/performance.md
         //tabulates. Written beside the executable, like the assets it loads.
         //
-        //Guarded on CB_DIST even though the macros already compile out under it:
-        //BeginSession/EndSession themselves are not macros, so left unguarded
-        //they would still open a session, record nothing, and write an empty
-        //profile-load.json beside a shipped executable on every launch.
+        //Guarded on CB_DIST even though the macros already compile out under
+        //it: BeginSession/EndSession themselves are not macros, so left
+        //unguarded they would still open a session, record nothing, and write
+        //an empty profile-load.json beside a shipped executable every launch.
 #ifndef CB_DIST
         Profiler::BeginSession("load", "profile-load.json");
 #endif
-        // Connected, the map arrives by name in Welcome and MatchClient's
-        // loader builds it. Loading here as well would pay the whole 23.8 MB
-        // load twice and leave a second world nothing ever reads. A connected
-        // launch therefore records a much shorter load, which is honest.
-        if (!m_Options.Connect)
-        {
-            LoadWorld(MapPath);
-        }
+        LoadWorld(MapPath);
 #ifndef CB_DIST
         Profiler::EndSession();
 #endif
 
-        if (m_Options.Connect)
-        {
-            Connect();
-        }
-        else
-        {
-            // LoadWorld resolves the spawn but deliberately does not teleport
-            // to it: F9 reloads mid-session and should leave the player where
-            // they were working. Starting fresh is the one time it should.
-            m_LocalPlayer = m_Match.AddPlayer(m_Spawn);
-
-            // Connected, both of these wait: Player_() throws until the server
-            // has said who we are and put us in a snapshot, so the first
-            // OnRender that has a player does them instead - the same two
-            // calls, through the same helper, not just the position half. The world
-            // scene is NOT part of that: its shader is built with the scene
-            // either way, because OnRender needs it before it needs a player.
-            AimAtMapCentre();
-            m_Aimed = true;
-
-            UpdateCameraPosition(1.0f);
-        }
-
+        m_CameraController.SetPosition(CameraStart + WorldOffset);
+        AimAtMapCentre();
     }
 
-    //Advances the player through the chunk by one fixed step under gravity.
-    //The camera is deliberately NOT moved here — rendering interpolates the
-    //eye between steps in OnRender.
-    void OnFixedUpdate(Timestep timestep) override
+    //Counts the steps the frame ran. Nothing is simulated here: the harness has
+    //no character, and the camera moves on frame time rather than in steps, so
+    //this is the readout's own number.
+    void OnFixedUpdate(Timestep step) override
     {
+        (void)step;
         ++m_StepsThisFrame;
-
-        // Reading the keyboard is this layer's job, not the controller's: the
-        // controller is handed what the player asked for, which is what lets it
-        // be stepped by a test with no window and no focus.
-        const CharacterInput input = ReadInput();
-
-        // BRANCH POINT 2 OF 3.
-        if (m_Client)
-        {
-            // Through Stage 2, nothing was simulated here, deliberately:
-            // pressing W did not move the view until the server had said so,
-            // so the latency was plainly visible rather than hidden behind a
-            // guess. This is the stage that ends that: Step below applies
-            // this input locally and immediately, so W moves the view on the
-            // same frame even at --latency 150.
-            //
-            // The server is still the authority throughout - the local move
-            // is a guess, held until acknowledged and corrected against every
-            // snapshot (CorrectionThreshold's deadzone means "corrected"
-            // still allows a little disagreement to pass unremarked, so the
-            // client is not exactly the server between snapshots even when it
-            // feels like it is). Feeling right is what a correct guess looks
-            // like, not proof there isn't one being made.
-            m_Client->SetInput(input);
-            m_Client->Step(timestep.GetSeconds());
-
-            m_LocalPlayer = m_Client->LocalPlayer();
-
-            m_HudState->Connected = m_Client->Connected();
-            m_HudState->Rejected = m_Client->Rejected();
-            m_HudState->Disconnected = m_Client->Disconnected();
-            m_HudState->RoundTripMs = m_Client->RoundTripTime() * 1000.0;
-            m_HudState->PlayersInMatch = Match_().Players().size();
-            m_HudState->Health = m_Client->LocalHealth();
-
-            if (!HaveLocalPlayer())
-                return;
-        }
-        else
-        {
-            const PlayerCommand commands[] = { { m_LocalPlayer, input } };
-            m_Match.Step(commands, static_cast<float>(timestep.GetSeconds()));
-        }
-
-        m_HudState->PlayerPosition = Player_().Position();
-        m_HudState->Grounded = Player_().Grounded();
-        m_HudState->BodyInFluid = Player_().BodyInFluid();
-        m_HudState->EyeInFluid = Player_().EyeInFluid();
-
-        // Falling off the edge of the map is a Sandbox rule rather than
-        // character physics, so it stays here. The velocity is cleared
-        // separately because Teleport deliberately leaves it alone.
-        //
-        // Connected, the rule belongs to whoever owns the simulation - the
-        // server - so the client does not get to teleport itself. Doing it
-        // locally would be a correction the server never made, and the next
-        // snapshot would drag the player straight back off the edge.
-        if (!m_Client && Player_().Position().y < FallResetHeight)
-        {
-            m_Match.TeleportPlayer(m_LocalPlayer, m_Spawn);
-            m_Match.PlayerForWrite(m_LocalPlayer).SetVerticalVelocity(0.0f);
-        }
     }
 
-    //Publishes how many fixed steps ran this frame, then resets for the next.
     void OnFrameUpdate(Timestep timestep) override
     {
-        (void)timestep;
+        //The free camera reads the movement keys itself.
+        m_CameraController.OnUpdate(timestep);
+
+        const glm::vec3 eye = m_CameraController.GetCamera().GetPosition() - WorldOffset;
+
+        m_HudState->CameraPosition = eye;
+        m_HudState->EyeInFluid = World_().IsBlockFluid(
+            static_cast<int>(std::floor(eye.x)),
+            static_cast<int>(std::floor(eye.y)),
+            static_cast<int>(std::floor(eye.z)));
         m_HudState->StepsPerFrame = m_StepsThisFrame;
         m_HudState->UndoDepth = m_Undo.size();
         m_StepsThisFrame = 0;
     }
 
-    //Draws the meshed voxel world through Cubit's scene renderer.
+    //Draws the meshed voxel world through the engine's scene.
     void OnRender(float alpha) override
     {
-        // Kept before the early return below, so a click that lands before the
-        // first snapshot still has this frame's alpha rather than a stale one.
-        m_LastAlpha = alpha;
-
-        // Nothing to draw from until the server has said who we are AND put us
-        // in a snapshot. Player_() would throw, and until Welcome lands the
-        // world is still the 1x1x1 placeholder MatchState was constructed with.
-        // See HaveLocalPlayer for why the two halves are separate events.
-        if (!HaveLocalPlayer())
-            return;
-
-        // The connected path's deferred half of the constructor's camera
-        // setup. Single-player has already aimed and set this flag, so this
-        // fires exactly once per session either way.
-        if (!m_Aimed)
-        {
-            AimAtMapCentre();
-            m_Aimed = true;
-        }
-
-        UpdateCameraPosition(alpha);
+        (void)alpha;
 
         m_Scene.Update(World_());
         m_Scene.Render(
             m_CameraController.GetCamera(),
             WorldOffset,
             FogColor,
-            Player_().EyeInFluid() ? FogDensity : 0.0f);
+            m_HudState->EyeInFluid ? FogDensity : 0.0f);
 
-        // Flushed here, while the world camera is current. The HUD overlay
-        // renders after this layer and leaves an orthographic matrix behind, so
-        // a later flush would draw these lines in screen space.
+        //Flushed here, while the world camera is current. The HUD overlay
+        //renders after this layer and leaves an orthographic matrix behind, so
+        //a later flush would draw these lines in screen space.
         DrawTargetedBlockOutline();
-        DrawRemotePlayers(alpha);
-        DrawShots();
-        DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
+        DebugDraw::Flush(
+            m_CameraController.GetCamera(),
+            glm::translate(glm::mat4(1.0f), WorldOffset));
 
         m_HudState->MeshFaceCount = m_Scene.TotalFaceCount();
         m_HudState->DrawnChunks = m_Scene.DrawnChunkCount();
@@ -321,11 +155,10 @@ public:
         m_HudState->PendingChunks = m_Scene.PendingCount();
     }
 
-    //Routes one-time key presses through the typed platform dispatcher.
     void OnEvent(Event& event) override
     {
-        //Mouse-look only while the game has the mouse: a released cursor is the
-        //player pointing at something else.
+        //Mouse-look only while the harness has the mouse: a released cursor is
+        //the user pointing at something else.
         if (m_Cursor.Captured() || event.GetEventType() != EventType::MouseMoved)
             m_CameraController.OnEvent(event);
 
@@ -339,7 +172,7 @@ public:
             [this](MouseButtonPressedEvent& mouseEvent)
             {
                 //A click that takes the cursor back is spent doing that, and
-                //never also edits or fires.
+                //never also edits.
                 if (!m_Cursor.OnClick())
                 {
                     ApplyCursor();
@@ -358,157 +191,18 @@ public:
             });
     }
 
-    //The stage's acceptance number, from a real run rather than a test.
-    //
-    //Logged at detach rather than drawn on the HUD: it is a whole-run figure,
-    //read once the run is over. It was first kept off the HUD because the
-    //debug font could not draw most of its words; the font can now, so that
-    //reason no longer holds on its own.
-    void OnDetach() override
-    {
-        if (!m_Client)
-            return;
-
-        const MatchClient::CorrectionStats stats = m_Client->Corrections();
-        const double perThousand = stats.Snapshots == 0
-            ? 0.0
-            : 1000.0 * static_cast<double>(stats.Count) / static_cast<double>(stats.Snapshots);
-
-        CB_INFO("NETSTATS snapshots=" + std::to_string(stats.Snapshots)
-            + " corrections=" + std::to_string(stats.Count)
-            + " per1000=" + std::to_string(perThousand)
-            + " mean=" + std::to_string(stats.Mean)
-            + " max=" + std::to_string(stats.Max));
-    }
-
 private:
-    //BRANCH POINT 1 OF 3. Everything else in this file reads the match through
-    //here, which is what keeps a second mode from spreading across 600 lines.
-    //
-    //If a fourth branch point appears while working in this file, that is the
-    //signal to extract rather than to continue.
-    MatchState& Match_() { return m_Client ? m_Client->MatchForWrite() : m_Match; }
-    const MatchState& Match_() const { return m_Client ? m_Client->Match() : m_Match; }
+    World& World_() { return *m_World; }
+    const World& World_() const { return *m_World; }
 
-    //Shorthands, because the layer reads the world and its own character on
-    //nearly every line and Match_().GetWorld() everywhere obscures them.
-    World& World_() { return Match_().GetWorld(); }
-    const World& World_() const { return Match_().GetWorld(); }
-    const CharacterController& Player_() const
-    {
-        return Match_().Player(m_LocalPlayer);
-    }
-
-    //Whether there is a local character to read at all. Every Player_() call on
-    //a per-frame path has to be behind this.
-    //
-    //Connected() is NOT the same question, and mistaking the two is a crash.
-    //It goes true the moment Welcome is accepted, but Welcome carries no
-    //position, so the local character does not exist until the first SNAPSHOT
-    //naming it lands. The server sends both in one Step, which is why they
-    //normally arrive together and why testing Connected() alone looked
-    //sufficient - but the welcome is reliable and the snapshot is not. Drop or
-    //reorder that one packet and the client is connected with an empty roster
-    //for a tick, Player_() throws out of a fixed-step callback, and the process
-    //goes with it. At the 5% loss this executable can be launched with, that is
-    //roughly one join in twenty, not a corner case.
-    bool HaveLocalPlayer() const
-    {
-        if (!m_Client)
-            return true;
-
-        return m_Client->Connected() && Match_().HasPlayer(m_LocalPlayer);
-    }
-
-    //Opens the socket and builds the client.
-    //
-    //Throws only when no socket can be made at all: ENet failing to start, a
-    //host that cannot be created, a hostname that will not resolve. It does
-    //NOT mean the server answered. enet_host_connect is asynchronous - it
-    //returns a peer immediately and the Connected event arrives from Poll
-    //several Advance calls later - so pointing --connect at a machine with
-    //nothing listening on the port succeeds here and always will.
-    //
-    //What happens then is Rejected(): ENet gives up on the connect attempt and
-    //raises a bare Disconnected, MatchClient latches the refusal, and the HUD
-    //draws NOT CONNECTED. That is the honest failure path, not this throw.
-    void Connect()
-    {
-        m_Socket = EnetTransport::Connect(m_Options.Host, m_Options.Port);
-        if (m_Socket == nullptr)
-            throw std::runtime_error("Could not reach the server");
-
-        Transport* transport = m_Socket.get();
-
-        if (m_Options.LatencyRtt > 0.0 || m_Options.Loss > 0.0f)
-        {
-            NetworkSim sim;
-            sim.Latency = m_Options.LatencyRtt / 2000.0;
-            sim.Loss = m_Options.Loss;
-            m_Simulated = std::make_unique<SimulatedTransport>(*m_Socket, sim);
-            transport = m_Simulated.get();
-        }
-
-        //The world is loaded by a callback rather than inside MatchClient
-        //because this is the only place that knows where the Sandbox keeps its
-        //assets. The server names the map; it never sends it.
-        m_Client = std::make_unique<MatchClient>(*transport,
-            [](const std::string& mapName) -> std::optional<LoadedMap>
-            {
-                const std::string path = "assets/maps/" + mapName;
-                if (!std::filesystem::exists(path))
-                    return std::nullopt;
-
-                World world = BuildWorld(VoxLoader::LoadFile(path));
-
-                //Same order the single-player load uses: light before anything
-                //meshes, or the first frames bake a dark world into their
-                //vertex colours.
-                SkyLight::PropagateAll(world);
-                return LoadedMap{ std::move(world), HashMapFile(path) };
-            },
-            SandboxRules);
-    }
-
-    //Returns held movement keys in the character's own frame: x strafes, y
-    //walks forward. No camera maths here any more - the simulation resolves
-    //the direction from the yaw, which is what lets a server reproduce the
-    //step rather than trust a vector this machine computed.
-    //
-    //Deliberately not normalised: Step caps the resolved vector, so pressing
-    //two keys is capped there rather than scaled here.
-    glm::vec2 ReadWalkInput() const
-    {
-        glm::vec2 move{ 0.0f };
-
-        if (Input::IsKeyPressed(KeyCode::W))
-            move.y += 1.0f;
-        if (Input::IsKeyPressed(KeyCode::S))
-            move.y -= 1.0f;
-        if (Input::IsKeyPressed(KeyCode::D))
-            move.x += 1.0f;
-        if (Input::IsKeyPressed(KeyCode::A))
-            move.x -= 1.0f;
-
-        return move;
-    }
-
-    //Places the camera at eye height above the player, in world space, at the
-    //point the player occupied `alpha` of the way through the current step.
-    void UpdateCameraPosition(float alpha)
-    {
-        m_CameraController.SetPosition(
-            Player_().InterpolatedEye(alpha) + WorldOffset);
-    }
-
-    //Faces the middle of the map, level with the eye. Aiming at the literal
+    //Faces the middle of the map, level with the camera. Aiming at the literal
     //centre of the world box would tilt the view into the ground.
     //
     //Goes through the controller rather than the camera because both hold a
     //copy of yaw and pitch - the reason SetRotation exists at all.
     void AimAtMapCentre()
     {
-        const glm::vec3 eye = Player_().InterpolatedEye(1.0f);
+        const glm::vec3 eye = m_CameraController.GetCamera().GetPosition() - WorldOffset;
         const glm::vec3 target(
             static_cast<float>(World_().GetWidth()) * 0.5f,
             eye.y,
@@ -523,210 +217,69 @@ private:
     //visible.
     void DrawTargetedBlockOutline()
     {
-        const PerspectiveCamera& camera = m_CameraController.GetCamera();
-        const VoxelRayHit hit = VoxelRaycast::Cast(
-            World_(),
-            camera.GetPosition() - WorldOffset,
-            camera.GetForwardDirection(),
-            SandboxRules.ReachDistance,
-            true);
-
-        if (!hit.Hit)
+        const std::optional<VoxelRayHit> hit = AimedBlock();
+        if (!hit)
             return;
 
         // Nudged outward a hair so the outline is not z-fighting with the block
         // face it traces.
         constexpr float Swell = 0.002f;
-        const glm::vec3 min = glm::vec3(hit.Block) - glm::vec3(Swell);
+        const glm::vec3 min = glm::vec3(hit->Block) - glm::vec3(Swell);
         const glm::vec3 max = min + glm::vec3(1.0f + Swell * 2.0f);
 
         DebugDraw::Box(min, max, OutlineColor);
     }
 
-    //Draws everyone else in the match as a wireframe box.
-    //
-    //Drawn from MatchClient's interpolation ring, six ticks behind the newest
-    //server tick this client has seen, rather than snapped to the newest or
-    //extrapolated past it. Single-player draws nothing here: there is nobody
-    //else.
-    void DrawRemotePlayers(float alpha)
-    {
-        if (!m_Client)
-            return;
-
-        for (const auto& [player, character] : Match_().Players())
-        {
-            if (player == m_LocalPlayer)
-                continue;
-
-            //From the interpolation ring rather than from the character, which
-            //holds whatever the last snapshot said and steps between packets.
-            //The character is still what supplies the box: how big a player is
-            //is simulation, where they are drawn is not.
-            const MatchClient::RemotePose pose = m_Client->PoseOf(player, alpha);
-            const glm::vec3 half = character.Config().HalfExtents;
-            DebugDraw::Box(pose.Position - half, pose.Position + half, RemotePlayerColor);
-        }
-    }
-
-    //What the player is asking for this instant: the movement keys held, the
-    //camera's aim, and jump. One place, because a shot has to send the same
-    //aim a step would.
-    CharacterInput ReadInput()
-    {
-        CharacterInput input;
-        input.Move = ReadWalkInput();
-        input.Yaw = m_CameraController.GetYaw();
-        input.Pitch = m_CameraController.GetPitch();
-        input.Jump = Input::IsKeyPressed(KeyCode::Space);
-        return input;
-    }
-
-    //Fires along the camera's view ray: the local tracer now, and the shot to
-    //the server when connected. Single-player has nobody to shoot, so the
-    //tracer is all there is - drawn regardless, so the binding is visibly
-    //alive.
-    void FireShot()
+    //What the camera is pointing at, within reach. Solid only: water is scenery,
+    //so the ray passes through the river to the bed rather than targeting the
+    //surface.
+    std::optional<VoxelRayHit> AimedBlock() const
     {
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
-        const glm::vec3 eye = camera.GetPosition() - WorldOffset;
-        const glm::vec3 forward = camera.GetForwardDirection();
-
-        if (m_Client)
-        {
-            // Fire sends the yaw and pitch of the INPUT, which OnFixedUpdate
-            // last set from the camera up to a whole step ago - and the mouse
-            // moves between steps. Refreshing it here sends the aim the
-            // crosshair shows on this frame, which is also the direction the
-            // tracer below is drawn along. The next step reads it afresh.
-            m_Client->SetInput(ReadInput());
-            m_Client->Fire(m_LastAlpha);
-        }
-
-        // Solid only, like an edit: water does not stop a shot.
-        const VoxelRayHit hit = VoxelRaycast::Cast(World_(), eye, forward, SandboxRules.ShotRange, true);
-        const float length = hit.Hit ? hit.Distance : SandboxRules.ShotRange;
-
-        // Pitch is clamped short of straight up or down, so forward is never
-        // parallel to the world's up and this cross product never vanishes.
-        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-        const glm::vec3 up = glm::cross(right, forward);
-
-        m_TracerFrom = eye + right * TracerMuzzleRight - up * TracerMuzzleDown;
-        m_TracerTo = eye + forward * length;
-        m_TracerTick = Match_().Tick();
-        m_TracerActive = true;
-    }
-
-    //The local tracer while it lasts, and the server's ruling on the most
-    //recent shot anybody fired.
-    //
-    //The two are deliberately separate. The tracer is this machine's own trace
-    //and appears the instant the button goes down. Whether it HIT anybody is
-    //the server's to say, and a hit marker that has to be taken back is worse
-    //than one a round trip late - so the marker and the HUD word come only
-    //from LastShot.
-    void DrawShots()
-    {
-        const std::uint64_t now = Match_().Tick();
-
-        if (m_TracerActive && now >= m_TracerTick && now - m_TracerTick < TracerTicks)
-            DebugDraw::Line(m_TracerFrom, m_TracerTo, TracerColor);
-        else
-            m_TracerActive = false;
-
-        m_HudState->ShotLabel.clear();
-
-        if (!m_Client || !m_Client->LastShot().has_value())
-            return;
-
-        // ReceivedAtTick is on this client's own clock, which is the one
-        // Match_() reads connected - so the two can be subtracted directly.
-        const MatchClient::ShotReport& shot = *m_Client->LastShot();
-        if (now < shot.ReceivedAtTick || now - shot.ReceivedAtTick >= ShotMarkerTicks)
-            return;
-
-        const bool connected = shot.Victim != InvalidPlayer;
-        const glm::vec3 half(ImpactHalfSize);
-        DebugDraw::Box(shot.Impact - half, shot.Impact + half,
-            connected ? ImpactHitColor : ImpactMissColor);
-
-        // Every client receives every ruling, so everybody's impacts draw
-        // above. Only this player's own shots put a word on the HUD.
-        if (connected && shot.Shooter == m_LocalPlayer)
-            m_HudState->ShotLabel = shot.Killed ? "KILLED" : "HIT";
-    }
-
-    //Breaks or places a block along the camera's view ray.
-    bool OnMouseButtonPressed(MouseButtonPressedEvent& event)
-    {
-        const MouseCode button = event.GetMouseButton();
-
-        // Middle rather than left, and the reason is verification rather than
-        // ergonomics: a script can drive the mouse but NOT the keyboard, so a
-        // shot bound to a key would be the one feature nobody can screenshot.
-        // It also leaves both edit paths below byte-for-byte as they were.
-        if (button == MouseCode::Middle)
-        {
-            if (!HaveLocalPlayer())
-                return false;
-
-            FireShot();
-            return true;
-        }
-
-        if (button != MouseCode::Left && button != MouseCode::Right)
-            return false;
-
-        const PerspectiveCamera& camera = m_CameraController.GetCamera();
-        //Subtracting WorldOffset turns the camera's view-space position back into
-        //world coordinates, the space the world and the ray share.
-        // Solid only: water is scenery, so an edit ray passes through the river
-        // to the bed rather than targeting the surface — or, when the player is
-        // standing in it, the cell their own head occupies.
         const VoxelRayHit hit = VoxelRaycast::Cast(
             World_(),
             camera.GetPosition() - WorldOffset,
             camera.GetForwardDirection(),
-            SandboxRules.ReachDistance,
+            HarnessRules.ReachDistance,
             true);
 
         if (!hit.Hit)
+            return std::nullopt;
+
+        return hit;
+    }
+
+    //Breaks or places one block, and brings down whatever the break left
+    //hanging, as one undoable step.
+    bool OnMouseButtonPressed(MouseButtonPressedEvent& event)
+    {
+        const MouseCode button = event.GetMouseButton();
+        if (button != MouseCode::Left && button != MouseCode::Right)
             return false;
 
-        const glm::ivec3 target = button == MouseCode::Left
-            ? hit.Block
-            : hit.Block + hit.Normal;
+        const std::optional<VoxelRayHit> hit = AimedBlock();
+        if (!hit)
+            return false;
 
         // A ray starting inside a block has no entry face, so there is nowhere
         // to place against.
-        if (button == MouseCode::Right && hit.Normal == glm::ivec3(0))
+        if (button == MouseCode::Right && hit->Normal == glm::ivec3(0))
             return false;
 
-        const BlockEdit edit{
-            target,
-            button == MouseCode::Left ? BlockId{0} : m_PlaceBlock };
+        const glm::ivec3 target = button == MouseCode::Left
+            ? hit->Block
+            : hit->Block + hit->Normal;
 
-        // BRANCH POINT 3 OF 3.
-        if (m_Client)
-        {
-            // Predicted, not waited for. MatchClient checks the edit against
-            // the same rules the server runs and shows it on the next step if
-            // it is legal; the server applies it on the same tick and only a
-            // refusal ever takes it back. Single-player below still applies
-            // edits directly and keeps its undo stack.
-            m_Client->RequestEdit(edit);
-            return true;
-        }
+        // Bounds and relighting both belong to ApplyBlockEdit: an edit is one
+        // operation, not a sequence a caller has to remember the rest of.
+        const std::optional<BlockEdit> inverse = ApplyBlockEdit(
+            World_(),
+            BlockEdit{ target, button == MouseCode::Left ? BlockId{0} : m_PlaceBlock });
 
-        // Bounds and relighting both belong to ApplyBlockEdit now: an edit is
-        // one operation, not a sequence a caller has to remember the rest of.
-        const std::optional<BlockEdit> inverse = ApplyBlockEdit(World_(), edit);
         if (!inverse)
             return false;
 
-        // What a dig left hanging comes down with it, as one undoable step. Only
-        // a dig: placing a block cannot take anything's support away.
+        // Only a dig: placing a block cannot take anything's support away.
         std::vector<BlockEdit> step = button == MouseCode::Left
             ? CollapseAfter({ target })
             : std::vector<BlockEdit>{};
@@ -741,37 +294,8 @@ private:
         return true;
     }
 
-    //Reverses the most recent edit, or the whole of the most recent blast.
-    //
-    //The entry is popped whether or not applying it changes anything: an
-    //inverse that comes back empty describes a cell some later edit has already
-    //overwritten, so keeping it would stall the stack on the same dead entry
-    //every press. Applying an inverse is itself an edit, but its own inverse is
-    //deliberately not pushed — that would make U alternate between two states
-    //instead of walking back through history.
-    void UndoLastEdit()
-    {
-        // Single-player only. The stack describes edits THIS machine applied,
-        // and connected it applied none - every edit it sees came back from the
-        // server. Undoing here would mean editing the world behind the server's
-        // back, and the next EditApplied would put it straight back.
-        if (m_Client)
-            return;
-
-        if (m_Undo.empty())
-            return;
-
-        const std::vector<BlockEdit> inverse = std::move(m_Undo.back());
-        m_Undo.pop_back();
-        ApplyBlockEdits(World_(), inverse);
-    }
-
     //Clears whatever the cells just emptied have left with nothing holding it
     //up, and returns how to put that back.
-    //
-    //Single-player only, like the undo stack: connected, the server decides what
-    //comes loose and sends it, and working it out here as well would be editing
-    //the world behind the server's back.
     std::vector<BlockEdit> CollapseAfter(const std::vector<glm::ivec3>& emptied)
     {
         const std::vector<glm::ivec3> loose = FindUnsupported(World_(), emptied);
@@ -787,34 +311,14 @@ private:
         return ApplyBlockEdits(World_(), falls);
     }
 
-    //Remembers how to undo one operation - a single edit or a whole batch.
-    void PushUndo(std::vector<BlockEdit> inverse)
-    {
-        m_Undo.push_back(std::move(inverse));
-        if (m_Undo.size() > MaxUndoDepth)
-            m_Undo.erase(m_Undo.begin());
-    }
-
-    //Clears a ball of air where the player is aiming, as one batch.
+    //Clears a ball of air where the camera is aiming, as one batch.
     //
-    //A debug stand-in for the explosions and falling terrain that batches exist
-    //for, so a batch can be seen, undone with U and timed in the running game.
-    //Single-player only: connected, only the server changes blocks in batches,
-    //and no game rule fires one yet.
+    //A stand-in for the explosions and falling terrain that batches exist for,
+    //so a batch can be seen, undone and timed in the running engine.
     void BlastAtAim()
     {
-        if (m_Client)
-            return;
-
-        const PerspectiveCamera& camera = m_CameraController.GetCamera();
-        const VoxelRayHit hit = VoxelRaycast::Cast(
-            World_(),
-            camera.GetPosition() - WorldOffset,
-            camera.GetForwardDirection(),
-            SandboxRules.ReachDistance,
-            true);
-
-        if (!hit.Hit)
+        const std::optional<VoxelRayHit> hit = AimedBlock();
+        if (!hit)
             return;
 
         // Water is left alone, as it is for the edit ray: nothing makes it flow,
@@ -827,7 +331,7 @@ private:
                     if (dx * dx + dy * dy + dz * dz > BlastRadius * BlastRadius)
                         continue;
 
-                    const glm::ivec3 cell = hit.Block + glm::ivec3(dx, dy, dz);
+                    const glm::ivec3 cell = hit->Block + glm::ivec3(dx, dy, dz);
                     if (World_().IsInBounds(cell.x, cell.y, cell.z)
                         && World_().IsBlockFluid(cell.x, cell.y, cell.z))
                         continue;
@@ -855,122 +359,67 @@ private:
         undo.insert(undo.begin(), fell.begin(), fell.end());
 
         CB_INFO("Blasted " + std::to_string(blasted) + " blocks at " +
-            std::to_string(hit.Block.x) + "," + std::to_string(hit.Block.y) + "," +
-            std::to_string(hit.Block.z) + " in " + std::to_string(milliseconds) + " ms");
+            std::to_string(hit->Block.x) + "," + std::to_string(hit->Block.y) + "," +
+            std::to_string(hit->Block.z) + " in " + std::to_string(milliseconds) + " ms");
 
         PushUndo(std::move(undo));
     }
 
-    //Logs a player-death notification received from the gameplay event bus.
-    void OnPlayerDied(const PlayerDiedEvent& event)
+    //Remembers how to undo one operation - a single edit or a whole batch.
+    void PushUndo(std::vector<BlockEdit> inverse)
     {
-        CB_INFO(
-            std::string("Player ") + std::to_string(event.Player) +
-            " was defeated by player " + std::to_string(event.Killer));
+        m_Undo.push_back(std::move(inverse));
+        if (m_Undo.size() > MaxUndoDepth)
+            m_Undo.erase(m_Undo.begin());
     }
 
-    //Replaces the world with the map at this path and settles the player into it.
-    //Throws when the file cannot be read or parsed.
+    //Reverses the most recent edit, or the whole of the most recent blast.
+    //
+    //The entry is popped whether or not applying it changes anything: an
+    //inverse that comes back empty describes a cell some later edit has already
+    //overwritten, so keeping it would stall the stack on the same dead entry
+    //every press. Applying an inverse is itself an edit, but its own inverse is
+    //deliberately not pushed - that would make U alternate between two states
+    //instead of walking back through history.
+    void UndoLastEdit()
+    {
+        if (m_Undo.empty())
+            return;
+
+        const std::vector<BlockEdit> inverse = std::move(m_Undo.back());
+        m_Undo.pop_back();
+        ApplyBlockEdits(World_(), inverse);
+    }
+
+    //Loads a map, lights it, and leaves every chunk dirty for the next render.
     void LoadWorld(const char* path)
     {
-        // Building locally before handing it to the match means a bad file
-        // leaves the current world untouched, rather than half-replaced.
-        m_Match.ReplaceWorld(BuildWorld(VoxLoader::LoadFile(path)));
+        // Building locally before handing it over means a bad file leaves the
+        // current world untouched, rather than half-replaced.
+        auto loaded = std::make_unique<World>(BuildWorld(VoxLoader::LoadFile(path)));
+
+        // Light has to exist before anything meshes, or the first frames bake
+        // a fully dark world into their vertex colours.
+        SkyLight::PropagateAll(*loaded);
+
+        m_World = std::move(loaded);
 
         // The stack describes a world that no longer exists.
         m_Undo.clear();
 
-        // Light has to exist before anything meshes, or the first frames bake
-        // a fully dark world into their vertex colours.
-        SkyLight::PropagateAll(World_());
-
-        // Before the lift, not after: the lift's last-resort fallback is the
-        // spawn, so it has to be valid for the world just loaded.
-        ResolveSpawn();
-
-        // The constructor runs LoadWorld before AddPlayer, so on the very
-        // first load there is no player yet to lift clear of terrain or
-        // centre the camera on - it is about to be placed straight at
-        // m_Spawn once AddPlayer runs. Every later call (F9) has a player,
-        // and preserving its position clear of the reloaded terrain is the
-        // whole reason this tail exists.
-        if (m_Match.HasPlayer(m_LocalPlayer))
-        {
-            LiftPlayerClearOfTerrain();
-            m_Match.PlayerForWrite(m_LocalPlayer).SetVerticalVelocity(0.0f);
-            UpdateCameraPosition(1.0f);
-        }
+        CB_INFO(std::string("Loaded world from ") +
+            std::filesystem::absolute(path).string());
     }
 
-    //Steps the player up until their box is clear of solid blocks.
-    //
-    //A reload can restore terrain where the player was standing, and
-    //VoxelCollision only pushes a box out of a block on a move it detects, so a
-    //player who starts embedded stays embedded with no escape but falling out of
-    //the world. Keeping x and z preserves the part of the map being worked on,
-    //which is the point of reloading quickly.
-    //
-    //Only solid blocks count, so reloading while standing in the river leaves
-    //the player in the water rather than lifting them onto its surface.
-    void LiftPlayerClearOfTerrain()
-    {
-        const float top = static_cast<float>(World_().GetHeight());
-        const glm::vec3& halfExtents = Player_().Config().HalfExtents;
-
-        glm::vec3 lifted = Player_().Position();
-        while (lifted.y < top &&
-            VoxelCollision::Overlaps(World_(), lifted, halfExtents))
-            lifted.y += 1.0f;
-
-        // A column solid to the sky has nowhere to stand.
-        if (VoxelCollision::Overlaps(World_(), lifted, halfExtents))
-            lifted = m_Spawn;
-
-        // A lift is a discontinuity, so it must not be interpolated through.
-        m_Match.TeleportPlayer(m_LocalPlayer, lifted);
-    }
-
-    //Resolves the spawn hint against the loaded map.
-    void ResolveSpawn()
-    {
-        // Half extents come from a default config rather than the live
-        // player: this can run before the player exists (the constructor
-        // calls LoadWorld, which calls this, before AddPlayer), and every
-        // player the Sandbox ever creates uses the default configuration
-        // anyway, so the value is the same either way.
-        const glm::vec3 halfExtents = CharacterConfig{}.HalfExtents;
-
-        const std::optional<glm::vec3> found =
-            FindSpawn(World_(), SpawnHintXZ, halfExtents);
-
-        if (found)
-        {
-            m_Spawn = *found;
-            return;
-        }
-
-        // Nothing standable within the search radius. Drop in from above the
-        // hint and say so: the whole point is that a bad spawn stops being a
-        // silent black screen.
-        CB_ERROR(
-            "No spawn found within " + std::to_string(MaxSpawnSearchRadius) +
-            " columns of " + std::to_string(SpawnHintXZ.x) + "," +
-            std::to_string(SpawnHintXZ.y) + " - dropping in from above");
-
-        m_Spawn = glm::vec3(
-            static_cast<float>(SpawnHintXZ.x) + 0.5f,
-            static_cast<float>(World_().GetHeight()) - halfExtents.y,
-            static_cast<float>(SpawnHintXZ.y) + 0.5f);
-    }
-
-    //Writes the edited world beside the executable and logs where it went.
+    //Writes the edited world beside the executable, for promoting by hand.
     void SaveWorld() const
     {
         // This runs inside a GLFW key callback, which is C code, and throwing
-        // across a C frame is undefined. A failed save has to end here, as a log
-        // line rather than a crash.
+        // across a C frame is undefined.
         try
         {
+            std::filesystem::create_directories(
+                std::filesystem::path(SavePath).parent_path());
             VoxWriter::WriteFile(ToVoxModel(World_()), SavePath);
 
             CB_INFO("Saved world to " +
@@ -986,20 +435,6 @@ private:
     //there isn't one.
     void ReloadWorld()
     {
-        // Single-player only, and this one is not merely pointless connected -
-        // it is incoherent. LoadWorld replaces m_Match's world, which nothing
-        // reads while m_Client exists, but then relights World_(), which
-        // resolves to the CLIENT's world. The result is half a reload applied
-        // to the wrong one of two worlds. The map a connected session runs is
-        // the server's to change.
-        if (m_Client)
-        {
-            CB_INFO("Connected: the server owns the map, so F9 does nothing");
-            return;
-        }
-
-        // Same reason SaveWorld catches: this runs inside a GLFW key callback,
-        // which is C code, and throwing across a C frame is undefined.
         try
         {
             LoadWorld(SavePath);
@@ -1024,7 +459,7 @@ private:
             m_CameraController.ResetMouseTracking();
     }
 
-    //Selects the colour used when placing blocks, or logs an unhandled press.
+    //Selects the colour used when placing blocks, or runs a tool.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
         if (event.IsRepeat())
@@ -1067,6 +502,7 @@ private:
         if (key >= first && key < first + PlaceableBlockCount)
         {
             m_PlaceBlock = PlaceableBlocks[key - first];
+            CB_INFO("Place block set to " + std::to_string(m_PlaceBlock));
             return true;
         }
 
@@ -1074,115 +510,60 @@ private:
     }
 
     std::shared_ptr<HudState> m_HudState;
-    SandboxOptions m_Options;
 
-    //Present only when connected. The client owns the MatchState everything
-    //reads through Match_(); m_Match below is the single-player one and is left
-    //untouched while these are alive.
-    //
-    //Declaration order is destruction order reversed: the client goes first, so
-    //it cannot service a transport that has already gone.
-    std::unique_ptr<EnetTransport> m_Socket;
-    std::unique_ptr<SimulatedTransport> m_Simulated;
-    std::unique_ptr<MatchClient> m_Client;
-
-    //The simulation. One player today; the type is the seam a server will
-    //step identically, which is why the Sandbox goes through it rather than
-    //owning a world and a character directly.
-    MatchState m_Match{ World(1, 1, 1) };
-    PlayerId m_LocalPlayer = InvalidPlayer;
-
-    //Whether the one-off opening camera aim has happened. Single-player sets it
-    //in the constructor; connected, the first OnRender with a player does. It
-    //is a latch rather than a re-aim because after that the view belongs to the
-    //mouse, and re-running it would yank the player's aim back every frame.
-    bool m_Aimed = false;
-
-    //The renderer's position within the current step, as of the last frame.
-    //Fire must be handed the alpha PoseOf drew remote players with, and a
-    //click arrives between frames, so this is the frame the player saw.
-    float m_LastAlpha = 1.0f;
-
-    //The local tracer, in world space, and the tick it was fired on.
-    glm::vec3 m_TracerFrom{ 0.0f };
-    glm::vec3 m_TracerTo{ 0.0f };
-    std::uint64_t m_TracerTick = 0;
-    bool m_TracerActive = false;
+    //Held by pointer because World has no empty state and F9 replaces it whole.
+    std::unique_ptr<World> m_World;
 
     WorldScene m_Scene;
+    PerspectiveCameraController m_CameraController;
     BlockId m_PlaceBlock = BlockId{2};
-    glm::vec3 m_Spawn{ 0.0f };
+
     //Counted across the current frame's steps and published by OnFrameUpdate.
     int m_StepsThisFrame = 0;
+
     //How to undo each applied operation, newest last: one inverse for an edit,
-    //a whole batch for a blast. Capped so a long session cannot creep; the
-    //oldest entries are the least likely to be wanted back.
-    static constexpr std::size_t MaxUndoDepth = 256;
+    //a whole batch for a blast.
     std::vector<std::vector<BlockEdit>> m_Undo;
 
-    //The debug blast's radius: 123 cells, about what a grenade would take.
-    static constexpr int BlastRadius = 3;
-    PerspectiveCameraController m_CameraController;
-
-    //Whether the game has the mouse. Escape and losing focus give it back; a
-    //click takes it again.
+    //Whether the harness has the mouse. Escape and losing focus give it back;
+    //a click takes it, and that click does not also edit.
     CursorCapture m_Cursor;
-
-    //This layer's place on the gameplay event bus, ended by its destructor.
-    Subscription m_DeathSubscription;
 };
 
+//Starts the harness and runs the engine loop.
 class SandboxApplication final : public Application
 {
 public:
-    //Creates the Sandbox layer and publishes a gameplay event.
-    explicit SandboxApplication(const SandboxOptions& options)
+    SandboxApplication()
     {
-        //Shared so the overlay can read what the gameplay layer writes, without
-        //either layer knowing about the other.
         auto hudState = std::make_shared<HudState>();
 
-        PushLayer(std::make_unique<SandboxLayer>(GetEventBus(), hudState, options));
+        PushLayer(std::make_unique<SandboxLayer>(hudState));
         PushOverlay(std::make_unique<HudLayer>(
             hudState,
             GetWindow().GetFramebufferWidth(),
             GetWindow().GetFramebufferHeight()));
-        GetEventBus().Publish(PlayerDiedEvent{ 1, 2 });
     }
 };
 
-//Starts the Sandbox application and runs the engine loop.
-//
-//With no arguments this is the single-player app exactly as it has always
-//been, with no socket anywhere in it. That is load-bearing rather than polite:
-//the project's whole rendering verification story is scripted runs of this
-//executable checking POS and FACES, and none of it may start needing a server.
 int main(int argc, char** argv)
 {
+    (void)argc;
+    (void)argv;
+
     CrashHandler::Install("Sandbox");
     Logger::OpenFile("Sandbox");
 
-    SandboxOptions options;
-
-    for (int i = 1; i < argc; ++i)
+    try
     {
-        const std::string arg = argv[i];
-
-        if (arg == "--connect" && i + 1 < argc)
-        {
-            options.Connect = true;
-            options.Host = argv[++i];
-        }
-        else if (arg == "--port" && i + 1 < argc)
-            options.Port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
-        else if (arg == "--latency" && i + 1 < argc)
-            options.LatencyRtt = std::atof(argv[++i]);
-        else if (arg == "--loss" && i + 1 < argc)
-            options.Loss = static_cast<float>(std::atof(argv[++i])) / 100.0f;
+        SandboxApplication app;
+        app.Run();
+    }
+    catch (const std::exception& error)
+    {
+        CB_CRITICAL(std::string("Fatal: ") + error.what());
+        return EXIT_FAILURE;
     }
 
-    SandboxApplication app(options);
-    app.Run();
-
-    return 0;
+    return EXIT_SUCCESS;
 }

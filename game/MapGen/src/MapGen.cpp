@@ -9,7 +9,7 @@
 #include <vector>
 
 //Offline tool: generate the battlefield map and write it as .vox. Pass an output
-//path as argv[1], e.g. "Sandbox/assets/maps/battlefield.vox".
+//path as argv[1], e.g. "game/assets/maps/battlefield.vox".
 int main(int argc, char** argv)
 {
     CrashHandler::Install("MapGen");

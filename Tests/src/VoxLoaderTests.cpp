@@ -303,7 +303,7 @@ TEST_CASE("LoadFile rejects an empty file")
 
 TEST_CASE("The starter map parses into a single chunk")
 {
-    const std::filesystem::path path = "Sandbox/assets/maps/starter.vox";
+    const std::filesystem::path path = "game/assets/maps/starter.vox";
     if (!std::filesystem::exists(path))
         return; // asset not reachable from this working directory; skip
 
@@ -524,8 +524,8 @@ TEST_CASE("The 512 battlefield survives stitching cell for cell")
     // step, so try both rather than silently passing in one of them.
     std::filesystem::path path;
     for (const char* candidate : {
-            "Sandbox/assets/maps/battlefield512.vox",
-            "../Sandbox/assets/maps/battlefield512.vox" })
+            "game/assets/maps/battlefield512.vox",
+            "../game/assets/maps/battlefield512.vox" })
         if (std::filesystem::exists(candidate))
         {
             path = candidate;

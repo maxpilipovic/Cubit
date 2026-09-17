@@ -9,19 +9,17 @@
 #include <string>
 #include <utility>
 
-//Values the sandbox publishes for the overlay to display.
+//What the harness publishes for its readout.
+//
+//No player: the Sandbox exercises the engine, and a character belongs to a
+//game. The position is the free camera's, and the counters are the renderer's.
 struct HudState
 {
-    glm::vec3 PlayerPosition{ 0.0f };
-    bool Grounded = false;
+    glm::vec3 CameraPosition{ 0.0f };
 
     //Whether the camera is inside a fluid block. Drives the underwater tint and
-    //the fog; separate from BodyInFluid because a wading player has their head
-    //in open air while their legs are in the river.
+    //the fog.
     bool EyeInFluid = false;
-
-    //Whether the player's box overlaps any fluid block. Drives the swim rules.
-    bool BodyInFluid = false;
 
     std::uint32_t MeshFaceCount = 0;
     std::size_t DrawnChunks = 0;
@@ -30,36 +28,18 @@ struct HudState
 
     //Fixed simulation steps run during the last frame. Above 1 the renderer is
     //behind the simulation; a value sustained at FrameClock::MaxTicksPerFrame
-    //suggests the frame rate has fallen far enough that steps may be being
-    //dropped.
+    //suggests the frame rate has fallen far enough that steps may be dropped.
     int StepsPerFrame = 0;
 
-    //Edits that can still be undone.
+    //Operations that can still be undone: an edit or a whole blast.
     std::size_t UndoDepth = 0;
-
-    //Networking. All zero and false in single-player, and the overlay draws
-    //none of these lines when Connected, Rejected and Disconnected are all
-    //false - so the single-player readout is byte-for-byte what it was before
-    //the wire existed, which the acceptance check depends on.
-    bool Connected = false;
-    bool Rejected = false;
-    bool Disconnected = false;
-    double RoundTripMs = 0.0;
-    std::size_t PlayersInMatch = 0;
-
-    //The shot. Connected only, like the lines above. Health is this player's
-    //own, as the last snapshot reported it. ShotLabel is HIT or KILLED for a
-    //short while after the server rules that one of this player's shots
-    //connected, and empty otherwise - it only ever follows the server's word.
-    std::uint8_t Health = 0;
-    std::string ShotLabel;
 };
 
-//Draws the sandbox's readout on top of the rendered scene.
+//Draws the harness's readout on top of the rendered scene.
 //
 //What to say, not how to say it: the pixel-space camera, the quad, the shader
-//and the font atlas all live in the engine's ScreenOverlay, because two apps
-//want a readout and neither owns the drawing of one.
+//and the font atlas live in the engine's ScreenOverlay, because the game wants
+//a readout too and neither app owns the drawing of one.
 class HudLayer final : public Layer
 {
 public:
@@ -111,6 +91,13 @@ public:
             });
     }
 
+    //Every label this readout draws. DebugFontTests checks the list against the
+    //font: an unsupported character draws as a blank rather than failing, so a
+    //label that drifts out of the font silently hides the value beside it.
+    static constexpr std::string_view Labels[] = {
+        "POS", "OCEAN", "FACES", "DRAWN", "PENDING", "STEPS", "UNDO", "FPS"
+    };
+
 private:
     //Covers the whole screen while submerged. The fog cannot reach the sky, so
     //without this, looking up from underwater shows an untouched clear colour.
@@ -123,7 +110,7 @@ private:
         const float margin = ScreenOverlay::Margin;
         float y = m_Overlay.TopLine();
 
-        const glm::vec3& position = m_State->PlayerPosition;
+        const glm::vec3& position = m_State->CameraPosition;
         m_Overlay.DrawText(
             "POS " + ScreenOverlay::FormatOneDecimal(position.x) +
             " " + ScreenOverlay::FormatOneDecimal(position.y) +
@@ -132,19 +119,8 @@ private:
             y);
 
         y -= lineHeight;
-        m_Overlay.DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), margin, y);
-
-        y -= lineHeight;
-        // The flags are digits. Every label on this readout has to be spelled
-        // from DebugFont::Order: an unsupported character still renders as a
-        // blank rather than failing, which would silently hide a set flag.
-        // DebugFontTests checks the HUD's own words against the font.
-        m_Overlay.DrawText(
-            std::string("OCEAN ") +
-            (m_State->EyeInFluid ? "1" : "0") +
-            (m_State->BodyInFluid ? "1" : "0"),
-            margin,
-            y);
+        m_Overlay.DrawText(std::string("OCEAN ") + (m_State->EyeInFluid ? "1" : "0"),
+            margin, y);
 
         y -= lineHeight;
         m_Overlay.DrawText("FACES " + std::to_string(m_State->MeshFaceCount), margin, y);
@@ -165,52 +141,6 @@ private:
         y -= lineHeight;
         m_Overlay.DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)),
             margin, y);
-
-        //Single-player draws nothing below this point, which is what keeps the
-        //readout identical to the pre-networking one.
-        if (!m_State->Connected && !m_State->Rejected && !m_State->Disconnected)
-            return;
-
-        //A refused handshake has to be visible on screen, not only in the log:
-        //the log scrolls past behind a fullscreen window, and "nothing is
-        //happening" is exactly what a silent rejection looks like.
-        //
-        //Every label here must be spelled from DebugFont::Order. An unsupported
-        //character renders as a blank rather than failing, so a wrong label
-        //would silently show as a gap - which is what kept these to CONNECTED
-        //and NET while the font lacked most of the alphabet. DebugFontTests now
-        //checks the words this readout draws.
-        y -= lineHeight;
-
-        if (m_State->Rejected)
-        {
-            m_Overlay.DrawText("NOT CONNECTED", margin, y);
-            return;
-        }
-
-        //The server stopped or the connection was lost. The world stays on
-        //screen as it last was, so without this a dead session looks exactly
-        //like a quiet one.
-        if (m_State->Disconnected)
-        {
-            m_Overlay.DrawText("DISCONNECTED", margin, y);
-            return;
-        }
-
-        m_Overlay.DrawText("CONNECTED " + std::to_string(m_State->PlayersInMatch), margin, y);
-
-        y -= lineHeight;
-        m_Overlay.DrawText("NET " + std::to_string(static_cast<int>(m_State->RoundTripMs + 0.5)),
-            margin, y);
-
-        y -= lineHeight;
-        m_Overlay.DrawText("HEALTH " + std::to_string(m_State->Health), margin, y);
-
-        if (!m_State->ShotLabel.empty())
-        {
-            y -= lineHeight;
-            m_Overlay.DrawText(m_State->ShotLabel, margin, y);
-        }
     }
 
     std::shared_ptr<const HudState> m_State;

@@ -361,8 +361,8 @@ TEST_CASE("What relighting a batch costs on the shipped map, measured")
     //about 5,000 cells for terrain giving way.
     std::filesystem::path path;
     for (const char* candidate : {
-            "Sandbox/assets/maps/battlefield512.vox",
-            "../Sandbox/assets/maps/battlefield512.vox" })
+            "game/assets/maps/battlefield512.vox",
+            "../game/assets/maps/battlefield512.vox" })
         if (std::filesystem::exists(candidate))
         {
             path = candidate;

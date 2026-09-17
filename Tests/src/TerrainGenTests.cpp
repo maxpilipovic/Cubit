@@ -203,7 +203,7 @@ TEST_CASE("Colours mirror across x everywhere except the team-coloured forts")
 
 TEST_CASE("The committed battlefield map loads at the expected size")
 {
-    const std::filesystem::path path = "Sandbox/assets/maps/battlefield.vox";
+    const std::filesystem::path path = "game/assets/maps/battlefield.vox";
     if (!std::filesystem::exists(path))
         return; // asset not reachable from this working directory; skip
 

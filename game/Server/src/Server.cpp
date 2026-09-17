@@ -10,6 +10,8 @@
 #include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
 
+#include "GameRules.h"
+
 #include <glm/glm.hpp>
 
 #include <atomic>
@@ -39,9 +41,10 @@ namespace
     //single-player rather than somewhere unrelated.
     const glm::ivec2 SpawnHint{ 240, 300 };
 
-    //The numbers this server's matches are played by. The engine holds none of
-    //them: see MatchRules.
-    const MatchRules ServerRules{};
+    //The numbers this server's matches are played by, from the game rather
+    //than the engine: see MatchRules. A client of this server comes from the
+    //same game build, which is what keeps the two agreeing.
+    const MatchRules ServerRules = CubitGame::Rules();
 
     //Set from a console handler on another thread; read by the loop every tick.
     std::atomic<bool> StopRequested{ false };

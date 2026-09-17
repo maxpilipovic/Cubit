@@ -187,8 +187,8 @@ TEST_CASE("What the support search costs, measured")
     //case, a search that runs to the cap and gives up.
     std::filesystem::path path;
     for (const char* candidate : {
-            "Sandbox/assets/maps/battlefield512.vox",
-            "../Sandbox/assets/maps/battlefield512.vox" })
+            "game/assets/maps/battlefield512.vox",
+            "../game/assets/maps/battlefield512.vox" })
         if (std::filesystem::exists(candidate))
         {
             path = candidate;
