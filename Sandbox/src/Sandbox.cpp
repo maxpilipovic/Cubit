@@ -12,6 +12,7 @@
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -763,9 +764,7 @@ private:
         if (!inverse)
             return false;
 
-        m_Undo.push_back(*inverse);
-        if (m_Undo.size() > MaxUndoDepth)
-            m_Undo.erase(m_Undo.begin());
+        PushUndo({ *inverse });
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
@@ -775,7 +774,7 @@ private:
         return true;
     }
 
-    //Reverses the most recent edit.
+    //Reverses the most recent edit, or the whole of the most recent blast.
     //
     //The entry is popped whether or not applying it changes anything: an
     //inverse that comes back empty describes a cell some later edit has already
@@ -795,9 +794,72 @@ private:
         if (m_Undo.empty())
             return;
 
-        const BlockEdit inverse = m_Undo.back();
+        const std::vector<BlockEdit> inverse = std::move(m_Undo.back());
         m_Undo.pop_back();
-        ApplyBlockEdit(World_(), inverse);
+        ApplyBlockEdits(World_(), inverse);
+    }
+
+    //Remembers how to undo one operation - a single edit or a whole batch.
+    void PushUndo(std::vector<BlockEdit> inverse)
+    {
+        m_Undo.push_back(std::move(inverse));
+        if (m_Undo.size() > MaxUndoDepth)
+            m_Undo.erase(m_Undo.begin());
+    }
+
+    //Clears a ball of air where the player is aiming, as one batch.
+    //
+    //A debug stand-in for the explosions and falling terrain that batches exist
+    //for, so a batch can be seen, undone with U and timed in the running game.
+    //Single-player only: connected, only the server changes blocks in batches,
+    //and no game rule fires one yet.
+    void BlastAtAim()
+    {
+        if (m_Client)
+            return;
+
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        const VoxelRayHit hit = VoxelRaycast::Cast(
+            World_(),
+            camera.GetPosition() - WorldOffset,
+            camera.GetForwardDirection(),
+            ReachDistance,
+            true);
+
+        if (!hit.Hit)
+            return;
+
+        // Water is left alone, as it is for the edit ray: nothing makes it flow,
+        // so a hole blown in the river would stay a hole in the river.
+        std::vector<BlockEdit> ball;
+        for (int dz = -BlastRadius; dz <= BlastRadius; ++dz)
+            for (int dy = -BlastRadius; dy <= BlastRadius; ++dy)
+                for (int dx = -BlastRadius; dx <= BlastRadius; ++dx)
+                {
+                    if (dx * dx + dy * dy + dz * dz > BlastRadius * BlastRadius)
+                        continue;
+
+                    const glm::ivec3 cell = hit.Block + glm::ivec3(dx, dy, dz);
+                    if (World_().IsInBounds(cell.x, cell.y, cell.z)
+                        && World_().IsBlockFluid(cell.x, cell.y, cell.z))
+                        continue;
+
+                    ball.push_back(BlockEdit{ cell, BlockId{0} });
+                }
+
+        const auto start = std::chrono::steady_clock::now();
+        std::vector<BlockEdit> undo = ApplyBlockEdits(World_(), ball);
+        const double milliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+
+        if (undo.empty())
+            return;
+
+        CB_INFO("Blasted " + std::to_string(undo.size()) + " blocks at " +
+            std::to_string(hit.Block.x) + "," + std::to_string(hit.Block.y) + "," +
+            std::to_string(hit.Block.z) + " in " + std::to_string(milliseconds) + " ms");
+
+        PushUndo(std::move(undo));
     }
 
     //Logs a player-death notification received from the gameplay event bus.
@@ -995,6 +1057,12 @@ private:
             return true;
         }
 
+        if (event.GetKeyCode() == KeyCode::B)
+        {
+            BlastAtAim();
+            return true;
+        }
+
         const int key = static_cast<int>(event.GetKeyCode());
         const int first = static_cast<int>(KeyCode::D1);
         if (key >= first && key < first + PlaceableBlockCount)
@@ -1048,10 +1116,14 @@ private:
     glm::vec3 m_Spawn{ 0.0f };
     //Counted across the current frame's steps and published by OnFrameUpdate.
     int m_StepsThisFrame = 0;
-    //Inverses of applied edits, newest last. Capped so a long session cannot
-    //creep; the oldest entries are the least likely to be wanted back.
+    //How to undo each applied operation, newest last: one inverse for an edit,
+    //a whole batch for a blast. Capped so a long session cannot creep; the
+    //oldest entries are the least likely to be wanted back.
     static constexpr std::size_t MaxUndoDepth = 256;
-    std::vector<BlockEdit> m_Undo;
+    std::vector<std::vector<BlockEdit>> m_Undo;
+
+    //The debug blast's radius: 123 cells, about what a grenade would take.
+    static constexpr int BlastRadius = 3;
     PerspectiveCameraController m_CameraController;
 
     //Whether the game has the mouse. Escape and losing focus give it back; a

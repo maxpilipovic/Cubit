@@ -1439,7 +1439,8 @@ TEST_CASE("An accepted edit answers its editor with a result and everyone else w
     const EditTraffic other = DrainEdits(second);
     CHECK(other.Results.empty());
     REQUIRE(other.Applied.size() == 1);
-    CHECK(other.Applied[0].Edit.Position == edit.Position);
+    REQUIRE(other.Applied[0].Edits.size() == 1);
+    CHECK(other.Applied[0].Edits[0].Position == edit.Position);
 
     REQUIRE(server.EditLog().size() == 1);
     CHECK(server.EditLog()[0].Position == edit.Position);
@@ -2201,4 +2202,126 @@ TEST_CASE("A welcome exactly as big as the transport carries is still sent")
     REQUIRE(welcome.has_value());
     CHECK(welcome->Edits.size() == 2);
     CHECK(server.ClientCount() == 2);
+}
+
+TEST_CASE("A server batch changes the world, enters the edit log, and reaches every joined client")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    REQUIRE(Join(server, first) != InvalidPlayer);
+
+    PeerId secondPeer = InvalidPeer;
+    Transport& second = network.AddClient(secondPeer);
+    REQUIRE(Join(server, second) != InvalidPlayer);
+
+    DrainEdits(first);
+    DrainEdits(second);
+
+    //(31, 0, 31) is well past ReachDistance from the spawn: a batch is a game
+    //rule's change, and no player's reach applies to it. The last two edits
+    //change nothing - one is out of range, the other sets the floor to itself.
+    const std::vector<BlockEdit> batch{
+        BlockEdit{ glm::ivec3(4, 0, 4), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(31, 0, 31), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(6, 1, 6), BlockId{ 2 } },
+        BlockEdit{ glm::ivec3(-1, 0, 0), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(7, 0, 7), BlockId{ 1 } }
+    };
+
+    CHECK(server.ApplyEdits(batch) == 3);
+
+    const World& world = server.Match().GetWorld();
+    CHECK(world.GetBlock(4, 0, 4) == BlockId{ 0 });
+    CHECK(world.GetBlock(31, 0, 31) == BlockId{ 0 });
+    CHECK(world.GetBlock(6, 1, 6) == BlockId{ 2 });
+
+    CHECK(server.EditLog().size() == 3);
+
+    //Everyone, in the order the server applied them, and nothing edit-shaped
+    //besides: there is no editor to answer.
+    for (Transport* client : { &first, &second })
+    {
+        const EditTraffic heard = DrainEdits(*client);
+        CHECK(heard.Results.empty());
+        REQUIRE(heard.Applied.size() == 1);
+
+        const std::vector<BlockEdit>& edits = heard.Applied[0].Edits;
+        REQUIRE(edits.size() == 3);
+        CHECK(edits[0].Position == glm::ivec3(4, 0, 4));
+        CHECK(edits[1].Position == glm::ivec3(31, 0, 31));
+        CHECK(edits[2].Position == glm::ivec3(6, 1, 6));
+        CHECK(edits[2].Block == BlockId{ 2 });
+    }
+}
+
+TEST_CASE("A player who joins after a server batch is welcomed with its changes")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    const std::vector<BlockEdit> batch{
+        BlockEdit{ glm::ivec3(4, 0, 4), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(6, 1, 6), BlockId{ 2 } }
+    };
+    REQUIRE(server.ApplyEdits(batch) == 2);
+
+    PeerId peer = InvalidPeer;
+    Transport& late = network.AddClient(peer);
+    late.Send(LoopbackNetwork::ServerPeer, Encode(HelloMessage{}), Channel::Reliable);
+
+    std::optional<WelcomeMessage> welcome;
+    for (int step = 0; step < 8 && !welcome.has_value(); ++step)
+    {
+        server.Step(FrameClock::FixedStepSeconds);
+        welcome = FindWelcome(late);
+    }
+
+    REQUIRE(welcome.has_value());
+    REQUIRE(welcome->Edits.size() == 2);
+
+    //The log is in no particular order.
+    const bool hasHole = welcome->Edits[0].Position == glm::ivec3(4, 0, 4)
+        || welcome->Edits[1].Position == glm::ivec3(4, 0, 4);
+    const bool hasBlock = welcome->Edits[0].Position == glm::ivec3(6, 1, 6)
+        || welcome->Edits[1].Position == glm::ivec3(6, 1, 6);
+    CHECK(hasHole);
+    CHECK(hasBlock);
+}
+
+TEST_CASE("A server batch bigger than one message is split across messages, in order")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    DrainEdits(client);
+
+    //Ten edits past one message's worth: whole 32 x 32 layers above the floor.
+    const std::size_t total = MaxEditsPerMessage + 10;
+    std::vector<BlockEdit> batch;
+    for (int y = 1; batch.size() < total; ++y)
+        for (int z = 0; z < 32 && batch.size() < total; ++z)
+            for (int x = 0; x < 32 && batch.size() < total; ++x)
+                batch.push_back(BlockEdit{ glm::ivec3(x, y, z), BlockId{ 2 } });
+
+    REQUIRE(server.ApplyEdits(batch) == total);
+
+    const EditTraffic heard = DrainEdits(client);
+    REQUIRE(heard.Applied.size() == 2);
+    CHECK(heard.Applied[0].Edits.size() == MaxEditsPerMessage);
+    CHECK(heard.Applied[1].Edits.size() == 10);
+
+    std::vector<BlockEdit> received = heard.Applied[0].Edits;
+    received.insert(received.end(), heard.Applied[1].Edits.begin(), heard.Applied[1].Edits.end());
+
+    REQUIRE(received.size() == batch.size());
+    bool sameOrder = true;
+    for (std::size_t i = 0; i < batch.size(); ++i)
+        sameOrder = sameOrder && received[i].Position == batch[i].Position;
+    CHECK(sameOrder);
 }

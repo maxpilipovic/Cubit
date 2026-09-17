@@ -72,6 +72,20 @@ public:
     //inputs sent during the stall off the transport.
     void SkipTicks(int ticks);
 
+    //Changes many blocks as one operation, for a game rule - an explosion,
+    //terrain giving way - and tells every joined client. Returns how many of the
+    //edits changed a block.
+    //
+    //Applied now and in order, following ApplyBlockEdit's rules: an out-of-range
+    //or no-op edit is skipped. NOT checked with IsEditLegal: reach and overlap
+    //are rules for what a player may do, and a rule that places blocks answers
+    //for where it puts them, players included. Every change enters the edit log,
+    //so a later joiner sees it, and goes out reliably in as many EditApplied
+    //messages as MaxEditsPerMessage needs. Reliable messages to a client stay in
+    //order, so a client sees these and its own EditResults in the order the
+    //server made them.
+    std::size_t ApplyEdits(std::span<const BlockEdit> edits);
+
     const MatchState& Match() const { return m_Match; }
 
     //Every cell whose block differs from the loaded map, each with the block it

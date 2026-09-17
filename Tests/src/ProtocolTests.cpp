@@ -197,10 +197,14 @@ TEST_CASE("An empty roster is a legal snapshot")
     CHECK(received.Players.empty());
 }
 
-TEST_CASE("An applied edit round-trips")
+TEST_CASE("An applied batch round-trips in order")
 {
     EditMessage sent;
-    sent.Edit = BlockEdit{ glm::ivec3(300, 40, -12), BlockId{ 3 } };
+    sent.Edits = {
+        BlockEdit{ glm::ivec3(300, 40, -12), BlockId{ 3 } },
+        BlockEdit{ glm::ivec3(1, 2, 3), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(300, 40, -12), BlockId{ 7 } }
+    };
 
     const std::vector<std::uint8_t> applied = EncodeEditApplied(sent);
 
@@ -208,10 +212,41 @@ TEST_CASE("An applied edit round-trips")
     REQUIRE(PeekMessageId(applied, id));
     CHECK(id == MessageId::EditApplied);
 
+    //The id, a u32 count, and 14 bytes an edit.
+    CHECK(applied.size() == 1 + 4 + 3 * 14);
+
     EditMessage received;
     REQUIRE(Decode(applied, received));
-    CHECK(received.Edit.Position == glm::ivec3(300, 40, -12));
-    CHECK(received.Edit.Block == BlockId{ 3 });
+    REQUIRE(received.Edits.size() == 3);
+    CHECK(received.Edits[0].Position == glm::ivec3(300, 40, -12));
+    CHECK(received.Edits[0].Block == BlockId{ 3 });
+    CHECK(received.Edits[1].Position == glm::ivec3(1, 2, 3));
+    CHECK(received.Edits[1].Block == BlockId{ 0 });
+    CHECK(received.Edits[2].Block == BlockId{ 7 });
+}
+
+TEST_CASE("An applied batch with no edits is legal and carries nothing")
+{
+    EditMessage received;
+    received.Edits.push_back(BlockEdit{});
+
+    REQUIRE(Decode(EncodeEditApplied(EditMessage{}), received));
+    CHECK(received.Edits.empty());
+}
+
+TEST_CASE("An applied batch declaring an edit count near its type's limit is refused without throwing")
+{
+    //Falsifiable in the same way as the welcome's version below: the count is a
+    //u32, and only the guard in Decode(EditMessage&) keeps a five-byte packet
+    //from reserving gigabytes.
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::EditApplied));
+    writer.U32(0xFFFFFFFFu);
+
+    EditMessage received;
+    bool ok = true;
+    CHECK_NOTHROW(ok = Decode(writer.Span(), received));
+    CHECK_FALSE(ok);
 }
 
 TEST_CASE("A retired message id is not recognised")
@@ -263,7 +298,10 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
         messages.push_back(Encode(TwoPlayerSnapshot()));
 
         EditMessage edit;
-        edit.Edit = BlockEdit{ glm::ivec3(2, 2, 2), BlockId{ 1 } };
+        edit.Edits = {
+            BlockEdit{ glm::ivec3(2, 2, 2), BlockId{ 1 } },
+            BlockEdit{ glm::ivec3(5, 6, 7), BlockId{ 0 } }
+        };
         messages.push_back(EncodeEditApplied(edit));
 
         InputMessage inputWithEdit;

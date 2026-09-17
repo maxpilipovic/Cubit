@@ -284,7 +284,7 @@ TEST_CASE("A server change beneath a pending prediction does not show until the 
 
     //Somebody else's edit to the same cell reaches this client first.
     EditMessage theirs;
-    theirs.Edit = BlockEdit{ cell, BlockId{ 3 } };
+    theirs.Edits.push_back(BlockEdit{ cell, BlockId{ 3 } });
     network.Server().Send(peer, EncodeEditApplied(theirs), Channel::Reliable);
 
     client.SetInput(CharacterInput{});
@@ -770,4 +770,47 @@ TEST_CASE("An edit on an input dropped from a full queue is taken back on the cl
     CHECK(ServerBlock(server, cell) == BlockId{ 1 });
     CHECK(client.PendingEditCount() == 0);
     CHECK(ClientBlock(client, cell) == BlockId{ 1 });
+}
+
+TEST_CASE("A server batch over a pending prediction leaves the client with the server's world")
+{
+    //Over the real server and a 166.7 ms link, so a rule's batch reaches the
+    //server between the client's prediction and the server applying it - the
+    //case where a batch lands on a cell the client is still predicting.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    const glm::ivec3 predicted(10, 1, 8);
+    client.RequestEdit(BlockEdit{ predicted, BlockId{ 2 } });
+    StepBoth(client, server);
+    REQUIRE(ClientBlock(client, predicted) == BlockId{ 2 });
+
+    //The batch fills the predicted cell with something else, and digs a hole
+    //the client has not touched.
+    const glm::ivec3 hole(12, 0, 12);
+    const std::vector<BlockEdit> batch{
+        BlockEdit{ predicted, BlockId{ 3 } },
+        BlockEdit{ hole, BlockId{ 0 } }
+    };
+    REQUIRE(server.ApplyEdits(batch) == 2);
+
+    for (int i = 0; i < 60; ++i)
+        StepBoth(client, server);
+
+    CHECK(client.PendingEditCount() == 0);
+    CHECK(ClientBlock(client, predicted) == ServerBlock(server, predicted));
+    CHECK(ClientBlock(client, hole) == BlockId{ 0 });
+    CHECK(ServerBlock(server, hole) == BlockId{ 0 });
 }

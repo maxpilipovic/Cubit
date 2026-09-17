@@ -51,7 +51,15 @@ enum class MessageId : std::uint8_t
 //
 //5: PlayerSnapshot gained SpareInputs, the backlog report a client catches up
 //on. On the per-tick path.
-constexpr std::uint32_t ProtocolVersion = 5;
+//
+//6: EditApplied carries a list, so the server can change many blocks as one
+//operation - an explosion, terrain giving way - and send them together.
+constexpr std::uint32_t ProtocolVersion = 6;
+
+//The most edits one EditApplied carries. The server splits a bigger batch across
+//several messages, 14 bytes an edit, so about 57 KB each: no batch can come near
+//what a transport carries in one message, which is a send dropped and logged.
+constexpr std::size_t MaxEditsPerMessage = 4096;
 
 //How many server ticks a spare-input report looks back over - ten seconds.
 //
@@ -167,11 +175,13 @@ struct SnapshotMessage
     std::vector<PlayerSnapshot> Players;
 };
 
-//One edit the server has applied, sent to every joined client except the one
-//that made it. The editor hears about its own edits from EditResult instead.
+//Edits the server has applied, in the order it applied them, sent to every
+//joined client. A player's edit is a list of one, sent to everyone except that
+//player, who hears about it from EditResult instead. A batch from a game rule
+//goes to everyone, split across messages of at most MaxEditsPerMessage.
 struct EditMessage
 {
-    BlockEdit Edit;
+    std::vector<BlockEdit> Edits;
 };
 
 //A client asking to shoot.

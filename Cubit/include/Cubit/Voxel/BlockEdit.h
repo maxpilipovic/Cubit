@@ -6,6 +6,8 @@
 #include <glm/glm.hpp>
 
 #include <optional>
+#include <span>
+#include <vector>
 
 class World;
 
@@ -31,3 +33,13 @@ struct BlockEdit
 //World::SetBlock: once an edit is data that can arrive from a file or a socket,
 //a bad coordinate is malformed input rather than a bug in the caller.
 CB_API std::optional<BlockEdit> ApplyBlockEdit(World& world, const BlockEdit& edit);
+
+//Applies a batch of edits in order and returns the batch that undoes it: apply
+//the result, as it is, to put back every block this batch changed.
+//
+//For changes nobody made by hand - an explosion, terrain giving way - which
+//touch many cells at once. Each edit follows ApplyBlockEdit's rules, so an
+//out-of-range or no-op edit is skipped and has no undo entry, and a cell named
+//twice ends with the later block. The world afterwards, light included, is
+//exactly the world the same edits applied one at a time would leave.
+CB_API std::vector<BlockEdit> ApplyBlockEdits(World& world, std::span<const BlockEdit> edits);

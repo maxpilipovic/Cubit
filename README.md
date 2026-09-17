@@ -134,7 +134,8 @@ the map. The current map is a 512x64x512 battlefield.
 
 **Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
 a block, right click places one, `1`–`8` pick the colour, and middle click fires. `U`
-undoes the last block edit. `F5` saves the edited world, `F9` restores it — a
+undoes the last block edit. `B` (single-player) blows a radius-3 ball out of the terrain
+where you aim, as one batch that `U` undoes whole. `F5` saves the edited world, `F9` restores it — a
 checkpoint pair for authoring a map by playing it.
 
 ## Building
@@ -184,7 +185,7 @@ for scripts; otherwise `Ctrl+C` stops it and tells every client. With no argumen
 
 ## Tests
 
-`Tests` is a doctest suite — 530 cases — covering everything that can be checked
+`Tests` is a doctest suite — 540 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's

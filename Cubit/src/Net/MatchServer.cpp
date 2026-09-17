@@ -469,7 +469,7 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
         RecordInLog(edit, inverse->Block);
 
         EditMessage applied;
-        applied.Edit = edit;
+        applied.Edits.push_back(edit);
         SendToJoined(EncodeEditApplied(applied), Channel::Reliable, peer);
     }
 
@@ -478,6 +478,36 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
     result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
 
     m_Transport.Send(peer, Encode(result), Channel::Reliable);
+}
+
+std::size_t MatchServer::ApplyEdits(std::span<const BlockEdit> edits)
+{
+    std::vector<BlockEdit> changed;
+    changed.reserve(edits.size());
+
+    //One at a time rather than through ApplyBlockEdits, because the log needs
+    //each edit's previous block, and a batch's undo list cannot say which edit
+    //it came from once no-ops have been skipped.
+    for (const BlockEdit& edit : edits)
+    {
+        const std::optional<BlockEdit> inverse = ApplyBlockEdit(m_Match.GetWorld(), edit);
+        if (!inverse.has_value())
+            continue;
+
+        RecordInLog(edit, inverse->Block);
+        changed.push_back(edit);
+    }
+
+    for (std::size_t first = 0; first < changed.size(); first += MaxEditsPerMessage)
+    {
+        const std::size_t count = std::min(MaxEditsPerMessage, changed.size() - first);
+
+        EditMessage message;
+        message.Edits.assign(changed.begin() + first, changed.begin() + first + count);
+        SendToJoined(EncodeEditApplied(message), Channel::Reliable);
+    }
+
+    return changed.size();
 }
 
 void MatchServer::RecordInLog(const BlockEdit& edit, BlockId previous)

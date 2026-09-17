@@ -529,7 +529,8 @@ void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)
     if (!Decode(data, message))
         return;
 
-    ApplyConfirmedBlock(message.Edit.Position, message.Edit.Block);
+    for (const BlockEdit& edit : message.Edits)
+        ApplyConfirmedBlock(edit.Position, edit.Block);
 }
 
 void MatchClient::HandleEditResult(std::span<const std::uint8_t> data)

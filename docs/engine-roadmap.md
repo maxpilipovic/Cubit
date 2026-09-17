@@ -246,9 +246,49 @@ them. Every item was checked in the code unless it says otherwise. References ar
 
 ### B. Missing — systems the game will need
 
-- [ ] **B1. Multi-block edits.** `BlockEdit` is one block (`BlockEdit.h:17`) and the
-  protocol carries at most one edit per input, 60 a second (`Protocol.h:99`). Explosions,
-  grenades and digging more than one block at a time all need more.
+- [x] **B1. Multi-block edits.** **Done 2026-09-17, scoped by the user to changes the
+  server makes.** An explosion or falling terrain changes many blocks at once, and only
+  the server does that. A player's own tools stay one edit per tick, which is all the
+  scope doc asks for (PLY-04 and PLY-05 are single-block tools; NET-04 recommends batching
+  edits on the wire). If a tool ever needs to change several blocks at once, say a 3-high
+  dig, that is new work: prediction, legality and refusals would all have to handle
+  batches. **What exists:**
+  - `ApplyBlockEdits(World&, span)` applies a batch in order and returns the batch that
+    undoes it.
+  - `MatchServer::ApplyEdits(span)` applies a batch now. It runs no reach or overlap check,
+    because a rule answers for where it puts blocks. Every change goes into the edit log,
+    and the changes go out reliably in `EditApplied` messages.
+  - Protocol v6: `EditApplied` carries a u32 count and a list, split at
+    `MaxEditsPerMessage` (4,096 edits, about 57 KB), so no batch can reach the transport's
+    limit. A player's edit is a list of one. The decoder guards the count the same way the
+    welcome's does.
+  - The client applies each cell the way it applies a single edit from the server. So a
+    batch that lands on a cell with a pending prediction becomes the confirmed block under
+    it.
+  - A Sandbox debug key, `B` (single-player only), clears a radius-3 ball where you aim.
+    `U` undoes the whole ball.
+
+  **Relighting stays one cell at a time, by measurement.** On the shipped map, a radius-3
+  ball (122 cells changed) takes 0.11 ms to break and 0.26 ms to undo in Release (2.1 ms in
+  Debug). A radius-10 ball (2,880 cells changed) takes 2.1 ms and 3.3 ms in Release (45 ms
+  and 68 ms in Debug). The test "What relighting a batch costs on the shipped map, measured"
+  prints these. A single relight for the whole batch is only worth doing if a real rule
+  makes batches far bigger.
+
+  **Tests:** a batch leaves blocks and light exactly as the same edits applied one at a
+  time; applying the undo batch restores both; only real changes get undo entries. The
+  protocol round-trips a batch in order, and refuses a batch declaring a huge count. On the
+  server, a batch reaches two clients in order and enters the log, a later joiner is
+  welcomed with it, and 4,106 edits split into 4,096 + 10. Over a 166.7 ms link, a batch
+  that lands on a cell with a pending prediction leaves the client matching the server.
+  Three deliberate faults were each caught by their test: no logging, no splitting, and a
+  client that applies only the first edit in a message. In the running Sandbox, a blast
+  made a crater the player fell into ("Blasted 49 blocks ... in 1.16 ms", Debug), and an
+  undo filled it back in. As with single-block undo, filling it back buries a player
+  standing in the hole. The original entry follows. `BlockEdit` is one block
+  (`BlockEdit.h:17`) and the protocol carries at most one edit per input, 60 a second
+  (`Protocol.h:99`). Explosions, grenades and digging more than one block at a time all
+  need more.
 - [ ] **B2. Terrain collapse** — blocks left with no support fall. Nothing exists. It is
   what makes a game Ace of Spades-like, but it is **not in the scope doc**, so the first
   step is deciding whether it is in scope. If it is: it must be server-authoritative, and it

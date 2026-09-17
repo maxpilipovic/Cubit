@@ -130,7 +130,11 @@ std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message)
 {
     ByteWriter writer;
     writer.U8(static_cast<std::uint8_t>(MessageId::EditApplied));
-    WriteEdit(writer, message.Edit);
+    writer.U32(static_cast<std::uint32_t>(message.Edits.size()));
+
+    for (const BlockEdit& edit : message.Edits)
+        WriteEdit(writer, edit);
+
     return writer.Bytes();
 }
 
@@ -342,13 +346,24 @@ bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out)
     if (!OpenAs(reader, MessageId::EditApplied))
         return false;
 
+    const std::uint32_t count = reader.U32();
+
+    //The same guard as Decode(WelcomeMessage&), for the same reason: a u32 count
+    //off a socket must not decide how much memory is reserved. Without it a
+    //five-byte packet asks for gigabytes - see that guard's comment for what
+    //happened when it was removed there.
+    if (!reader.Ok() || count > reader.Remaining() / BlockEditBytes)
+        return false;
+
     EditMessage message;
-    message.Edit = ReadEdit(reader);
+    message.Edits.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i)
+        message.Edits.push_back(ReadEdit(reader));
 
     if (!reader.Ok())
         return false;
 
-    out = message;
+    out = std::move(message);
     return true;
 }
 

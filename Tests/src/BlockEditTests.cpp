@@ -2,9 +2,12 @@
 
 #include "Cubit/Voxel/BlockEdit.h"
 #include "Cubit/Voxel/SkyLight.h"
+#include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/World.h"
 
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -246,4 +249,160 @@ TEST_CASE("An edit and its inverse leave every sky-light value unchanged")
     const std::optional<glm::ivec3> difference = FirstLightDifference(world, before);
     INFO("first differing sky-light cell: ", Describe(difference));
     CHECK_FALSE(difference.has_value());
+}
+
+namespace
+{
+    //Every block in the world, in the same z, y, x order as SnapshotLight.
+    std::vector<BlockId> SnapshotBlocks(const World& world)
+    {
+        std::vector<BlockId> blocks;
+        blocks.reserve(static_cast<std::size_t>(world.GetWidth()) *
+            world.GetHeight() * world.GetDepth());
+
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 0; y < world.GetHeight(); ++y)
+                for (int x = 0; x < world.GetWidth(); ++x)
+                    blocks.push_back(world.GetBlock(x, y, z));
+
+        return blocks;
+    }
+
+    //A batch that exercises every rule at once: it opens the chamber's roof, fills
+    //part of the chamber, names one cell twice, and carries an out-of-range and a
+    //no-op edit.
+    std::vector<BlockEdit> MixedBatch()
+    {
+        std::vector<BlockEdit> batch;
+
+        for (int x = 14; x <= 18; ++x)
+            batch.push_back(BlockEdit{ glm::ivec3(x, 9, 16), BlockId{0} });
+
+        for (int x = 13; x <= 15; ++x)
+            batch.push_back(BlockEdit{ glm::ivec3(x, 5, 13), BlockId{2} });
+
+        batch.push_back(BlockEdit{ glm::ivec3(20, 6, 20), BlockId{3} });
+        batch.push_back(BlockEdit{ glm::ivec3(20, 6, 20), BlockId{4} });
+
+        batch.push_back(BlockEdit{ glm::ivec3(-1, 5, 5), BlockId{1} });
+        batch.push_back(BlockEdit{ glm::ivec3(2, 2, 2), BlockId{1} });
+
+        return batch;
+    }
+}
+
+TEST_CASE("A batch leaves the world exactly as the same edits applied one at a time")
+{
+    World batched = MakeChamberWorld();
+    World oneByOne = MakeChamberWorld();
+    SkyLight::PropagateAll(batched);
+    SkyLight::PropagateAll(oneByOne);
+
+    const std::vector<BlockEdit> batch = MixedBatch();
+
+    ApplyBlockEdits(batched, batch);
+    for (const BlockEdit& edit : batch)
+        ApplyBlockEdit(oneByOne, edit);
+
+    // Opening the roof must reach the chamber, or matching light proves little.
+    REQUIRE(oneByOne.GetSkyLight(16, 8, 16) > 0);
+
+    CHECK(batched.GetBlock(20, 6, 20) == BlockId{4});
+    CHECK(SnapshotBlocks(batched) == SnapshotBlocks(oneByOne));
+
+    const std::optional<glm::ivec3> difference =
+        FirstLightDifference(batched, SnapshotLight(oneByOne));
+    INFO("first differing sky-light cell: ", Describe(difference));
+    CHECK_FALSE(difference.has_value());
+}
+
+TEST_CASE("Applying the batch a batch returns puts back every block and every light value")
+{
+    World world = MakeChamberWorld();
+    SkyLight::PropagateAll(world);
+
+    const std::vector<BlockId> blocksBefore = SnapshotBlocks(world);
+    const std::vector<std::uint8_t> lightBefore = SnapshotLight(world);
+
+    const std::vector<BlockEdit> undo = ApplyBlockEdits(world, MixedBatch());
+    REQUIRE(SnapshotBlocks(world) != blocksBefore);
+
+    ApplyBlockEdits(world, undo);
+
+    CHECK(SnapshotBlocks(world) == blocksBefore);
+
+    const std::optional<glm::ivec3> difference = FirstLightDifference(world, lightBefore);
+    INFO("first differing sky-light cell: ", Describe(difference));
+    CHECK_FALSE(difference.has_value());
+}
+
+TEST_CASE("A batch has undo entries only for edits that changed something")
+{
+    World world = MakeChamberWorld();
+
+    // Five roof cells, three floor cells and two changes to one cell change
+    // something; the out-of-range and the no-op edits do not.
+    const std::vector<BlockEdit> undo = ApplyBlockEdits(world, MixedBatch());
+    CHECK(undo.size() == 10);
+
+    // Undo runs newest first, so the doubly-named cell goes back to 3 before 0.
+    REQUIRE_FALSE(undo.empty());
+    CHECK(undo.front().Position == glm::ivec3(20, 6, 20));
+    CHECK(undo.front().Block == BlockId{3});
+    CHECK(undo[1].Position == glm::ivec3(20, 6, 20));
+    CHECK(undo[1].Block == BlockId{0});
+}
+
+TEST_CASE("What relighting a batch costs on the shipped map, measured")
+{
+    //Not a gate: the number that decides whether ApplyBlockEdits needs one
+    //relight for the whole batch instead of one per cell. A ball of air blown
+    //into the ground in the middle of the map, at two sizes - a grenade's, and
+    //about 5,000 cells for terrain giving way.
+    std::filesystem::path path;
+    for (const char* candidate : {
+            "Sandbox/assets/maps/battlefield512.vox",
+            "../Sandbox/assets/maps/battlefield512.vox" })
+        if (std::filesystem::exists(candidate))
+        {
+            path = candidate;
+            break;
+        }
+
+    REQUIRE_FALSE(path.empty());
+
+    World world = BuildWorld(VoxLoader::LoadFile(path.string()));
+    SkyLight::PropagateAll(world);
+
+    const int cx = world.GetWidth() / 2;
+    const int cz = world.GetDepth() / 2;
+    int top = world.GetHeight() - 1;
+    while (top > 0 && !world.IsBlockOpaque(cx, top, cz))
+        --top;
+
+    for (const int radius : { 3, 10 })
+    {
+        const glm::ivec3 centre(cx, top, cz);
+        std::vector<BlockEdit> ball;
+        for (int dz = -radius; dz <= radius; ++dz)
+            for (int dy = -radius; dy <= radius; ++dy)
+                for (int dx = -radius; dx <= radius; ++dx)
+                    if (dx * dx + dy * dy + dz * dz <= radius * radius)
+                        ball.push_back(BlockEdit{ centre + glm::ivec3(dx, dy, dz), BlockId{0} });
+
+        const auto start = std::chrono::steady_clock::now();
+        const std::vector<BlockEdit> undo = ApplyBlockEdits(world, ball);
+        const auto middle = std::chrono::steady_clock::now();
+        ApplyBlockEdits(world, undo);
+        const auto end = std::chrono::steady_clock::now();
+
+        const auto ms = [](auto from, auto to)
+        {
+            return std::chrono::duration<double, std::milli>(to - from).count();
+        };
+
+        MESSAGE("radius ", radius, " ball at y ", top, ": ", ball.size(), " cells, ", undo.size(),
+            " changed; blowing it out ", ms(start, middle), " ms, filling it back ", ms(middle, end), " ms");
+        CHECK_FALSE(undo.empty());
+    }
 }
