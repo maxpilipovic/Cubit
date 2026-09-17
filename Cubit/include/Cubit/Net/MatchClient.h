@@ -51,6 +51,13 @@ constexpr std::size_t MaxQueuedEdits = 4;
 //measurement; if the measured correction rate is bad, suspect this first.
 constexpr float CorrectionThreshold = 0.15f;
 
+//Fewest ticks between two catch-up skips.
+//
+//A skip holds the local player still for one tick, which on its own is a 16.7 ms
+//pause nobody sees; bunched together, skips would be a visible stall. Ten apart
+//drains the queue cap's worth of backlog in a little over a second.
+constexpr std::uint64_t CatchUpSkipSpacingTicks = 10;
+
 //A map the client found on its own disk, and the hash of the bytes it came
 //from. The hash is checked against the server's before anything is trusted.
 struct LoadedMap
@@ -245,6 +252,10 @@ private:
     //Ends the connection and latches Rejected.
     void Reject(const char* reason);
 
+    //Whether this step should make no input, to drain a backlog the server has
+    //reported. Takes the skip when it says yes.
+    bool TakeCatchUpSkip();
+
     Transport& m_Transport;
     MapLoader m_LoadMap;
 
@@ -349,6 +360,17 @@ private:
 
     std::optional<ShotReport> m_LastShot;
     std::uint8_t m_LocalHealth = 0;
+
+    //The newest spare-input report from this client's own snapshot entry, and
+    //the ack that came with it - which says how far the server's window reaches.
+    std::uint8_t m_ReportedSpare = 0;
+    std::uint64_t m_ReportedAck = 0;
+
+    //Catch-up skips a report asked for that have not been taken yet.
+    std::uint8_t m_SkipsOwed = 0;
+
+    //The tick this client was on when it last skipped. Unset until it first does.
+    std::optional<std::uint64_t> m_LastSkipTick;
 };
 
 #ifdef _MSC_VER

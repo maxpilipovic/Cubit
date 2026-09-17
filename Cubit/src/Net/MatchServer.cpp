@@ -67,6 +67,17 @@ void MatchServer::Step(double seconds)
 
     for (Client& client : m_Clients)
     {
+        //Before the take, so an input that arrived just in time counts as a
+        //depth of one - and every step, empty queue or not, because a starved
+        //step is the thinnest moment there is.
+        if (client.Player != InvalidPlayer)
+        {
+            client.DepthSamples[client.NextDepthSample] =
+                static_cast<std::uint8_t>(std::min<std::size_t>(client.Queue.size(), 255));
+            client.NextDepthSample = (client.NextDepthSample + 1) % client.DepthSamples.size();
+            client.DepthSampleCount = std::min(client.DepthSampleCount + 1, client.DepthSamples.size());
+        }
+
         //An empty queue means no input this tick, exactly as in Stage 2 when a
         //packet was lost. The player simply does not move; the client sees a
         //correction of one step of walking, 0.083 blocks, which is inside the
@@ -192,6 +203,32 @@ void MatchServer::PassInput(Client& client, std::uint64_t tick)
     client.SeenInputs = advance >= RememberedInputTicks ? 0 : client.SeenInputs << advance;
     client.SeenInputs |= 1;
     client.LastInputTick = tick;
+}
+
+std::uint8_t MatchServer::SpareInputsOf(const Client& client)
+{
+    //A backlog is only a backlog if it lasts a whole window.
+    if (client.DepthSampleCount < client.DepthSamples.size())
+        return 0;
+
+    //The thinnest moment, not the latest or the average: a jitter buffer runs
+    //down to one input at its worst and is doing its job, and trimming it would
+    //starve the next worst moment. One is what an input arriving just in time
+    //leaves.
+    const auto [thinnestAt, deepestAt] =
+        std::minmax_element(client.DepthSamples.begin(), client.DepthSamples.end());
+    const int thinnest = *thinnestAt;
+
+    //And one more in reserve if the depth moved at all. A link that loses
+    //packets runs its queue down furthest when two or three bundles in a row are
+    //lost, which can be longer apart than any window worth waiting for: measured
+    //on the suite's 5%-loss links, a window with no reserve reported inputs to
+    //spare 24 times in 35,000 ticks, each a starved tick waiting to happen, and
+    //with the reserve none. A queue that held one depth for the whole window is
+    //arriving like clockwork, and gets back everything above one.
+    const int keep = *thinnestAt == *deepestAt ? 1 : 2;
+
+    return static_cast<std::uint8_t>(std::max(thinnest - keep, 0));
 }
 
 void MatchServer::HandleConnected(PeerId peer)
@@ -592,6 +629,7 @@ void MatchServer::SendSnapshots()
             entry.Pitch = owner->Pitch;
             entry.LastInputTick = owner->LastInputTick;
             entry.Health = owner->Health;
+            entry.SpareInputs = SpareInputsOf(*owner);
         }
 
         snapshot.Players.push_back(entry);

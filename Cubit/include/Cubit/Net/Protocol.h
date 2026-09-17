@@ -48,7 +48,20 @@ enum class MessageId : std::uint8_t
 //
 //4: predicted edits. An input entry may carry one edit, and the editor hears
 //its fate from EditResult. On the per-tick path.
-constexpr std::uint32_t ProtocolVersion = 4;
+//
+//5: PlayerSnapshot gained SpareInputs, the backlog report a client catches up
+//on. On the per-tick path.
+constexpr std::uint32_t ProtocolVersion = 5;
+
+//How many server ticks a spare-input report looks back over - ten seconds.
+//
+//Chosen by measurement, not reasoning: at two seconds, the suite's 5%-loss
+//links reported inputs to spare over and over, because the rare moments their
+//queues ran thinnest fell outside the window. So a backlog costs up to ten
+//seconds of extra delay before it starts to drain. Shared because the client
+//needs it too: a report is only news once a whole window of inputs made after
+//its last catch-up skip has been taken.
+constexpr std::uint64_t SpareInputWindowTicks = 600;
 
 //How many inputs one InputMessage carries at most.
 //
@@ -134,6 +147,18 @@ struct PlayerSnapshot
     //and nothing more, because health changes only when a game rule fires and
     //the client owns no game rules.
     std::uint8_t Health = 0;
+
+    //How many more of this player's inputs the server has held queued than it
+    //needs, at the thinnest moment of the last SpareInputWindowTicks ticks: more
+    //than one if the queue's depth held steady over the window, more than two if
+    //it moved. Zero until a whole window has been seen.
+    //
+    //Non-zero means a backlog that is not draining: the server takes one input
+    //a tick and the client sends one, so inputs that once bunched up - a clock
+    //running fast, a lag spike - stay queued as input delay for good. The owning
+    //client catches up by not making that many inputs. Per-player for the same
+    //reason LastInputTick is.
+    std::uint8_t SpareInputs = 0;
 };
 
 struct SnapshotMessage

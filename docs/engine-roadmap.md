@@ -108,7 +108,41 @@ them. Every item was checked in the code unless it says otherwise. References ar
   unanswered. Older than today's change and rare — each tick rides in three bundles — and
   telling a never-seen input from a repeat needs the server to remember which ticks it has
   had.
-- [ ] **A8. A client whose clock runs fast fills its queue over a long match.** _Reasoned
+- [x] **A8. A client whose clock runs fast fills its queue over a long match.** **Confirmed,
+  found to be wider than written, and fixed 2026-09-16.** Measured first, at 3-tick latency:
+  a client clock 0.2% fast took input delay from 4 ticks to 6, 8, 10 and then 11, where the
+  queue cap started dropping inputs (4 corrections). A slow clock was harmless. The wider
+  problem is that clock drift is only one way to bunch inputs. Holding the client's upload
+  for 5 ticks (83 ms) took delay from 4 to 8, and for 30 ticks to 11, and both were unchanged
+  3,000 ticks later. So one Wi-Fi hiccup cost a player up to 117 ms of delay, as others see
+  them, for the rest of the match.
+  **The fix is the client catching up, chosen by the user over the server trimming.** Each
+  snapshot entry carries `SpareInputs` (protocol v5, 1 byte): the server samples each
+  client's queue depth before every take over a 600-tick window and reports the thinnest
+  depth, less 1 if the depth held steady all window, less 2 if it moved. The client then
+  skips making that many inputs, `CatchUpSkipSpacingTicks` (10) apart. A skipped step holds
+  the player still (previous position set to current, so nothing is interpolated twice)
+  and advances the remote-render clock. It acts on a new report only once the server has
+  acknowledged a whole window past its last skip, so one spare input is never skipped twice.
+  No input is ever thrown away, so catching up costs no correction and refuses no edit.
+  **Two numbers were set by measurement, not reasoning.** The first version used a 120-tick
+  window with no reserve, and it broke the 5%-loss pillar gate (1 correction). A per-tick
+  depth dump showed why: on lossy links the queue sits at 3–4 and runs down only when
+  several bundles in a row are lost, which is often further apart than two seconds. Across
+  every test link (about 50,000 ticks), the tested rules would have reported spare inputs
+  this often: 120 ticks with no reserve, 204 times in the 35,000-tick hit-rate run; 600
+  ticks with no reserve, 24 times; 600 ticks plus the reserve on a moving queue, 0 times
+  anywhere. The cost is recovery time: a backlog drains starting a window (10 s) after it
+  forms. **Tests:** the 30-tick upload spike now reads 4 before and 4 after; a 0.05%-fast
+  clock over 20,000 ticks reads 4 at every sample with 0 corrections; server tests pin the
+  window, the thinnest-not-latest rule and the reserve; client tests pin the count, the
+  spacing, the hold and the stale-report rule. Each went red under a mutation of what it
+  guards. Every existing gate reads as before: pillar and dig 0 corrections, clean link 0,
+  lag-compensation precision unchanged. The 0.05% rate is used rather than 0.2% because an
+  extra input every 500 ticks never leaves a steady 600-tick window, which no real clock
+  does either. **Still true:** a jitter peak rarer than the window can be trimmed and cost
+  one starved tick when it recurs; none of the suite's links showed one.
+  The original entry follows. _Reasoned
   2026-09-14, not measured on real machines._ Each end counts ticks on its own wall clock
   through `FrameClock`, and nothing synchronises the two. A client clock just 0.01% faster
   than the server's sends one extra input about every 10,000 ticks — under three minutes.

@@ -1939,3 +1939,152 @@ TEST_CASE("Accepted edits are counted even when the log collapses them, and refu
     CHECK(server.EditLog().empty());
     CHECK(server.AcceptedEditCount() == 2);
 }
+
+namespace
+{
+    //The SpareInputs this client's own snapshot entry reported most recently,
+    //draining everything waiting.
+    std::optional<std::uint8_t> ReportedSpare(Transport& client)
+    {
+        const std::optional<SnapshotMessage> snapshot = LastSnapshot(client);
+        if (!snapshot.has_value() || snapshot->Players.size() != 1)
+            return std::nullopt;
+
+        return snapshot->Players[0].SpareInputs;
+    }
+}
+
+TEST_CASE("A client that keeps inputs queued beyond what it needs is told how many")
+{
+    //A8 on the pre-game punch list. A client whose inputs bunched up once - a
+    //clock running fast, a lag spike, a Wi-Fi hiccup - has a backlog the server
+    //never works through, because it takes one input a tick and the client sends
+    //one. Four queued at every step is three more than an input arriving just in
+    //time needs, and the server says so.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    for (std::uint64_t tick = 1; tick <= 3; ++tick)
+        SendInput(client, tick, CharacterInput{});
+
+    std::uint64_t next = 4;
+
+    //Not before a whole window has been seen: a backlog is only a backlog if it
+    //lasts.
+    for (int step = 0; step < 10; ++step)
+    {
+        SendInput(client, next++, CharacterInput{});
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(0));
+
+    for (int step = 0; step < static_cast<int>(SpareInputWindowTicks); ++step)
+    {
+        SendInput(client, next++, CharacterInput{});
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(3));
+}
+
+TEST_CASE("A client whose inputs arrive just in time has none to spare")
+{
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    for (std::uint64_t tick = 1; tick <= SpareInputWindowTicks * 2; ++tick)
+    {
+        SendInput(client, tick, CharacterInput{});
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(0));
+}
+
+TEST_CASE("One thin moment anywhere in the window means nothing is spare")
+{
+    //The smallest depth over the window, not the latest or the average. A queue
+    //that runs down to a single input once in two seconds is a jitter buffer
+    //doing its job at its worst moment; trimming it would starve the next one.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    for (std::uint64_t tick = 1; tick <= 3; ++tick)
+        SendInput(client, tick, CharacterInput{});
+
+    std::uint64_t next = 4;
+    auto steadyStep = [&]()
+    {
+        SendInput(client, next++, CharacterInput{});
+        server.Step(FrameClock::FixedStepSeconds);
+    };
+
+    for (int step = 0; step < static_cast<int>(SpareInputWindowTicks); ++step)
+        steadyStep();
+    REQUIRE(ReportedSpare(client) == std::optional<std::uint8_t>(3));
+
+    //Three steps with nothing arriving run the queue down to one input, and a
+    //burst of four puts it straight back.
+    for (int step = 0; step < 3; ++step)
+        server.Step(FrameClock::FixedStepSeconds);
+
+    for (int i = 0; i < 4; ++i)
+        SendInput(client, next++, CharacterInput{});
+    server.Step(FrameClock::FixedStepSeconds);
+
+    for (int step = 0; step < 10; ++step)
+        steadyStep();
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(0));
+
+    //Until the thin moment has left the window.
+    for (int step = 0; step < static_cast<int>(SpareInputWindowTicks); ++step)
+        steadyStep();
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(3));
+}
+
+TEST_CASE("A queue whose depth moves keeps one input in reserve")
+{
+    //A lossy link runs its queue down furthest when several bundles in a row are
+    //lost, and that can be rarer than a window. The reserve covers it. Here the
+    //depth swings between three and four, so one input is spare, not two.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    const PlayerId player = Join(server, client);
+    REQUIRE(player != InvalidPlayer);
+
+    for (std::uint64_t tick = 1; tick <= 2; ++tick)
+        SendInput(client, tick, CharacterInput{});
+
+    std::uint64_t next = 3;
+
+    //Nothing, then two: four before the first take, three before the second.
+    for (int step = 0; step < static_cast<int>(SpareInputWindowTicks) + 10; ++step)
+    {
+        if (step % 2 == 0)
+        {
+            SendInput(client, next++, CharacterInput{});
+            SendInput(client, next++, CharacterInput{});
+        }
+
+        server.Step(FrameClock::FixedStepSeconds);
+    }
+
+    CHECK(ReportedSpare(client) == std::optional<std::uint8_t>(1));
+}

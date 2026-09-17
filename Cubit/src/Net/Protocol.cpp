@@ -8,7 +8,8 @@ namespace
     //reserving for it, which is what stops a tiny hostile packet claiming a
     //huge collection from becoming a denial of service.
     //
-    //The trailing 1 is Health, added in version 3. Keep this at the encoder's
+    //The last two 1s are Health, added in version 3, and SpareInputs, added in
+    //version 5. Keep this at the encoder's
     //true entry width, but for the reason that is easy to get backwards: the
     //guard below is `count > Remaining() / PlayerSnapshotBytes`, so a value
     //SMALLER than the true width only raises that threshold and makes the
@@ -21,7 +22,7 @@ namespace
     //slack is invisible to every test's return value on a well-formed packet,
     //the same way the guard in Decode(SnapshotMessage&) below is invisible to
     //one. Do not chase a red test by lowering this number; there isn't one.
-    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8 + 1;
+    constexpr std::size_t PlayerSnapshotBytes = 2 + 12 + 4 + 4 + 4 + 1 + 8 + 1 + 1;
     constexpr std::size_t BlockEditBytes = 12 + 2;
     constexpr std::size_t CharacterInputBytes = 4 + 4 + 4 + 4 + 1;
 
@@ -119,6 +120,7 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
         writer.Bool(player.Grounded);
         writer.U64(player.LastInputTick);
         writer.U8(player.Health);
+        writer.U8(player.SpareInputs);
     }
 
     return writer.Bytes();
@@ -323,6 +325,7 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
         player.Grounded = reader.Bool();
         player.LastInputTick = reader.U64();
         player.Health = reader.U8();
+        player.SpareInputs = reader.U8();
         message.Players.push_back(player);
     }
 

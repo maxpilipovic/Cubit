@@ -9,9 +9,11 @@
 #include "Cubit/Voxel/MatchState.h"
 
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -1140,4 +1142,304 @@ TEST_CASE("A server stall does not leave input delay behind it")
         << " ticks; " << SettleTicks << " ticks after it = " << after << " ticks");
 
     CHECK(after == before);
+}
+
+namespace
+{
+    //Sends this client a snapshot of itself, from the server's side of the
+    //loopback, carrying an ack and a spare-input report of the test's choosing.
+    //`tick` must beat every snapshot the client has seen, or it is discarded as
+    //stale.
+    void SendOwnReport(LoopbackNetwork& network, PeerId peer, const MatchClient& client,
+        std::uint64_t tick, std::uint64_t ack, std::uint8_t spare)
+    {
+        const PlayerId local = client.LocalPlayer();
+
+        PlayerSnapshot mine;
+        mine.Player = local;
+        mine.Position = client.Match().Player(local).Position();
+        mine.Grounded = true;
+        mine.Health = StartingHealth;
+        mine.LastInputTick = ack;
+        mine.SpareInputs = spare;
+
+        SnapshotMessage snapshot;
+        snapshot.Tick = tick;
+        snapshot.Players = { mine };
+
+        network.Server().Send(peer, Encode(snapshot), Channel::Unreliable);
+    }
+
+    //Steps the client alone, walking, and returns the client tick at every step
+    //that made no input.
+    std::vector<std::uint64_t> StepAloneRecordingSkips(MatchClient& client, int steps)
+    {
+        CharacterInput walking;
+        walking.Move = glm::vec2(0.0f, 1.0f);
+
+        std::vector<std::uint64_t> skipped;
+        for (int step = 0; step < steps; ++step)
+        {
+            const std::uint64_t before = client.Match().Tick();
+            client.SetInput(walking);
+            client.Step(FrameClock::FixedStepSeconds);
+
+            if (client.Match().Tick() == before)
+                skipped.push_back(before);
+        }
+
+        return skipped;
+    }
+}
+
+TEST_CASE("A client told it has inputs to spare skips making that many, spread out")
+{
+    //The other half of A8. Not making an input is the only way to drain a
+    //backlog without throwing one away: the server takes a queued input on the
+    //tick this client stayed quiet, and nothing the client showed is undone.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    StandStill(server, client, 120);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    SendOwnReport(network, peer, client, server.Match().Tick() + 1, client.Match().Tick(), 2);
+
+    CharacterInput walking;
+    walking.Move = glm::vec2(0.0f, 1.0f);
+
+    std::vector<std::uint64_t> skipped;
+    for (int step = 0; step < 200; ++step)
+    {
+        const std::uint64_t before = client.Match().Tick();
+        client.SetInput(walking);
+        client.Step(FrameClock::FixedStepSeconds);
+
+        if (client.Match().Tick() != before)
+            continue;
+
+        skipped.push_back(before);
+
+        //Held still, not left mid-interpolation: a step that did not happen must
+        //not render as a step backwards.
+        const CharacterController& self = client.Match().Player(client.LocalPlayer());
+        CHECK(self.PreviousPosition() == self.Position());
+    }
+
+    REQUIRE(skipped.size() == 2);
+    CHECK(skipped[1] - skipped[0] >= CatchUpSkipSpacingTicks);
+}
+
+TEST_CASE("A client does not act on a spare-input report that may predate its last skip")
+{
+    //The report is the smallest depth over the server's last window. Until the
+    //server has taken a whole window of inputs made after the skip, that window
+    //still holds depths from before it - acting on it again would skip twice for
+    //one spare input and starve the server.
+    LoopbackNetwork network;
+    PeerId peer = InvalidPeer;
+    Transport& raw = network.AddClient(peer);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, network.Server());
+    MatchClient client(raw, GoodLoader());
+
+    StandStill(server, client, 120);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    std::uint64_t reportTick = server.Match().Tick() + 1;
+    SendOwnReport(network, peer, client, reportTick++, client.Match().Tick(), 1);
+
+    const std::vector<std::uint64_t> first = StepAloneRecordingSkips(client, 20);
+    REQUIRE(first.size() == 1);
+    const std::uint64_t skippedAt = first[0];
+
+    //Far enough on that the client has made every input the reports below name.
+    StepAloneRecordingSkips(client, static_cast<int>(SpareInputWindowTicks) + 10);
+
+    SendOwnReport(network, peer, client, reportTick++, skippedAt + SpareInputWindowTicks - 1, 1);
+    CHECK(StepAloneRecordingSkips(client, 3 * static_cast<int>(CatchUpSkipSpacingTicks)).empty());
+
+    SendOwnReport(network, peer, client, reportTick++, skippedAt + SpareInputWindowTicks, 1);
+    CHECK(StepAloneRecordingSkips(client, 3 * static_cast<int>(CatchUpSkipSpacingTicks)).size() == 1);
+}
+
+namespace
+{
+    //Holds everything a client sends while Holding is set and lets it all go at
+    //once on Release - a lag spike on the client's upload, which delivers the
+    //inputs made during it as one burst.
+    class UploadSpike : public Transport
+    {
+    public:
+        explicit UploadSpike(Transport& inner) : m_Inner(inner) {}
+
+        bool Holding = false;
+
+        void Release()
+        {
+            for (const Held& held : m_Held)
+                m_Inner.Send(held.Peer, held.Data, held.Lane);
+
+            m_Held.clear();
+        }
+
+        void Send(PeerId peer, std::span<const std::uint8_t> data, Channel channel) override
+        {
+            if (Holding)
+            {
+                m_Held.push_back(Held{ peer, std::vector<std::uint8_t>(data.begin(), data.end()), channel });
+                return;
+            }
+
+            m_Inner.Send(peer, data, channel);
+        }
+
+        void Broadcast(std::span<const std::uint8_t> data, Channel channel) override
+        {
+            m_Inner.Broadcast(data, channel);
+        }
+
+        void Disconnect(PeerId peer) override { m_Inner.Disconnect(peer); }
+        bool Poll(NetEvent& out) override { return m_Inner.Poll(out); }
+        void Advance(double seconds) override { m_Inner.Advance(seconds); }
+        double RoundTripTime(PeerId peer) const override { return m_Inner.RoundTripTime(peer); }
+
+    private:
+        struct Held
+        {
+            PeerId Peer = InvalidPeer;
+            std::vector<std::uint8_t> Data;
+            Channel Lane = Channel::Unreliable;
+        };
+
+        Transport& m_Inner;
+        std::vector<Held> m_Held;
+    };
+}
+
+TEST_CASE("A lag spike on a client's upload does not leave input delay behind it")
+{
+    //A8. Measured before the fix: holding the upload for 5 ticks took input
+    //delay from 4 ticks to 8, and 30 ticks took it to 11 - the queue cap - and
+    //both were unchanged 3,000 ticks later. During the spike the server starves;
+    //afterwards the burst sits queued, and a server that takes one input a tick
+    //from a client that sends one never works through it.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientSim(network.AddClient(peer), sim);
+    UploadSpike clientNet(clientSim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    StandStill(server, client, 120);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    const int before = TicksUntilServerMoves(server, client);
+    REQUIRE(before > 0);
+    StandStill(server, client, 120);
+
+    constexpr int SpikeTicks = 30;
+    clientNet.Holding = true;
+    StandStill(server, client, SpikeTicks);
+    clientNet.Holding = false;
+    clientNet.Release();
+
+    //A whole window before the server calls the burst a backlog, then one skip
+    //every CatchUpSkipSpacingTicks for each of the queue cap's worth of spare
+    //inputs, then a margin.
+    const int SettleTicks = static_cast<int>(SpareInputWindowTicks + 8 * CatchUpSkipSpacingTicks) + 120;
+    StandStill(server, client, SettleTicks);
+
+    const int after = TicksUntilServerMoves(server, client);
+
+    MESSAGE("input delay before a " << SpikeTicks << "-tick upload spike = " << before
+        << " ticks; " << SettleTicks << " ticks after it = " << after << " ticks");
+
+    CHECK(after == before);
+}
+
+TEST_CASE("A client clock running fast does not build input delay over a long match")
+{
+    //A8. One extra input every 2,000 ticks is a clock 0.05% fast - ten times a
+    //bad crystal's drift, so a match's worth of it fits in a test. Measured before
+    //the fix, at 0.2%: delay climbed 4, 6, 8, 10 and stopped at 11 only because the
+    //queue cap started dropping inputs, which cost 4 corrections. Not run at 0.2%
+    //now because an extra input every 500 ticks never leaves the server a steady
+    //SpareInputWindowTicks-long window to judge a backlog by, which no real clock
+    //does either.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+
+    SimulatedTransport serverNet(network.Server(), sim);
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    MatchServer server(FlatWorld(), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, GoodLoader());
+
+    StandStill(server, client, 120);
+    REQUIRE(client.Connected());
+    REQUIRE(client.Match().HasPlayer(client.LocalPlayer()));
+
+    const int before = TicksUntilServerMoves(server, client);
+    REQUIRE(before > 0);
+    StandStill(server, client, 60);
+
+    constexpr int ExtraInputEvery = 2000;
+    constexpr int Ticks = 20000;
+
+    int worst = before;
+    std::string delays;
+    std::uint64_t driftingCorrections = 0;
+    std::uint64_t correctionsAtLastSample = client.Corrections().Count;
+
+    for (int tick = 1; tick <= Ticks; ++tick)
+    {
+        client.SetInput(InputForTick(tick));
+        client.Step(FrameClock::FixedStepSeconds);
+
+        if (tick % ExtraInputEvery == 0)
+        {
+            client.SetInput(InputForTick(tick));
+            client.Step(FrameClock::FixedStepSeconds);
+        }
+
+        server.Step(FrameClock::FixedStepSeconds);
+
+        //Halfway between extra inputs: long enough after one for a whole window to
+        //have seen it, which is what catching up waits for.
+        if (tick % ExtraInputEvery == ExtraInputEvery / 2)
+        {
+            driftingCorrections += client.Corrections().Count - correctionsAtLastSample;
+
+            StandStill(server, client, 60);
+            const int delay = TicksUntilServerMoves(server, client);
+            StandStill(server, client, 60);
+
+            worst = std::max(worst, delay);
+            delays += " " + std::to_string(delay);
+            correctionsAtLastSample = client.Corrections().Count;
+        }
+    }
+
+    MESSAGE("input delay before = " << before << " ticks; every 2000 ticks of a 0.05%-fast clock:"
+        << delays << "; corrections while drifting = " << driftingCorrections);
+
+    CHECK(worst <= before + 1);
+    CHECK(driftingCorrections == 0);
 }

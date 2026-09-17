@@ -10,6 +10,7 @@
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -152,6 +153,14 @@ private:
         //input.
         bool QueueOverflowWarned = false;
 
+        //The queue's depth at the start of each of the last
+        //SpareInputWindowTicks steps, before that step took an input - a ring,
+        //NextDepthSample the slot the next step overwrites. What SpareInputs is
+        //worked out from.
+        std::array<std::uint8_t, SpareInputWindowTicks> DepthSamples{};
+        std::size_t DepthSampleCount = 0;
+        std::size_t NextDepthSample = 0;
+
         //Last reported view angles, resent in every snapshot so remote
         //characters are drawn facing the right way.
         float Yaw = 0.0f;
@@ -201,6 +210,10 @@ private:
     //front of its queue, recording that input as had and every tick it jumped
     //over as never received.
     static void PassInput(Client& client, std::uint64_t tick);
+
+    //How many inputs this client keeps queued beyond what it needs, for its
+    //snapshot entry. See PlayerSnapshot::SpareInputs.
+    static std::uint8_t SpareInputsOf(const Client& client);
 
     //Brings the log up to date with an edit just applied. `previous` is the
     //block the cell held immediately before it.

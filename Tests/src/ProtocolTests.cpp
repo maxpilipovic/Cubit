@@ -22,6 +22,7 @@ namespace
         first.VerticalVelocity = -3.25f;
         first.Grounded = true;
         first.LastInputTick = 4294967301ull;
+        first.SpareInputs = 7;
 
         PlayerSnapshot second;
         second.Player = PlayerId{ 2 };
@@ -168,15 +169,18 @@ TEST_CASE("Snapshot round-trips every player")
     CHECK_FALSE(received.Players[1].Grounded);
     CHECK(received.Players[0].LastInputTick == 4294967301ull);
     CHECK(received.Players[1].LastInputTick == 0);
+    CHECK(received.Players[0].SpareInputs == 7);
+    CHECK(received.Players[1].SpareInputs == 0);
 }
 
-TEST_CASE("A two-player snapshot is 83 bytes")
+TEST_CASE("A two-player snapshot is 85 bytes")
 {
     //Pinned for the same reason the input bundle's size is: this is where the
     //stage's per-client bandwidth is quoted from. 1 id + 8 tick + 2 count +
-    //2 x 36 = 83. The per-entry width grew from 35 to 36 in protocol version 3,
-    //when PlayerSnapshot gained Health.
-    CHECK(Encode(TwoPlayerSnapshot()).size() == 83);
+    //2 x 37 = 85. The per-entry width grew from 35 to 36 in protocol version 3,
+    //when PlayerSnapshot gained Health, and to 37 in version 5, when it gained
+    //SpareInputs.
+    CHECK(Encode(TwoPlayerSnapshot()).size() == 85);
 }
 
 TEST_CASE("An empty roster is a legal snapshot")

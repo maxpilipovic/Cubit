@@ -103,6 +103,28 @@ void MatchClient::Step(double seconds)
     if (!m_Connected || !m_HasInput)
         return;
 
+    //CATCHING UP. No input, no tick, no prediction: the server takes one of
+    //the inputs it has queued on the tick this client stays quiet, so the
+    //backlog shrinks by one and nothing this client showed is undone - unlike
+    //the server throwing a queued input away, which would be a correction.
+    if (TakeCatchUpSkip())
+    {
+        //Held rather than left alone. Leaving both positions as the last step
+        //set them would have the renderer interpolate across that step a
+        //second time, drawing the player jumping back and walking it again.
+        if (m_Match.HasPlayer(m_LocalPlayer))
+        {
+            CharacterController& self = m_Match.PlayerForWrite(m_LocalPlayer);
+            self.SetState(self.Position(), self.Position(), self.VerticalVelocity(), self.Grounded());
+        }
+
+        //The server's clock did not stop, so the one remote players are drawn
+        //against does not either.
+        m_RemoteClock += 1.0;
+        m_HasInput = false;
+        return;
+    }
+
     //The tick this step is about to produce. Stamped before the step so an
     //input's tick names the step it caused, which is the number the server
     //echoes back and the number replay reinserts against.
@@ -309,6 +331,8 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         if (entry.Player == m_LocalPlayer && m_Match.HasPlayer(entry.Player))
         {
             m_LocalHealth = entry.Health;
+            m_ReportedSpare = entry.SpareInputs;
+            m_ReportedAck = entry.LastInputTick;
             Reconcile(entry);
             continue;
         }
@@ -576,6 +600,30 @@ void MatchClient::ReplayEdit(std::uint64_t tick, std::vector<glm::ivec3>& change
     //Left showing what was beneath it, which the undo pass already wrote.
     found->Withdrawn = true;
     changed.push_back(at);
+}
+
+bool MatchClient::TakeCatchUpSkip()
+{
+    //A report is the thinnest queue over the server's last window. Until the
+    //server has taken a whole window of inputs made after this client's last
+    //skip, that window still holds depths from before it, and adopting the
+    //report again would skip twice for one spare input and starve the server.
+    const bool reportIsNews = !m_LastSkipTick.has_value()
+        || m_ReportedAck >= *m_LastSkipTick + SpareInputWindowTicks;
+
+    if (m_SkipsOwed == 0 && m_ReportedSpare > 0 && reportIsNews)
+        m_SkipsOwed = m_ReportedSpare;
+
+    if (m_SkipsOwed == 0)
+        return false;
+
+    const std::uint64_t now = m_Match.Tick();
+    if (m_LastSkipTick.has_value() && now < *m_LastSkipTick + CatchUpSkipSpacingTicks)
+        return false;
+
+    --m_SkipsOwed;
+    m_LastSkipTick = now;
+    return true;
 }
 
 void MatchClient::Reject(const char* reason)
