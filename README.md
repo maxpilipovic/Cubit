@@ -184,7 +184,7 @@ for scripts; otherwise `Ctrl+C` stops it and tells every client. With no argumen
 
 ## Tests
 
-`Tests` is a doctest suite — 524 cases — covering everything that can be checked
+`Tests` is a doctest suite — 530 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's

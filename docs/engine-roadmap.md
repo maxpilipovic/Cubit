@@ -67,8 +67,27 @@ them. Every item was checked in the code unless it says otherwise. References ar
   minidump writer. An exception thrown from any layer ends the process after whatever it
   last logged. Scope doc TOL-05. **Done when:** an exception out of a layer is logged with
   its message before the process exits, and a native crash leaves a dump or stack trace.
-- [ ] **A3. The cursor can never be released.** **Built 2026-09-16; a hand check is
-  outstanding, so not ticked.** `CursorCapture` (`Sandbox/src/CursorCapture.h`, header-only
+- [x] **A3. The cursor can never be released.** **Fixed 2026-09-16, checked by hand
+  2026-09-17.** Escape, clicking back in and Alt+Tab all behaved as written. **The hand
+  check found a freeze, fixed the same day.** After Alt+Tabbing, the game sometimes could
+  not be clicked back into. That was not the cursor. A click in the Sandbox's console
+  window, which Windows opens with QuickEdit on, starts a text selection, and Windows
+  holds every write to the console until the selection ends. Every log line goes to the
+  console, so the game stopped on its next line and its window stopped responding.
+  Reproduced by script: after one click in the console, its title read "Select", no more
+  log lines appeared, and `IsHungAppWindow` reported the game hung. Temporary logging of
+  the game's, GLFW's and Windows' cursor state at every focus change and click showed
+  the three always agreed. `LogSink` now turns QuickEdit off on the attached console
+  before its first line, and puts the console's mode back at normal exit, because the
+  console may be a terminal the program was started from. So the Server gets the fix
+  too. A crash exits through `TerminateProcess` and skips the restore. **Test:** a child
+  `Tests.exe` in a hidden console of its own, with QuickEdit on, starts a grandchild
+  that logs one line. The grandchild finds QuickEdit off; once it exits, the console has
+  QuickEdit back. The test went red without the fix and red without the restore. The
+  same scripted clicks against the fixed build: no selection, logging carried on, the
+  window never hung, and the first click back took the cursor without acting. **If
+  Alt+Tab alone, with no click in the console, ever reproduces the freeze, reopen
+  this.** The 2026-09-16 entry follows. `CursorCapture` (`Sandbox/src/CursorCapture.h`, header-only
   and window-free) holds the rules. Escape and losing focus release the cursor. A click
   while released takes it back, and that click is swallowed, so it neither edits nor
   fires. Coming back from Alt+Tab needs a click too, since focus returning is not the

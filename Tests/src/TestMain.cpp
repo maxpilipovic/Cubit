@@ -2,6 +2,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest.h>
 
+#include "ConsoleProbe.h"
 #include "CrashProbe.h"
 
 #include <string_view>
@@ -16,6 +17,13 @@ int main(int argc, char** argv)
         const std::string_view arg = argv[i];
         if (arg.starts_with(CrashProbeFlag))
             return RunCrashProbe(arg.substr(CrashProbeFlag.size()), argc, argv);
+
+        //Children for the console QuickEdit test, which needs a console of its own.
+        if (arg.starts_with(ConsoleProbeFlag))
+            return RunConsoleProbe(arg.substr(ConsoleProbeFlag.size()));
+
+        if (arg.starts_with(ConsoleLogProbeFlag))
+            return RunConsoleLogProbe(arg.substr(ConsoleLogProbeFlag.size()));
     }
 
     doctest::Context context;

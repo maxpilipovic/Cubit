@@ -8,8 +8,80 @@
 #include <fstream>
 #include <mutex>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+#endif
+
 namespace
 {
+#ifdef _WIN32
+    //Turns QuickEdit off on the attached console for as long as this object
+    //lives, and puts the console's mode back when it is destroyed.
+    //
+    //With QuickEdit on - how Windows opens a console for a program unless the
+    //user has changed it - one click in the console window starts a text
+    //selection, and every write to the console waits until the selection ends.
+    //Every line goes to the console, so one stray click froze the Sandbox on its
+    //next line, and a frozen window cannot be clicked back into (found on the A3
+    //hand check, 2026-09-17). The console can be a terminal the program was
+    //started from, which outlives it, hence the restore; a crash ends the process
+    //with TerminateProcess and skips it.
+    class ConsoleQuickEditOff
+    {
+    public:
+        ConsoleQuickEditOff()
+        {
+            //CONIN$ rather than the standard input handle, which may have been
+            //redirected while the console itself is still there.
+            m_Input = CreateFileW(L"CONIN$", GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (m_Input == INVALID_HANDLE_VALUE)
+                return;
+
+            DWORD mode = 0;
+            if (!GetConsoleMode(m_Input, &mode) || (mode & ENABLE_QUICK_EDIT_MODE) == 0)
+                return;
+
+            //Windows ignores the QuickEdit bit unless ENABLE_EXTENDED_FLAGS is set
+            //in the same call.
+            if (SetConsoleMode(m_Input, (mode & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS))
+                m_Restore = mode | ENABLE_EXTENDED_FLAGS;
+        }
+
+        ~ConsoleQuickEditOff()
+        {
+            if (m_Input == INVALID_HANDLE_VALUE)
+                return;
+
+            if (m_Restore != 0)
+                SetConsoleMode(m_Input, m_Restore);
+
+            CloseHandle(m_Input);
+        }
+
+        ConsoleQuickEditOff(const ConsoleQuickEditOff&) = delete;
+        ConsoleQuickEditOff& operator=(const ConsoleQuickEditOff&) = delete;
+
+    private:
+        HANDLE m_Input = INVALID_HANDLE_VALUE;
+
+        //The mode to put back, or 0 if nothing was changed.
+        DWORD m_Restore = 0;
+    };
+
+    //Before the first line reaches the console.
+    void KeepConsoleFromPausing()
+    {
+        static ConsoleQuickEditOff quickEditOff;
+    }
+#else
+    void KeepConsoleFromPausing()
+    {
+    }
+#endif
+
     //Recursive because the crash handler logs from whatever state the thread was
     //in - including, if a write itself faulted, halfway through one.
     std::recursive_mutex& Lock()
@@ -67,6 +139,7 @@ void LogSink::Write(std::string_view channel, std::string_view level, std::strin
 
     std::lock_guard guard(Lock());
 
+    KeepConsoleFromPausing();
     std::cout << line << std::endl;
 
     if (File().is_open())
