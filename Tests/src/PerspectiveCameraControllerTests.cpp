@@ -46,3 +46,30 @@ TEST_CASE("A mouse move continues from a rotation that was set")
     //above, not 1.2 degrees on top of the -90 default.
     CHECK(controller.GetYaw() == doctest::Approx(1.2f));
 }
+
+TEST_CASE("After mouse tracking is reset, the next move is a new reference rather than a jump")
+{
+    //A3. While the cursor is released it moves freely, so the last position the
+    //controller saw means nothing by the time the game takes the mouse back.
+    //Measuring the first move after that against it would swing the view by
+    //however far the cursor wandered.
+    PerspectiveCameraController controller(16.0f / 9.0f);
+    controller.SetRotation(0.0f, 0.0f);
+
+    MouseMovedEvent first(100.0, 100.0);
+    controller.OnEvent(first);
+    MouseMovedEvent second(110.0, 100.0);
+    controller.OnEvent(second);
+    REQUIRE(controller.GetYaw() == doctest::Approx(1.2f));
+
+    controller.ResetMouseTracking();
+
+    MouseMovedEvent faraway(900.0, 400.0);
+    controller.OnEvent(faraway);
+    CHECK(controller.GetYaw() == doctest::Approx(1.2f));
+    CHECK(controller.GetPitch() == doctest::Approx(0.0f));
+
+    MouseMovedEvent onward(910.0, 400.0);
+    controller.OnEvent(onward);
+    CHECK(controller.GetYaw() == doctest::Approx(2.4f));
+}

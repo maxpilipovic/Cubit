@@ -8,6 +8,7 @@
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
+#include "CursorCapture.h"
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -129,7 +130,7 @@ public:
           m_Options(options),
           m_CameraController(16.0f / 9.0f)
     {
-        Input::SetCursorCaptured(true);
+        Input::SetCursorCaptured(m_Cursor.Captured());
 
         eventBus.Subscribe<PlayerDiedEvent>(
             [this](const PlayerDiedEvent& event)
@@ -362,7 +363,10 @@ public:
     //Routes one-time key presses through the typed platform dispatcher.
     void OnEvent(Event& event) override
     {
-        m_CameraController.OnEvent(event);
+        //Mouse-look only while the game has the mouse: a released cursor is the
+        //player pointing at something else.
+        if (m_Cursor.Captured() || event.GetEventType() != EventType::MouseMoved)
+            m_CameraController.OnEvent(event);
 
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<KeyPressedEvent>(
@@ -373,7 +377,23 @@ public:
         dispatcher.Dispatch<MouseButtonPressedEvent>(
             [this](MouseButtonPressedEvent& mouseEvent)
             {
+                //A click that takes the cursor back is spent doing that, and
+                //never also edits or fires.
+                if (!m_Cursor.OnClick())
+                {
+                    ApplyCursor();
+                    return true;
+                }
+
                 return OnMouseButtonPressed(mouseEvent);
+            });
+        dispatcher.Dispatch<WindowLostFocusEvent>(
+            [this](WindowLostFocusEvent&)
+            {
+                if (m_Cursor.OnFocusLost())
+                    ApplyCursor();
+
+                return false;
             });
     }
 
@@ -932,11 +952,30 @@ private:
         }
     }
 
+    //Hands the cursor to the desktop or takes it back, to match m_Cursor.
+    void ApplyCursor()
+    {
+        Input::SetCursorCaptured(m_Cursor.Captured());
+
+        //The cursor moved freely while it was released, so the last position
+        //mouse-look saw would turn into one large jump of the view.
+        if (m_Cursor.Captured())
+            m_CameraController.ResetMouseTracking();
+    }
+
     //Selects the colour used when placing blocks, or logs an unhandled press.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
         if (event.IsRepeat())
             return false;
+
+        if (event.GetKeyCode() == KeyCode::Escape)
+        {
+            if (m_Cursor.Release())
+                ApplyCursor();
+
+            return true;
+        }
 
         if (event.GetKeyCode() == KeyCode::F5)
         {
@@ -1014,6 +1053,10 @@ private:
     static constexpr std::size_t MaxUndoDepth = 256;
     std::vector<BlockEdit> m_Undo;
     PerspectiveCameraController m_CameraController;
+
+    //Whether the game has the mouse. Escape and losing focus give it back; a
+    //click takes it again.
+    CursorCapture m_Cursor;
 };
 
 class SandboxApplication final : public Application

@@ -67,7 +67,20 @@ them. Every item was checked in the code unless it says otherwise. References ar
   minidump writer. An exception thrown from any layer ends the process after whatever it
   last logged. Scope doc TOL-05. **Done when:** an exception out of a layer is logged with
   its message before the process exits, and a native crash leaves a dump or stack trace.
-- [ ] **A3. The cursor can never be released.** The Sandbox captures it once
+- [ ] **A3. The cursor can never be released.** **Built 2026-09-16; a hand check is
+  outstanding, so not ticked.** `CursorCapture` (`Sandbox/src/CursorCapture.h`, header-only
+  and window-free) holds the rules. Escape and losing focus release the cursor. A click
+  while released takes it back, and that click is swallowed, so it neither edits nor
+  fires. Coming back from Alt+Tab needs a click too, since focus returning is not the
+  player asking for the game. The Sandbox applies it with `Input::SetCursorCaptured`,
+  forwards mouse-look only while captured, and calls the new
+  `PerspectiveCameraController::ResetMouseTracking` on recapture, so the view does not
+  jump by however far the free cursor wandered. **Tests:** the capture rules and the
+  tracking reset, each red under a mutation. **Not verified:** the wiring in the running
+  Sandbox. Escape cannot be scripted into the window, so the check is by hand: press
+  Escape, the cursor appears and moving it does not turn the view; click, it is captured
+  again with no block broken; Alt+Tab away and back, the cursor is free until a click.
+  Tick this when that passes. The original entry follows. The Sandbox captures it once
   (`Sandbox.cpp:132`) and nothing gives it back: no Escape binding, and the window's focus
   events (`WindowsWindow.cpp:128`) are not used. Its visible cost: clicks meant for another
   window land in the game as edits. **Done when:** Escape releases the cursor, a click

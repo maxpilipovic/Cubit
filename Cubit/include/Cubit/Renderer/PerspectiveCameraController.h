@@ -33,6 +33,11 @@ public:
     //mouse move recomputes from the controller's stale copy and snaps back.
     void SetRotation(float yaw, float pitch);
 
+    //Forgets the last mouse position, so the next move only records a new one.
+    //For when the cursor has been free - released to the desktop - and the last
+    //position seen says nothing about where it is now.
+    void ResetMouseTracking() { m_HasMousePosition = false; }
+
     const glm::vec3& GetPosition() const { return m_Position; }
     float GetYaw() const { return m_Yaw; }
     float GetPitch() const { return m_Pitch; }
