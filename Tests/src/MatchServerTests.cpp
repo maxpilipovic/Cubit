@@ -2325,3 +2325,100 @@ TEST_CASE("A server batch bigger than one message is split across messages, in o
         sameOrder = sameOrder && received[i].Position == batch[i].Position;
     CHECK(sameOrder);
 }
+
+TEST_CASE("A dig that leaves blocks hanging brings them down, logs them, and tells everybody")
+{
+    LoopbackNetwork network;
+
+    //A pillar next to the spawn, inside reach: nothing holds it up but its base.
+    World world = FlatWorld();
+    for (int y = 1; y <= 5; ++y)
+        world.SetBlock(9, y, 9, BlockId{ 1 });
+
+    MatchServer server(std::move(world), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId firstPeer = InvalidPeer;
+    Transport& first = network.AddClient(firstPeer);
+    const PlayerId player = Join(server, first);
+    REQUIRE(player != InvalidPlayer);
+
+    PeerId secondPeer = InvalidPeer;
+    Transport& second = network.AddClient(secondPeer);
+    REQUIRE(Join(server, second) != InvalidPlayer);
+
+    Settle(server, player);
+    DrainEdits(first);
+    DrainEdits(second);
+
+    SendInputWithEdit(first, 1, CharacterInput{}, BlockEdit{ glm::ivec3(9, 1, 9), BlockId{ 0 } });
+    server.Step(FrameClock::FixedStepSeconds);
+
+    //The whole pillar is gone, base and all.
+    const World& after = server.Match().GetWorld();
+    for (int y = 1; y <= 5; ++y)
+        CHECK(after.GetBlock(9, y, 9) == BlockId{ 0 });
+
+    //The dig and the four cells that came down: five entries for a joiner.
+    CHECK(server.EditLog().size() == 5);
+
+    //The editor is told what came loose, though not about its own dig.
+    const EditTraffic editor = DrainEdits(first);
+    REQUIRE(editor.Results.size() == 1);
+    CHECK(editor.Results[0].Accepted);
+    REQUIRE(editor.Applied.size() == 1);
+    CHECK(editor.Applied[0].Edits.size() == 4);
+
+    //Everyone else hears the dig and then the collapse.
+    const EditTraffic other = DrainEdits(second);
+    REQUIRE(other.Applied.size() == 2);
+    REQUIRE(other.Applied[0].Edits.size() == 1);
+    CHECK(other.Applied[0].Edits[0].Position == glm::ivec3(9, 1, 9));
+    CHECK(other.Applied[1].Edits.size() == 4);
+}
+
+TEST_CASE("A rule's batch carries the collapse it causes in the same message")
+{
+    LoopbackNetwork network;
+
+    World world = FlatWorld();
+    for (int y = 1; y <= 5; ++y)
+        world.SetBlock(20, y, 20, BlockId{ 1 });
+
+    MatchServer server(std::move(world), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    DrainEdits(client);
+
+    //One edit, five blocks gone: the base, and the four it was holding up.
+    const std::vector<BlockEdit> batch{ BlockEdit{ glm::ivec3(20, 1, 20), BlockId{ 0 } } };
+    CHECK(server.ApplyEdits(batch) == 5);
+
+    const EditTraffic heard = DrainEdits(client);
+    REQUIRE(heard.Applied.size() == 1);
+    REQUIRE(heard.Applied[0].Edits.size() == 5);
+    CHECK(heard.Applied[0].Edits[0].Position == glm::ivec3(20, 1, 20));
+
+    for (int y = 1; y <= 5; ++y)
+        CHECK(server.Match().GetWorld().GetBlock(20, y, 20) == BlockId{ 0 });
+}
+
+TEST_CASE("Digging the floor brings nothing down")
+{
+    //The guard against the whole world falling, at the server level: the floor
+    //is anchored, so a hole in it is just a hole.
+    LoopbackNetwork network;
+    MatchServer server(FlatWorld(), "flat.vox", 0xABCD, Spawn, network.Server());
+
+    PeerId peer = InvalidPeer;
+    Transport& client = network.AddClient(peer);
+    REQUIRE(Join(server, client) != InvalidPlayer);
+    DrainEdits(client);
+
+    CHECK(server.ApplyEdits(std::vector<BlockEdit>{
+        BlockEdit{ glm::ivec3(4, 0, 4), BlockId{ 0 } },
+        BlockEdit{ glm::ivec3(5, 0, 5), BlockId{ 0 } } }) == 2);
+
+    CHECK(server.EditLog().size() == 2);
+}

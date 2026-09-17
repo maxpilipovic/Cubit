@@ -7,6 +7,7 @@
 #include "Cubit/Voxel/EditRules.h"
 #include "Cubit/Voxel/HitboxHistory.h"
 #include "Cubit/Voxel/MatchState.h"
+#include "Cubit/Voxel/Support.h"
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
@@ -84,6 +85,10 @@ public:
     //messages as MaxEditsPerMessage needs. Reliable messages to a client stay in
     //order, so a client sees these and its own EditResults in the order the
     //server made them.
+    //
+    //Whatever the batch leaves with nothing holding it up is cleared in the same
+    //call and carried by the same messages, so the count includes those cells.
+    //See FindUnsupported for the rule.
     std::size_t ApplyEdits(std::span<const BlockEdit> edits);
 
     const MatchState& Match() const { return m_Match; }
@@ -211,7 +216,9 @@ private:
     void HandleMessage(PeerId peer, std::span<const std::uint8_t> data);
 
     //Rules on one client's edit, applies it if legal, answers the editor with
-    //EditResult and tells everyone else with EditApplied.
+    //EditResult and tells everyone else with EditApplied. A dig that leaves
+    //blocks with nothing holding them up clears those too, in the same step, and
+    //tells everybody - the editor included, since nobody predicted them.
     void ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t clientTick,
         const BlockEdit& edit);
 
@@ -232,6 +239,21 @@ private:
     //Brings the log up to date with an edit just applied. `previous` is the
     //block the cell held immediately before it.
     void RecordInLog(const BlockEdit& edit, BlockId previous);
+
+    //Applies edits in order, logging each that changed a block, and returns
+    //those. Sends nothing: what reaches clients is one decision, made once the
+    //collapse below is known.
+    std::vector<BlockEdit> ApplyAndLog(std::span<const BlockEdit> edits);
+
+    //The edits that clear whatever `applied` has left with nothing holding it
+    //up - empty unless it emptied a cell. Decided here and never predicted: a
+    //client's world holds edits the server has not ruled on, so a client working
+    //this out for itself could reach a different answer and desync.
+    std::vector<BlockEdit> CollapseEdits(std::span<const BlockEdit> applied);
+
+    //Tells joined clients about blocks that changed, in as many EditApplied
+    //messages as MaxEditsPerMessage needs. `except` skips one peer.
+    void Broadcast(std::span<const BlockEdit> changed, PeerId except = InvalidPeer);
 
     //Resolves one shot against the world as the shooter saw it and tells
     //everybody the answer.

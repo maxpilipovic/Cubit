@@ -468,9 +468,9 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
         //time this cell changes, is the map's own block.
         RecordInLog(edit, inverse->Block);
 
-        EditMessage applied;
-        applied.Edits.push_back(edit);
-        SendToJoined(EncodeEditApplied(applied), Channel::Reliable, peer);
+        //Everyone but the editor, which hears its own edit's fate from the
+        //result below.
+        Broadcast(std::span(&edit, 1), peer);
     }
 
     //The server's truth either way, so the client never has to work it out.
@@ -478,9 +478,32 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
     result.Edit.Block = m_Match.GetWorld().GetBlock(at.x, at.y, at.z);
 
     m_Transport.Send(peer, Encode(result), Channel::Reliable);
+
+    //After the result, so the editor sees its own dig answered before it is told
+    //what came down with it. The collapse goes to everyone, the editor included:
+    //it is nobody's edit, so nobody is predicting it.
+    if (inverse.has_value())
+    {
+        const std::vector<BlockEdit> fell = ApplyAndLog(CollapseEdits(std::span(&edit, 1)));
+        Broadcast(fell);
+    }
 }
 
 std::size_t MatchServer::ApplyEdits(std::span<const BlockEdit> edits)
+{
+    std::vector<BlockEdit> changed = ApplyAndLog(edits);
+
+    //In the same call, so the blocks that came loose ride the same messages as
+    //the change that loosened them: a client never draws a frame with the hole
+    //but not the collapse.
+    const std::vector<BlockEdit> fell = ApplyAndLog(CollapseEdits(changed));
+    changed.insert(changed.end(), fell.begin(), fell.end());
+
+    Broadcast(changed);
+    return changed.size();
+}
+
+std::vector<BlockEdit> MatchServer::ApplyAndLog(std::span<const BlockEdit> edits)
 {
     std::vector<BlockEdit> changed;
     changed.reserve(edits.size());
@@ -498,16 +521,40 @@ std::size_t MatchServer::ApplyEdits(std::span<const BlockEdit> edits)
         changed.push_back(edit);
     }
 
+    return changed;
+}
+
+std::vector<BlockEdit> MatchServer::CollapseEdits(std::span<const BlockEdit> applied)
+{
+    //Only the cells this change emptied can have left anything hanging.
+    std::vector<glm::ivec3> emptied;
+    for (const BlockEdit& edit : applied)
+    {
+        const glm::ivec3& at = edit.Position;
+        if (!m_Match.GetWorld().IsBlockSolid(at.x, at.y, at.z))
+            emptied.push_back(at);
+    }
+
+    if (emptied.empty())
+        return {};
+
+    std::vector<BlockEdit> falls;
+    for (const glm::ivec3& cell : FindUnsupported(m_Match.GetWorld(), emptied))
+        falls.push_back(BlockEdit{ cell, BlockId{ 0 } });
+
+    return falls;
+}
+
+void MatchServer::Broadcast(std::span<const BlockEdit> changed, PeerId except)
+{
     for (std::size_t first = 0; first < changed.size(); first += MaxEditsPerMessage)
     {
         const std::size_t count = std::min(MaxEditsPerMessage, changed.size() - first);
 
         EditMessage message;
         message.Edits.assign(changed.begin() + first, changed.begin() + first + count);
-        SendToJoined(EncodeEditApplied(message), Channel::Reliable);
+        SendToJoined(EncodeEditApplied(message), Channel::Reliable, except);
     }
-
-    return changed.size();
 }
 
 void MatchServer::RecordInLog(const BlockEdit& edit, BlockId previous)

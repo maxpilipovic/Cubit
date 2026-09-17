@@ -35,6 +35,10 @@ the map. The current map is a 512x64x512 battlefield.
 - A separate `EventBus` for typed gameplay notifications, so layers do not need to know
   about each other
 - Polled input, cursor capture, and debug-only assertions
+- Blocks with nothing holding them up fall, and disappear: after a change empties cells,
+  whatever they were touching is checked for a path of solid blocks down to the map's
+  bottom layer, and anything without one is cleared. Terrain is anchored through the
+  ground, so digging a hillside never brings the world down
 - Logging with a wall-clock time on every line, flushed per line, and copied to
   `logs/<program>-<date>-<time>-<pid>.log`
 - A crash handler: an uncaught exception or a native fault is logged with a symbolised
@@ -134,8 +138,9 @@ the map. The current map is a 512x64x512 battlefield.
 
 **Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
 a block, right click places one, `1`–`8` pick the colour, and middle click fires. `U`
-undoes the last block edit. `B` (single-player) blows a radius-3 ball out of the terrain
-where you aim, as one batch that `U` undoes whole. `F5` saves the edited world, `F9` restores it — a
+undoes the last block edit, along with anything that fell because of it. `B`
+(single-player) blows a radius-3 ball out of the terrain where you aim, as one batch that
+`U` undoes whole. `F5` saves the edited world, `F9` restores it — a
 checkpoint pair for authoring a map by playing it.
 
 ## Building
@@ -185,7 +190,7 @@ for scripts; otherwise `Ctrl+C` stops it and tells every client. With no argumen
 
 ## Tests
 
-`Tests` is a doctest suite — 540 cases — covering everything that can be checked
+`Tests` is a doctest suite — 553 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's

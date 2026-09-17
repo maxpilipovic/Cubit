@@ -41,6 +41,7 @@
 #include "Cubit/Voxel/EditRules.h"
 #include "Cubit/Voxel/Heading.h"
 #include "Cubit/Voxel/MatchState.h"
+#include "Cubit/Voxel/Support.h"
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/VoxelRaycast.h"
 #include "Cubit/Voxel/World.h"

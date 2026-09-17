@@ -764,7 +764,13 @@ private:
         if (!inverse)
             return false;
 
-        PushUndo({ *inverse });
+        // What a dig left hanging comes down with it, as one undoable step. Only
+        // a dig: placing a block cannot take anything's support away.
+        std::vector<BlockEdit> step = button == MouseCode::Left
+            ? CollapseAfter({ target })
+            : std::vector<BlockEdit>{};
+        step.push_back(*inverse);
+        PushUndo(std::move(step));
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
@@ -797,6 +803,27 @@ private:
         const std::vector<BlockEdit> inverse = std::move(m_Undo.back());
         m_Undo.pop_back();
         ApplyBlockEdits(World_(), inverse);
+    }
+
+    //Clears whatever the cells just emptied have left with nothing holding it
+    //up, and returns how to put that back.
+    //
+    //Single-player only, like the undo stack: connected, the server decides what
+    //comes loose and sends it, and working it out here as well would be editing
+    //the world behind the server's back.
+    std::vector<BlockEdit> CollapseAfter(const std::vector<glm::ivec3>& emptied)
+    {
+        const std::vector<glm::ivec3> loose = FindUnsupported(World_(), emptied);
+        if (loose.empty())
+            return {};
+
+        std::vector<BlockEdit> falls;
+        falls.reserve(loose.size());
+        for (const glm::ivec3& cell : loose)
+            falls.push_back(BlockEdit{ cell, BlockId{0} });
+
+        CB_INFO(std::to_string(loose.size()) + " blocks came loose and fell");
+        return ApplyBlockEdits(World_(), falls);
     }
 
     //Remembers how to undo one operation - a single edit or a whole batch.
@@ -855,7 +882,18 @@ private:
         if (undo.empty())
             return;
 
-        CB_INFO("Blasted " + std::to_string(undo.size()) + " blocks at " +
+        const std::size_t blasted = undo.size();
+
+        // Whatever the crater left hanging comes down with it, undone as one step.
+        std::vector<glm::ivec3> emptied;
+        emptied.reserve(undo.size());
+        for (const BlockEdit& inverse : undo)
+            emptied.push_back(inverse.Position);
+
+        const std::vector<BlockEdit> fell = CollapseAfter(emptied);
+        undo.insert(undo.begin(), fell.begin(), fell.end());
+
+        CB_INFO("Blasted " + std::to_string(blasted) + " blocks at " +
             std::to_string(hit.Block.x) + "," + std::to_string(hit.Block.y) + "," +
             std::to_string(hit.Block.z) + " in " + std::to_string(milliseconds) + " ms");
 

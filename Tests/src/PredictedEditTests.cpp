@@ -814,3 +814,60 @@ TEST_CASE("A server batch over a pending prediction leaves the client with the s
     CHECK(ClientBlock(client, hole) == BlockId{ 0 });
     CHECK(ServerBlock(server, hole) == BlockId{ 0 });
 }
+
+TEST_CASE("A client digging out a pillar's base sees the whole pillar go")
+{
+    //The collapse is the server's alone, so the client learns it the way it
+    //learns anybody's edit: it shows a tick or so after its own dig does.
+    LoopbackNetwork network;
+
+    NetworkSim sim;
+    sim.Latency = OneWayLatency;
+    SimulatedTransport serverNet(network.Server(), sim);
+
+    PeerId peer = InvalidPeer;
+    SimulatedTransport clientNet(network.AddClient(peer), sim);
+
+    World world = FlatWorld();
+    for (int y = 1; y <= 5; ++y)
+        world.SetBlock(9, y, 9, BlockId{ 1 });
+
+    const MatchClient::MapLoader pillarLoader = [](const std::string&) -> std::optional<LoadedMap>
+    {
+        World loaded = FlatWorld();
+        for (int y = 1; y <= 5; ++y)
+            loaded.SetBlock(9, y, 9, BlockId{ 1 });
+
+        return LoadedMap{ std::move(loaded), MapHash };
+    };
+
+    MatchServer server(std::move(world), "flat.vox", MapHash, Spawn, serverNet);
+    MatchClient client(clientNet, pillarLoader);
+
+    ConnectAndSettle(client, server);
+    REQUIRE(client.Connected());
+
+    const std::uint64_t correctionsBefore = client.Corrections().Count;
+
+    const glm::ivec3 base(9, 1, 9);
+    client.RequestEdit(BlockEdit{ base, BlockId{ 0 } });
+    StepBoth(client, server);
+
+    //Its own dig is predicted; the rest of the pillar is still standing here.
+    CHECK(ClientBlock(client, base) == BlockId{ 0 });
+    CHECK(ClientBlock(client, glm::ivec3(9, 5, 9)) == BlockId{ 1 });
+
+    for (int i = 0; i < 60; ++i)
+        StepBoth(client, server);
+
+    CHECK(client.PendingEditCount() == 0);
+    for (int y = 1; y <= 5; ++y)
+    {
+        CHECK(ServerBlock(server, glm::ivec3(9, y, 9)) == BlockId{ 0 });
+        CHECK(ClientBlock(client, glm::ivec3(9, y, 9)) == BlockId{ 0 });
+    }
+
+    //A collapse is not a correction: it arrives as edits, not as the server
+    //disagreeing about where the player is.
+    CHECK(client.Corrections().Count == correctionsBefore);
+}

@@ -289,10 +289,57 @@ them. Every item was checked in the code unless it says otherwise. References ar
   (`BlockEdit.h:17`) and the protocol carries at most one edit per input, 60 a second
   (`Protocol.h:99`). Explosions, grenades and digging more than one block at a time all
   need more.
-- [ ] **B2. Terrain collapse** — blocks left with no support fall. Nothing exists. It is
-  what makes a game Ace of Spades-like, but it is **not in the scope doc**, so the first
-  step is deciding whether it is in scope. If it is: it must be server-authoritative, and it
-  meets both predicted edits (Stage 5's confirmed layer) and relight cost.
+- [x] **B2. Terrain collapse** — blocks left with no support fall. **In scope by the user's
+  decision, and done 2026-09-17.** Blocks that come loose disappear, the user's choice over
+  moving them down to rest or animating a fall (which would need B3 first).
+  **The rule, in `Cubit/Voxel/Support.h`:** a solid cell is held up when touching solid
+  cells lead down to `y = 0`. Terrain is filled from y = 0 up (`TerrainGen.cpp`, `FillColumn`),
+  so hills are anchored through the ground and **a dig cannot bring the world down** - the
+  question the user asked first. `FindUnsupported(world, emptied)` answers for the up-to-six
+  solid neighbours of each emptied cell, and nothing else: emptying a cell cannot unsettle
+  what it was not touching, and filling one cannot unsettle anything.
+  **No chain reactions, and not by a rule:** a search walks a whole connected piece, so
+  anything resting on a piece that comes loose is part of that piece. A test pins it -
+  asking again about the cells that just fell returns nothing.
+  **The one case the rule cannot answer cheaply** is something enormous and genuinely
+  unanchored, such as a platform built out over nothing: proving it unanchored means walking
+  all of it. `MaxSupportSearch` (4,096 cells) is the cap, and past it the piece stays.
+  **Two cost mistakes, both measured rather than reasoned** (one dig into the shipped map,
+  Debug): a search that spread out evenly cost 2.4 ms because it walked everything within
+  reach of the dig before finding the floor; ordering the neighbours so the search *climbed*
+  cost 17 ms. Diving - taking the cell below first - costs 0.35 ms. Release: 0.07 ms for a
+  dig, 0.12 ms for a radius-3 crater's 123 emptied cells, and 0.80 ms for the worst case, a
+  3,600-cell slab walked to the cap. Well inside a 16.7 ms tick, which is why the cap can be
+  as large as it is. The test "What the support search costs, measured" prints all three.
+  **Server-authoritative, and never predicted.** `MatchServer` clears what a dig or a rule's
+  batch leaves hanging in the same step, through `ApplyEdits`, so it enters the edit log and
+  reaches every client and every later joiner. A client predicts its own dig but not the
+  collapse: its world holds edits the server has not ruled on, so working it out locally
+  could reach a different answer and desync. So a wall stands for about half a round trip
+  after its last support goes. A collapse is not a correction - a test checks the correction
+  count does not move.
+  **Single-player** runs the same engine call after a dig or a `B` blast, and what fell joins
+  the same undo entry, so one `U` puts back the hole and the collapse together.
+  **Tests:** a pillar cut at its base comes down whole; digging into ten solid layers, and
+  tunnelling through them cell by cell, brings nothing down; an arch that loses one leg
+  stands on the other and comes down with the second; a piece past the cap stays and the
+  same piece under it falls; water neither holds blocks up nor falls; a cell on the bottom
+  layer is its own anchor. On the server, a player's dig sends the dig and then the collapse,
+  logs five cells for a joiner, and tells the editor what came loose but not its own dig; a
+  rule's batch carries both in one message; digging the floor brings nothing down. Over a
+  166.7 ms link, a client digging a pillar's base ends up matching the server with no
+  corrections. Four deliberate faults were each caught: no anchor (which also broke the
+  existing dig-straight-down gate), no cap, and each of the server's two collapse hooks. In
+  the running Sandbox, a five-block tower stood and then vanished when its base went, with
+  "4 blocks came loose and fell" logged.
+  **Left out on purpose:** falling blocks doing damage (a game rule, D-level) and any visible
+  falling motion (needs B3). A placement is never checked for support, so a player can still
+  build out into the air; making that illegal is a gameplay rule, and it would have to live
+  in `IsEditLegal` so the client predicts it the same way. The original entry follows.
+  Nothing exists. It is what makes a game Ace of Spades-like, but it is **not in the scope
+  doc**, so the first step is deciding whether it is in scope. If it is: it must be
+  server-authoritative, and it meets both predicted edits (Stage 5's confirmed layer) and
+  relight cost.
 - [ ] **B3. A way to draw anything that is not a chunk.** There is no `Mesh` type and no
   model loading; remote players are `DebugDraw` wireframe boxes (`DrawRemotePlayers`,
   `Sandbox.cpp:570`). Player models, a held tool and team colours all need it.
