@@ -134,14 +134,19 @@ void Application::OnEvent(Event& event)
         m_Data->Layers.OnEvent(event);
 }
 
-void Application::PushLayer(std::unique_ptr<Layer> layer)
+Layer* Application::PushLayer(std::unique_ptr<Layer> layer)
 {
-    m_Data->Layers.PushLayer(std::move(layer));
+    return m_Data->Layers.PushLayer(std::move(layer));
 }
 
-void Application::PushOverlay(std::unique_ptr<Layer> overlay)
+Layer* Application::PushOverlay(std::unique_ptr<Layer> overlay)
 {
-    m_Data->Layers.PushOverlay(std::move(overlay));
+    return m_Data->Layers.PushOverlay(std::move(overlay));
+}
+
+bool Application::RemoveLayer(Layer* layer)
+{
+    return m_Data->Layers.Remove(layer);
 }
 
 EventBus& Application::GetEventBus()

@@ -31,9 +31,11 @@ the map. The current map is a 512x64x512 battlefield.
 - A fixed 60 Hz simulation step (`FrameClock`) separate from the frame rate, with
   layers split into `OnFixedUpdate`, `OnFrameUpdate` and an interpolated `OnRender`
 - Typed platform events (window, key, mouse) dispatched through a layer stack, overlays
-  first
+  first, where a layer can be removed — including by itself, mid-event, which is what a
+  menu closing itself does
 - A separate `EventBus` for typed gameplay notifications, so layers do not need to know
-  about each other
+  about each other. Subscribing hands back a subscription that unsubscribes when it is
+  destroyed, so a listener's callback cannot outlive the listener
 - Polled input, cursor capture, and debug-only assertions
 - Blocks with nothing holding them up fall, and disappear: after a change empties cells,
   whatever they were touching is checked for a path of solid blocks down to the map's
@@ -190,7 +192,7 @@ for scripts; otherwise `Ctrl+C` stops it and tells every client. With no argumen
 
 ## Tests
 
-`Tests` is a doctest suite — 553 cases — covering everything that can be checked
+`Tests` is a doctest suite — 571 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's

@@ -346,7 +346,41 @@ them. Every item was checked in the code unless it says otherwise. References ar
 - [ ] **B4. Text and UI beyond the debug font.** `DebugFont` is a 5x7 bitmap with no
   lowercase and no J, Q, X or Z (`DebugFont.h:24`). A scoreboard and menus need more.
   Scope doc ENG-07, POL-03.
-- [ ] **B5. Lifetimes for subscriptions and layers.** `EventBus::Subscribe`
+- [x] **B5. Lifetimes for subscriptions and layers.** **Done 2026-09-17.** One item because
+  the two halves are one bug: a layer's callback captures `this`, so a layer that could be
+  removed while its subscription lived on would have the next publish call into freed
+  memory. Nothing popped layers yet, so it was latent.
+  - `Subscribe` now returns a `Subscription`, move-only, which unsubscribes when destroyed.
+    Held as a member it ends exactly when its owner does, with nothing to remember to call.
+    Marked `[[nodiscard]]`, because dropping it on the floor unsubscribes at once.
+  - Publishing has two rules, since callbacks change the list they are in: one unsubscribed
+    during a publish does not run in that publish, and one subscribed during a publish first
+    runs in the next. Entries are marked dead and swept when the last publish finishes
+    (counted, because a callback may publish), so nothing is destroyed while it is on the
+    stack. `Publish` no longer copies the callback vector per call.
+  - `LayerStack::Remove(Layer*)` detaches and destroys a layer; `PushLayer` and
+    `PushOverlay` return the pointer to pass it. Removal and pushing are both deferred
+    while a pass over the layers is running: a layer may remove itself from inside its own
+    handler, stops receiving anything immediately, and is destroyed when the pass ends. A
+    layer pushed during a pass joins at the end of it, and its `OnAttach` runs then, so a
+    menu opened from a click first updates next frame. `Application` gained `RemoveLayer`.
+  - The Sandbox's `PlayerDiedEvent` subscription is now a member, which is the one real
+    caller proving the shape.
+
+  **Tests (571 cases):** a callback stops when its subscription is destroyed while others
+  carry on; a moved-from subscription ends nothing; a callback that unsubscribes another, or
+  itself, and one that subscribes mid-publish; a nested publish, where the sweep waits for
+  the outer one. For layers: removal detaches once and stops all four calls; self-removal
+  during an event and during a fixed update; a layer removed before a pass reaches it hears
+  nothing; a push during a pass joins after it, and a push removed before the pass ends
+  never attaches; overlays keep their order across a removal; the destructor still detaches.
+  The one that ties the halves together removes a layer that is subscribed, then publishes,
+  which was the use-after-free. **Faults caught:** a bus that never marks a subscription
+  dead (seven tests, and the run crashed partway - the use-after-free itself), and a stack
+  that keeps calling a layer it has removed.
+  **A test-writing trap worth knowing:** three of these tests failed first time because they
+  read counters held inside the removed layer, which is freed by then. The counters live
+  outside the layer now. The original entry follows. `EventBus::Subscribe`
   (`EventBus.h:14`) stores `this`-capturing callbacks with no way to remove them, and
   `Publish` copies the callback vector on every call. `LayerStack` can push
   (`LayerStack.h:26–29`) but never pop. Menus, map rotation and leaving a match all remove

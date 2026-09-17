@@ -26,11 +26,17 @@ public:
     //Handles application events before routing unhandled events through layers.
     void OnEvent(Event& event);
 
-    //Transfers ownership of a regular layer to the application.
-    void PushLayer(std::unique_ptr<Layer> layer);
+    //Transfers ownership of a regular layer to the application, and hands back
+    //a pointer for a later RemoveLayer. See LayerStack::PushLayer for when a
+    //layer pushed from inside a handler actually joins.
+    Layer* PushLayer(std::unique_ptr<Layer> layer);
 
     //Transfers ownership of an overlay to the application.
-    void PushOverlay(std::unique_ptr<Layer> overlay);
+    Layer* PushOverlay(std::unique_ptr<Layer> overlay);
+
+    //Detaches and destroys a layer the application owns. False if it owns no
+    //such layer.
+    bool RemoveLayer(Layer* layer);
 
     //Returns the gameplay notification bus owned by this application.
     EventBus& GetEventBus();

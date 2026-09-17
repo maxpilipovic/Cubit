@@ -133,7 +133,9 @@ public:
     {
         Input::SetCursorCaptured(m_Cursor.Captured());
 
-        eventBus.Subscribe<PlayerDiedEvent>(
+        //Held as a member: the callback captures `this`, so the subscription must
+        //end when this layer does.
+        m_DeathSubscription = eventBus.Subscribe<PlayerDiedEvent>(
             [this](const PlayerDiedEvent& event)
             {
                 OnPlayerDied(event);
@@ -1167,6 +1169,9 @@ private:
     //Whether the game has the mouse. Escape and losing focus give it back; a
     //click takes it again.
     CursorCapture m_Cursor;
+
+    //This layer's place on the gameplay event bus, ended by its destructor.
+    Subscription m_DeathSubscription;
 };
 
 class SandboxApplication final : public Application
