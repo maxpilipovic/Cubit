@@ -356,6 +356,26 @@ git push origin master
 
 ### Task 3: The game library and its application
 
+**Done 2026-09-17, with four deviations.**
+1. **`WorldScene` went into the engine first**, committed on its own. Both apps draw the same
+   world, and the app that did it held the chunk shader as a string literal; duplicating that
+   in two apps would have let it drift. The engine owns the chunk renderer, its shader and
+   the fog now.
+2. **`PlayerLayer` stayed inside `GameApp.cpp`** rather than becoming a library header.
+   Nothing outside the app constructs it and it needs a GL context; the library holds the
+   rules, the options and the HUD, which is what `GameTests` links. A library with only
+   headers also produces nothing to link, which is why `GameRules.cpp` exists.
+3. **The method was a move, not a rewrite.** `Sandbox.cpp` became `GameApp.cpp` with its
+   authoring tools removed, and the harness was written fresh — the game keeps the code that
+   already worked, and the new code is the small half.
+4. **Undo, the blast, `F5` and `F9` are the harness's**, not the game's, so the game HUD lost
+   its `UNDO` line. Those are map-authoring tools, and the harness is where a map is authored.
+
+**Also worth recording:** `rm -rf game/game`, aimed at a stray generated directory, deleted
+`game/Game` as well — Windows paths are case-insensitive. `GameHudLayer.h` came back with
+`git checkout-index` because the move was staged; the three new files were not, and were
+rewritten. Stage or commit before any recursive delete near a path that differs only in case.
+
 **Files:**
 - Create: `game/Game/src/GameRules.h`, `game/Game/src/GameOptions.h`,
   `game/Game/src/PlayerLayer.h`, `game/Game/src/PlayerLayer.cpp`,
@@ -375,7 +395,7 @@ git push origin master
   `PlayerLayer(EventBus&, std::shared_ptr<GameHudState>, const GameOptions&)`;
   `GameHudLayer(std::shared_ptr<GameHudState>, std::uint32_t width, std::uint32_t height)`.
 
-- [ ] **Step 1: Write the failing test for the game's own rules**
+- [x] **Step 1: Write the failing test for the game's own rules**
 
 Create `game/GameTests/src/GameRulesTests.cpp`:
 
@@ -401,13 +421,13 @@ TEST_CASE("The game states its rules rather than taking the engine's placeholder
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: the Debug build.
 Expected: the file is not in any project yet, so it does not even compile. Add the projects
 in Step 3 and it fails on the missing `GameRules.h` instead.
 
-- [ ] **Step 3: Add the game's projects**
+- [x] **Step 3: Add the game's projects**
 
 Write `game/premake5.lua` with four projects, following the existing file's shape exactly
 (`targetdir`, `objdir`, `cppdialect "C++20"`, the three configuration filters, the
@@ -427,7 +447,7 @@ Write `game/premake5.lua` with four projects, following the existing file's shap
 Add `include "game"` to the root `premake5.lua`, then run
 `C:\dev\premake\premake5 vs2026`.
 
-- [ ] **Step 4: Write the game's rules and options**
+- [x] **Step 4: Write the game's rules and options**
 
 `game/Game/src/GameRules.h`: `namespace CubitGame { MatchRules Rules(); }` — or an
 `inline` function in the header, which suits five assignments. Comment each number with what
@@ -437,7 +457,7 @@ this file is where a designer will come to change them.
 `game/Game/src/GameOptions.h`: the struct from `SandboxOptions` in `Sandbox.cpp:32-41`,
 renamed, with its comment about single-player being the default.
 
-- [ ] **Step 5: Move the player, tools, shooting and client wiring**
+- [x] **Step 5: Move the player, tools, shooting and client wiring**
 
 From `Sandbox/src/Sandbox.cpp` into `PlayerLayer`, verbatim except for names: the
 `Match_`/`World_`/`Player_`/`HaveLocalPlayer` accessors and the branch-point comments,
@@ -461,7 +481,7 @@ put `MapPath` in `GameOptions.h` with its comment about working directories.
 `--latency`, `--loss`), pushing `PlayerLayer` and `GameHudLayer`, and calling
 `CrashHandler::Install("Game")` and `Logger::OpenFile("Game")`.
 
-- [ ] **Step 6: Cut the Sandbox back to a harness**
+- [x] **Step 6: Cut the Sandbox back to a harness**
 
 What stays in `Sandbox.cpp`: the world load, `SaveWorld`, `ReloadWorld`, `BlastAtAim` and
 its undo stack, `DrawTargetedBlockOutline`'s outline of the block under the crosshair,
@@ -477,17 +497,17 @@ The harness keeps `assets/` beside its executable: change its `postbuildcommands
 `{COPYDIR} "../game/assets" "%{cfg.targetdir}/assets"` so one copy of the maps serves both
 apps.
 
-- [ ] **Step 7: Run everything**
+- [x] **Step 7: Run everything**
 
 Run: `C:\dev\premake\premake5 vs2026`, then the Debug build, then Release.
 Expected: both suites green — `Tests` (engine) and `GameTests` (the rules case above).
 
-- [ ] **Step 8: Prove the game's rules test can fail**
+- [x] **Step 8: Prove the game's rules test can fail**
 
 Change `CubitGame::Rules()` to leave `ShotDamage` at the engine's placeholder minus one
 (33); rebuild; expect the three-shots-to-kill check red. Restore, rebuild, green.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A
