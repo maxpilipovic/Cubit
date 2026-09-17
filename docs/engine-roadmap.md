@@ -1,13 +1,12 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-09-14_
+_Last updated: 2026-09-16_
 
-A living view of what the Cubit engine has, what it still needs to be a complete
-voxel engine, and the order we intend to finish it in. Most of it is scoped to
-the *voxel* engine, with gameplay itself — teams, combat, networking — out of
-scope. The exception is "Beyond the voxel engine" below, which records the
-engine-side systems a multiplayer FPS will need and that a single-player voxel
-sandbox never asked for.
+A living view of what the Cubit engine has, what it still needs before the game, and
+the order we intend to finish it in. The punch list directly below is the current plan;
+"What Cubit is today" summarises the engine as it stands; everything after that is the
+history of the voxel-engine arc, the multiplayer systems found after it ("Beyond the
+voxel engine"), and the networking stages, kept because the reasons in them still apply.
 
 ## Before the game — engine punch list (2026-09-14)
 
@@ -117,7 +116,13 @@ them. Every item was checked in the code unless it says otherwise. References ar
   million cells — roughly 14% of a 512x64x512 map — differ from the map, a joiner silently
   never gets a welcome. **Done when:** a refused send is logged, and the ceiling is either
   lifted (chunk-based join is the recorded answer) or written down as an accepted limit.
-- [ ] **A6. The docs describe an older engine.** `README.md` says the suite has 270 cases
+- [x] **A6. The docs describe an older engine.** **Fixed 2026-09-16.** The README now
+  covers the Server and networking, shooting, the fixed step, crash handler and log files,
+  both GL versions, 524 tests, the 1.42 s load, how to run a match, and a "What's next"
+  that points at this punch list. This page's header and "What Cubit is today" were
+  rewritten the same way. Every new claim was checked against the code or a committed
+  measurement, not carried over from earlier write-ups. The original entry follows.
+  `README.md` says the suite has 270 cases
   (it has 495), says the window is OpenGL 3.3 (Debug builds request 4.3), and its "What's
   next" lists shipped work (multi-model stitching) and puts networking in the future. This
   page's "What Cubit is today" below still says "single-player" and "two-thirds of the way".
@@ -272,25 +277,37 @@ or just after it.
 
 ## What Cubit is today
 
-A single-player voxel sandbox engine. You load a map, walk around under gravity with
-collision, and place/break blocks. The core is complete and clean:
+_Rewritten 2026-09-16 (A6); the sections after this one are the history of how it got
+here._
+
+A voxel engine with networked multiplayer. You load a map, walk, swim and jump under
+gravity with collision, place and break blocks, and shoot — alone, or in a match against
+a headless authoritative server, with your own movement and edits predicted and shots
+lag-compensated. What exists:
 
 - **Platform / core loop:** `Application`, `Layer`/`LayerStack`, `Window`, `Input`,
-  `EventBus`, `Timestep`, logging, asserts.
-- **Rendering:** OpenGL context, vertex/index buffers, `VertexArray`, `Shader`,
-  `Texture2D`, ortho + perspective cameras, `Renderer`, `WorldRenderer` (per-chunk
-  meshes with dirty-chunk remeshing), HUD text (`DebugFont`, `HudLayer`).
-- **Voxel systems:** `Block`/`Chunk`/`World` (fixed chunk grid, palette-indexed
-  blocks), `ChunkMesher` (neighbour-aware, face-culled), `VoxelRaycast`,
-  `VoxelCollision` (box physics), dirty-chunk tracking.
-- **Content pipeline:** `VoxLoader` (load `.vox`), `VoxWriter` (save `.vox`),
-  `TerrainGen` + `MapGen` (procedural map generation). See
+  `EventBus`, a fixed 60 Hz step (`FrameClock`) with interpolated rendering, timestamped
+  logging to console and file, a crash handler (stack + minidump), a profiler, asserts.
+- **Rendering:** OpenGL context (3.3 Release, 4.3 Debug), vertex/index buffers,
+  `VertexArray`, `Shader`, `Texture2D`, ortho + perspective cameras, `Renderer`,
+  `WorldRenderer` (per-chunk meshes, budgeted remeshing, frustum culling, transparent
+  pass), `DebugDraw`, HUD text (`DebugFont`, `HudLayer`).
+- **Voxel systems:** `Chunk`/`World` (fixed chunk grid, palette-indexed blocks, sky
+  light), `ChunkMesher` (neighbour-aware, face-culled, per-vertex AO), `SkyLight`,
+  `VoxelRaycast`, `VoxelCollision`, `BlockEdit` (edits as values with inverses),
+  `CharacterController`, `FindSpawn`.
+- **Networking:** `MatchState`, `Transport` (ENet, loopback, simulated bad network),
+  `MatchServer`, `MatchClient` (prediction, reconciliation, interpolation, predicted
+  edits, lag-compensated hitscan), `Server.exe`, `Sandbox --connect`.
+- **Content pipeline:** `VoxLoader` (load `.vox`, multi-model stitching), `VoxWriter`
+  (save `.vox`), `TerrainGen` + `MapGen` (procedural map generation). See
   `docs/superpowers/specs/2026-07-25-battlefield-map-design.md`.
-- **Tests:** doctest suite (`Tests/`) run as a build step.
+- **Tests:** 524-case doctest suite (`Tests/`) run as a build step, netcode included.
 
-We are roughly **two-thirds** of the way to a complete voxel engine: the skeleton is
-done, but several real systems remain, mostly in rendering performance and visual
-quality.
+The voxel engine and the netcode are both built. What stands between this and the game
+is the punch list at the top of this page: the remaining robustness items, then the
+systems a game needs that a sandbox never asked for — multi-block edits, drawing things
+that are not chunks, text and UI, configuration, audio and a separate game target.
 
 ## Remaining engine systems
 

@@ -8,29 +8,37 @@ A C++ voxel engine, built alongside a sandbox application that exercises each sy
 it lands. The target is an Ace of Spades style multiplayer FPS: destructible terrain,
 building, shooting, and team-based matches.
 
-The engine builds as a DLL (`Cubit`). `Sandbox` is the executable that drives it, and
-`MapGen` is an offline tool that writes map files.
+The engine builds as a DLL (`Cubit`). `Sandbox` is the executable that drives it,
+`Server` is a headless authoritative match server, and `MapGen` is an offline tool that
+writes map files.
 
 Full scope and feature spec lives in `Documentation/Cubit.pdf`.
 
 ## What works
 
 You load a map, walk around it under gravity, and dig into it or build on it, lit by
-sky light and ambient occlusion. Water is see-through and you swim through it rather
-than walking on it, with the screen washing blue and hazing out while you are under.
-Swimming alone will not get you up the banks, though — there is no step-up assist, so
-climbing out means digging or building a way up, same as anywhere else on the map. The
-current map is a 512x64x512 battlefield.
+sky light and ambient occlusion — alone, or in a match with other players over the
+network, where you can shoot each other. Water is see-through and you swim through it
+rather than walking on it, with the screen washing blue and hazing out while you are
+under. Swimming alone will not get you up the banks, though — there is no step-up
+assist, so climbing out means digging or building a way up, same as anywhere else on
+the map. The current map is a 512x64x512 battlefield.
 
 **Platform and core loop**
 
-- GLFW-backed window on an OpenGL 3.3 core context, with vsync
+- GLFW-backed window on an OpenGL core context with vsync: 3.3 in Release, 4.3 in Debug,
+  where the extra version is what makes the driver's debug message callback available
+- A fixed 60 Hz simulation step (`FrameClock`) separate from the frame rate, with
+  layers split into `OnFixedUpdate`, `OnFrameUpdate` and an interpolated `OnRender`
 - Typed platform events (window, key, mouse) dispatched through a layer stack, overlays
   first
 - A separate `EventBus` for typed gameplay notifications, so layers do not need to know
   about each other
-- Polled input, cursor capture, frame timesteps, flushed logging, and debug-only
-  assertions
+- Polled input, cursor capture, and debug-only assertions
+- Logging with a wall-clock time on every line, flushed per line, and copied to
+  `logs/<program>-<date>-<time>-<pid>.log`
+- A crash handler: an uncaught exception or a native fault is logged with a symbolised
+  stack and leaves a minidump in `crashes/`
 - `CB_PROFILE_SCOPE` times named scopes into a Chrome trace, compiled into Debug
   and Release and out of Dist
 
@@ -48,6 +56,8 @@ current map is a 512x64x512 battlefield.
   frustum
 - Two-pass drawing: opaque geometry first, then transparent geometry sorted back
   to front with depth writes off, so water blends over the riverbed beneath it
+- `DebugDraw`: world-space lines and wireframe boxes callable from anywhere, used to
+  outline the block under the crosshair and to draw other players
 
 **Voxel world**
 
@@ -71,11 +81,36 @@ current map is a 512x64x512 battlefield.
   is grounded, plus solid and fluid overlap queries). A block is *present* if it is
   there at all, *solid* if it stops you, and *fluid* if it is present but does not —
   so water is swum through, aimed through, and cannot be dug or placed
+- `BlockEdit`: one block change as a value. Applying it relights and returns its
+  inverse, which is what undo and edit rollback are built on
+- `CharacterController`: the player's movement as a pure step over state, an input and
+  the world — gravity, jumping, swimming and collision — so prediction and replay are
+  just calling it again
+- `FindSpawn` resolves a map column into a standable, dry spawn position
+
+**Networking**
+
+- `MatchState` holds the world, the roster and the tick, and both ends step it
+- A `Transport` interface over ENet, plus a loopback and a `SimulatedTransport` that adds
+  deterministic latency, jitter and loss — so the netcode is tested with a server and
+  clients in one process, identically every run
+- `MatchServer`, the only authority: it applies each client's inputs one per tick,
+  validates and applies edits, resolves shots, and sends a snapshot to every client
+- `MatchClient` predicts its own movement and its own edits, reconciles against each
+  snapshot by replaying what the server has not yet acknowledged, and draws other
+  players interpolated between snapshots
+- Hitscan shooting with lag compensation: the server rewinds everyone to the instant the
+  shooter saw. Three hits kill, and death respawns instantly
+- A joining client receives every cell that differs from the map, and a server can be
+  stopped cleanly
+- A client whose inputs have piled up on the server — a lag spike, a fast clock —
+  catches up by skipping inputs, so input delay does not grow over a match
 
 **Content pipeline**
 
 - `VoxLoader` parses MagicaVoxel `.vox` into Cubit's Y-up space and `BuildWorld` sizes
-  a world to hold it, palette included
+  a world to hold it, palette included. A map larger than 256 on an axis is stitched
+  together from several models
 - `VoxWriter` is the exact inverse, so a model round-trips through the loader
 - `ToVoxModel` and `VoxWriter::WriteFile` save an edited world back out, so a map
   can be fixed by playing it — the sandbox binds this to `F5` and `F9`, though
@@ -83,22 +118,24 @@ current map is a 512x64x512 battlefield.
 - `TerrainGen` generates a symmetric Ace-of-Spades-style map: noise hills, mountain
   flanks with snow caps, a central river with sand banks, scattered forests, and two
   mirrored team-coloured forts
-- `MapGen` is the offline tool that runs the generator and writes `battlefield.vox`
+- `MapGen` is the offline tool that runs the generator and writes a `.vox`
 
 **Sandbox**
 
 - Loads `assets/maps/battlefield512.vox` — 4,096 chunks, of which 2,408 hold geometry
-- A player box that falls, lands, jumps, slides along walls, and respawns after falling
-  off the map
-- Breaking and placing blocks along the view ray, within reach, relit on each edit
-- A debug HUD: crosshair, position, grounded flag, total meshed faces, drawn and total
-  chunks, chunks still pending a remesh, physics steps per frame, undo stack depth, and
-  a smoothed frame rate — drawn with a 5x7 bitmap font defined in code
+- A player that falls, lands, jumps, swims, slides along walls, and respawns after
+  falling off the map
+- Breaking and placing blocks along the view ray, within reach, relit on each edit, with
+  an undo stack
+- A debug HUD: crosshair, position, grounded and in-water flags, meshed faces, drawn and
+  total chunks, chunks pending a remesh, physics steps per frame, undo depth and frame
+  rate; connected, it adds the player count, round-trip time, health and hit markers.
+  It is drawn with a bitmap font defined in code
 
 **Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
-a block, right click places one, and `1`–`8` pick the colour. `U` undoes the last block
-edit. `F5` saves the edited world, `F9` restores it — a checkpoint pair for authoring a
-map by playing it.
+a block, right click places one, `1`–`8` pick the colour, and middle click fires. `U`
+undoes the last block edit. `F5` saves the edited world, `F9` restores it — a
+checkpoint pair for authoring a map by playing it.
 
 ## Building
 
@@ -114,6 +151,10 @@ Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, the
 post-build steps, so the running app resolves `assets/...` the way a shipped build
 would.
 
+Premake expands its file lists when it generates the projects, so a new source file
+needs the projects regenerated. `GenerateProjects.bat` deletes `bin/` and `bin-int/`
+first; `premake5 vs2026` on its own regenerates without the clean rebuild.
+
 To regenerate the map, build and run `MapGen` with the size and output path you want
 it written to, then rebuild `Sandbox` so the new file is copied next to the executable.
 The shipped map is 512x64x512, which needs an explicit `--size` since `MapGen`
@@ -123,13 +164,35 @@ defaults to 256x64x256:
 MapGen.exe --size 512 64 512 <repo>\Sandbox\assets\maps\battlefield512.vox
 ```
 
+## Playing a match
+
+Start the server, then connect clients:
+
+```bat
+Server.exe
+Sandbox.exe --connect 127.0.0.1
+```
+
+Both read the map from `assets/` in the working directory, which the build copies next
+to each executable, so run each from its own output directory. A client checks the
+map's hash against the server's and refuses to join on a mismatch. The server listens on port 27015 and takes a map path as an argument; `--port` changes
+the port on either side. `--latency <ms>` (round trip) and `--loss <percent>` add a
+simulated bad network to either end, which is how to see prediction and lag
+compensation working on one machine. `--duration <seconds>` stops the server by itself,
+for scripts; otherwise `Ctrl+C` stops it and tells every client. With no arguments,
+`Sandbox` is the single-player app, with no socket anywhere.
+
 ## Tests
 
-`Tests` is a doctest suite — 270 cases — covering the parts that can be checked
+`Tests` is a doctest suite — 524 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
-frustum culling, `.vox` loading and writing, and the generated terrain's invariants. It
-runs automatically after building, so a failing test breaks the build.
+character movement, frustum culling, `.vox` loading and writing, the generated terrain's
+invariants, the wire protocol, and the netcode end to end under simulated latency and
+loss — prediction, corrections, predicted edits, lag compensation and input delay. The
+crash handler is tested by running the test executable itself as a child process that
+crashes on purpose. The suite runs automatically after building, so a failing test
+breaks the build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running the
 sandbox and looking at the result.
@@ -142,11 +205,12 @@ Cubit/         Engine, built as a DLL
   src/         Implementation; engine-only code under Core/
 Sandbox/       Executable that drives the engine
   assets/maps/ The .vox maps it loads
+Server/        Headless match server
 MapGen/        Offline map generator
 Tests/         doctest suite
 docs/          Roadmap, performance notes, designs and plans
 Documentation/ Scope spec and per-commit design notes
-vendor/        GLFW, GLAD, GLM, doctest
+vendor/        GLFW, GLAD, GLM, ENet, doctest
 ```
 
 Public headers live under `Cubit/include/Cubit` and are exported with `CB_API`. The
@@ -159,41 +223,35 @@ but not the engine-internal `CB_CORE_*` ones.
 
 The engine is fast enough to build on, and the work to get there is written up rather
 than guessed at. [`docs/performance.md`](docs/performance.md) catalogs each known
-problem, where it lives, and what it cost; the block-edit investigation under
-`docs/superpowers/investigations/` records how the causes were found, including three
+problem, where it lives, and what it cost; the investigations under
+`docs/superpowers/investigations/` record how the causes were found, including
 optimisations that measured slower and were reverted.
 
-Greedy meshing is the fourth. It was built in full, measured, and reverted: it cut
+Greedy meshing is one of them. It was built in full, measured, and reverted: it cut
 geometry 20.7% but doubled meshing time in both Debug and Release, and draw calls are
 one per chunk either way. P3 in the performance notes has the numbers and the reason —
 per-vertex ambient occlusion and greedy merging turn out to be close to mutually
 exclusive on lit outdoor terrain.
 
-Where an edit stands today, on the 256x64x256 map in a debug build: relighting a broken
-surface block takes 0.03 ms, down from 173 ms, and remeshing the four chunks it touches
-about 7 ms, down from 26 ms and now spread across frames by the mesh budget. Still open
-at load: the initial sky-light flood over the whole world.
+Loading the 512-wide map takes 1.42 s in a debug build, down from 33.1 s, with no single
+phase dominating any more. The largest remaining cost is meshing the whole map, about
+5 s of debug work spread across frames by the mesh budget, so the world visibly builds
+itself around you rather than stalling.
 
 ## What's next
 
-Finishing the engine first, in this order — see
-[`docs/engine-roadmap.md`](docs/engine-roadmap.md):
+Before gameplay, every gap from an engine audit is being closed, in
+[`docs/engine-roadmap.md`](docs/engine-roadmap.md) under "Before the game — engine punch
+list": bugs and robustness first, then missing systems the game will need — multi-block
+edits, a way to draw things that are not chunks, text and UI, configuration, audio, and
+a separate game target — then parked items to do or drop on purpose, such as threaded
+meshing.
 
-- **Multi-model stitching**, for maps beyond the 256-per-axis limit of a single `.vox`
-- **Threaded meshing** — the per-frame budget hides load cost but does not remove it
+Deliberately out of scope: per-block textures (blocks are palette colours by design)
+and LOD and streaming (maps are a fixed known size).
 
-Smaller gaps: reusing a chunk's GPU buffers instead of reallocating them per remesh,
-and batching chunk draws.
-
-Deliberately out of scope: per-block textures (blocks are palette colours by design),
-LOD and streaming (maps are a fixed known size), and audio (that belongs with gameplay).
-
-After the engine, the game:
-
-- Weapons and shooting
-- Health, death, and respawn
-- Client/server networking, including replicating terrain edits
-- Match state: teams, scoring, objectives
+After the engine, the game: teams, match state, an objective and a scoreboard; tool
+slots for digging, building and shooting; and ammunition.
 
 The rule the project follows is to build only what the game needs, and to prove each
 system in the sandbox before the game layer depends on it.
