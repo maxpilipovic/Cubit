@@ -44,3 +44,6 @@ Debug/
 Release/
 x64/
 x86/
+# Crash records written by CrashHandler
+crashes/
+*.dmp

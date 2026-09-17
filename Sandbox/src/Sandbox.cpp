@@ -1043,6 +1043,8 @@ public:
 //executable checking POS and FACES, and none of it may start needing a server.
 int main(int argc, char** argv)
 {
+    CrashHandler::Install("Sandbox");
+
     SandboxOptions options;
 
     for (int i = 1; i < argc; ++i)

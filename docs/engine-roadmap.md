@@ -44,7 +44,26 @@ them. Every item was checked in the code unless it says otherwise. References ar
   measured at zero corrections in Stage 4. **Done when:** a `SimulatedTransport` test with
   the server skipping steps shows what the queue does after a stall, and, if it stays deep,
   a fix returns it to its pre-stall depth, pinned by that test failing without the fix.
-- [ ] **A2. A crash leaves no record.** `Application::Run` (`Application.cpp:76`) has no
+- [x] **A2. A crash leaves no record.** **Fixed 2026-09-16.** `CrashHandler::Install`, called
+  at the top of `main` in Sandbox, Server and MapGen, installs a terminate handler and an
+  unhandled-exception filter. An exception nobody catches is logged as
+  `Terminating: uncaught exception <type>: <message>`; a native fault as `Crashed: <what>
+  at <module>+<offset>`, with an access violation's address and whether it read or wrote.
+  Both are followed by a symbolised stack, and both write a minidump (about 100 KB) to
+  `crashes/<program>-<date>-<time>-<pid>.dmp`. The filter hands C++ exceptions back to the
+  runtime's own filter, which is what calls `std::terminate` with the exception still
+  current, so the terminate handler can name it and the stack still shows the throw.
+  It ends the process with `TerminateProcess`, not `std::abort`, because Debug `abort`
+  raises a modal dialog that would hang an unattended server. **Tests:** crashes cannot be
+  tested in-process, so `Tests.exe --crash-probe=<kind>` installs the handler and crashes
+  on purpose, and three tests run it as a child process and read its log and dump
+  directory: a `std::runtime_error`, a thrown `int`, and a write through null. They pass in
+  Debug and Release, and went red with the two headline log lines removed. **Limits:** a
+  stack overflow is not reliably recorded (the handler has no stack to run on); the
+  terminate handler covers only the thread that called `Install`, because MSVC keeps it per
+  thread (every thread the engine has today); `Server.exe` still catches `std::exception`
+  in `main` for a clean exit, so a startup failure such as a missing map is logged there
+  without a dump. The original entry follows. `Application::Run` (`Application.cpp:76`) has no
   try/catch, and nothing installs a terminate handler, an unhandled-exception filter or a
   minidump writer. An exception thrown from any layer ends the process after whatever it
   last logged. Scope doc TOL-05. **Done when:** an exception out of a layer is logged with

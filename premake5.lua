@@ -198,7 +198,10 @@ project "Cubit"
         "opengl32",
         "ENet",
         "ws2_32",
-        "winmm"
+        "winmm",
+
+        -- MiniDumpWriteDump and the stack walk in CrashHandler.
+        "dbghelp"
     }
 
     defines

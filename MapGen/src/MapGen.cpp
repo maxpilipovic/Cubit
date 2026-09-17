@@ -1,3 +1,4 @@
+#include "Cubit/CrashHandler.h"
 #include "Cubit/Voxel/TerrainGen.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
@@ -11,6 +12,8 @@
 //path as argv[1], e.g. "Sandbox/assets/maps/battlefield.vox".
 int main(int argc, char** argv)
 {
+    CrashHandler::Install("MapGen");
+
     std::string out = "battlefield.vox";
     TerrainConfig config;
     config.Size = glm::ivec3(256, 64, 256);

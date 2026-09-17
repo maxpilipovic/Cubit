@@ -1,3 +1,4 @@
+#include "Cubit/CrashHandler.h"
 #include "Cubit/FrameClock.h"
 #include "Cubit/Logger.h"
 #include "Cubit/Net/EnetTransport.h"
@@ -83,6 +84,8 @@ namespace
 //is what makes this eighty lines rather than an engine refactor.
 int main(int argc, char** argv)
 {
+    CrashHandler::Install("Server");
+
     std::string mapPath = DefaultMap;
     std::uint16_t port = DefaultPort;
 
