@@ -34,6 +34,7 @@
 #include "Cubit/Renderer/VertexArray.h"
 #include "Cubit/Renderer/VertexBuffer.h"
 #include "Cubit/Renderer/WorldRenderer.h"
+#include "Cubit/Renderer/WorldScene.h"
 #include "Cubit/FrameClock.h"
 #include "Cubit/Timestep.h"
 #include "Cubit/Window.h"

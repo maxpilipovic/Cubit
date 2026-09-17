@@ -185,51 +185,15 @@ public:
             // Connected, both of these wait: Player_() throws until the server
             // has said who we are and put us in a snapshot, so the first
             // OnRender that has a player does them instead - the same two
-            // calls, through the same helper, not just the position half. The
-            // shader below is NOT part of that: it is built either way,
-            // because OnRender needs it before it needs a player.
+            // calls, through the same helper, not just the position half. The world
+            // scene is NOT part of that: its shader is built with the scene
+            // either way, because OnRender needs it before it needs a player.
             AimAtMapCentre();
             m_Aimed = true;
 
             UpdateCameraPosition(1.0f);
         }
 
-        constexpr std::string_view vertexSource = R"(
-            #version 330 core
-            layout(location = 0) in vec3 a_Position;
-            layout(location = 1) in vec4 a_Color;
-            uniform mat4 u_ViewProjection;
-            uniform mat4 u_Transform;
-            out vec4 v_Color;
-            out vec3 v_WorldPos;
-
-            void main()
-            {
-                v_Color = a_Color;
-                v_WorldPos = (u_Transform * vec4(a_Position, 1.0)).xyz;
-                gl_Position = u_ViewProjection * u_Transform * vec4(a_Position, 1.0);
-            }
-        )";
-        constexpr std::string_view fragmentSource = R"(
-            #version 330 core
-            layout(location = 0) out vec4 color;
-            in vec4 v_Color;
-            in vec3 v_WorldPos;
-            uniform vec3 u_FogColor;
-            uniform float u_FogDensity;
-            uniform vec3 u_CameraPos;
-
-            void main()
-            {
-                // Exponential, so it needs no far-plane constant and never
-                // saturates abruptly. Density is zero when dry, which makes
-                // this a mix against nothing rather than a branch.
-                float d = length(v_WorldPos - u_CameraPos);
-                float f = 1.0 - exp(-u_FogDensity * d);
-                color = vec4(mix(v_Color.rgb, u_FogColor, f), v_Color.a);
-            }
-        )";
-        m_Shader = std::make_unique<Shader>(vertexSource, fragmentSource);
     }
 
     //Advances the player through the chunk by one fixed step under gravity.
@@ -336,22 +300,12 @@ public:
 
         UpdateCameraPosition(alpha);
 
-        m_WorldRenderer.Update(World_());
-
-        Renderer::BeginScene(m_CameraController.GetCamera());
-        // u_Transform already carries WorldOffset and the camera position is in
-        // that same space — the invariant the transparency sort already relies
-        // on — so the two can be subtracted directly.
-        m_Shader->SetFloat3("u_FogColor", FogColor);
-        m_Shader->SetFloat3("u_CameraPos", m_CameraController.GetCamera().GetPosition());
-        m_Shader->SetFloat(
-            "u_FogDensity", Player_().EyeInFluid() ? FogDensity : 0.0f);
-        m_WorldRenderer.Render(
-            *m_Shader,
-            m_CameraController.GetCamera().GetViewProjectionMatrix(),
+        m_Scene.Update(World_());
+        m_Scene.Render(
+            m_CameraController.GetCamera(),
             WorldOffset,
-            m_CameraController.GetCamera().GetPosition());
-        Renderer::EndScene();
+            FogColor,
+            Player_().EyeInFluid() ? FogDensity : 0.0f);
 
         // Flushed here, while the world camera is current. The HUD overlay
         // renders after this layer and leaves an orthographic matrix behind, so
@@ -361,10 +315,10 @@ public:
         DrawShots();
         DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
 
-        m_HudState->MeshFaceCount = m_WorldRenderer.TotalFaceCount();
-        m_HudState->DrawnChunks = m_WorldRenderer.DrawnChunkCount();
-        m_HudState->TotalChunks = m_WorldRenderer.TotalChunkCount();
-        m_HudState->PendingChunks = m_WorldRenderer.PendingCount();
+        m_HudState->MeshFaceCount = m_Scene.TotalFaceCount();
+        m_HudState->DrawnChunks = m_Scene.DrawnChunkCount();
+        m_HudState->TotalChunks = m_Scene.TotalChunkCount();
+        m_HudState->PendingChunks = m_Scene.PendingCount();
     }
 
     //Routes one-time key presses through the typed platform dispatcher.
@@ -1119,7 +1073,6 @@ private:
         return false;
     }
 
-    std::unique_ptr<Shader> m_Shader;
     std::shared_ptr<HudState> m_HudState;
     SandboxOptions m_Options;
 
@@ -1156,7 +1109,7 @@ private:
     std::uint64_t m_TracerTick = 0;
     bool m_TracerActive = false;
 
-    WorldRenderer m_WorldRenderer;
+    WorldScene m_Scene;
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
     //Counted across the current frame's steps and published by OnFrameUpdate.
