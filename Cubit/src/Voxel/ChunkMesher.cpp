@@ -9,6 +9,7 @@
 
 #include "Core/CoreLogger.h"
 #include "Voxel/Neighbourhood.h"
+#include "Voxel/VoxelFaces.h"
 
 #include <array>
 
@@ -121,82 +122,6 @@ namespace
         }
     }
 
-    //Per-face brightness, so a solid-coloured block still reads as a cube.
-    //Roughly the shading a single overhead light would give.
-    constexpr float TopShade = 1.00f;
-    constexpr float RightShade = 0.92f;
-    constexpr float FrontShade = 0.86f;
-    constexpr float LeftShade = 0.80f;
-    constexpr float BackShade = 0.72f;
-    constexpr float BottomShade = 0.60f;
-
-    //One block face, described rather than hand-written. Corner holds the four
-    //vertex offsets from the block's minimum corner, in the winding order the
-    //face is emitted in. U and V are the two axes spanning the face, and
-    //CornerU/CornerV give each vertex's sign along them — which is what lets a
-    //corner's two occluding neighbours be found without a switch per face.
-    struct FaceGeometry
-    {
-        glm::ivec3 Normal;
-        glm::vec3 Corner[4];
-        glm::ivec3 U;
-        glm::ivec3 V;
-        int CornerU[4];
-        int CornerV[4];
-        float Shade;
-    };
-
-    constexpr FaceGeometry Faces[6] =
-    {
-        // Front (+Z)
-        { {  0,  0,  1 },
-          { { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 1.0f },
-            { 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f, 1.0f } },
-          { 1, 0, 0 }, { 0, 1, 0 },
-          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
-          FrontShade },
-
-        // Back (-Z)
-        { {  0,  0, -1 },
-          { { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
-            { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 0.0f } },
-          { 1, 0, 0 }, { 0, 1, 0 },
-          { +1, -1, -1, +1 }, { -1, -1, +1, +1 },
-          BackShade },
-
-        // Right (+X)
-        { {  1,  0,  0 },
-          { { 1.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f },
-            { 1.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } },
-          { 0, 0, 1 }, { 0, 1, 0 },
-          { +1, -1, -1, +1 }, { -1, -1, +1, +1 },
-          RightShade },
-
-        // Left (-X)
-        { { -1,  0,  0 },
-          { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f },
-            { 0.0f, 1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } },
-          { 0, 0, 1 }, { 0, 1, 0 },
-          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
-          LeftShade },
-
-        // Top (+Y)
-        { {  0,  1,  0 },
-          { { 0.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f },
-            { 1.0f, 1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-          { 1, 0, 0 }, { 0, 0, 1 },
-          { -1, +1, +1, -1 }, { +1, +1, -1, -1 },
-          TopShade },
-
-        // Bottom (-Y)
-        { {  0, -1,  0 },
-          { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f },
-            { 1.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } },
-          { 1, 0, 0 }, { 0, 0, 1 },
-          { -1, +1, +1, -1 }, { -1, -1, +1, +1 },
-          BottomShade },
-    };
-
     //Emits one face: four vertices shaded by their own corner occlusion, then
     //the two triangles joining them.
     //A face's normal and tangent axes as flat neighbourhood offsets, worked out
@@ -214,7 +139,7 @@ namespace
         const Neighbourhood& cells,
         int blockCell,
         const glm::vec3& blockOrigin,
-        const FaceGeometry& face,
+        const VoxelFaces::Face& face,
         const FaceSteps& steps,
         const glm::vec4& blockColor)
     {
@@ -233,20 +158,9 @@ namespace
 
         for (int i = 0; i < 4; ++i)
         {
-            const float lit = face.Shade * ChunkMesher::AoShade[ao[i]] * light[i];
-
-            // The floor applies to the finished shading, not to light alone:
-            // the three factors multiply, so flooring only the light term still
-            // lets an occluded ceiling underside reach near-black.
-            //
-            // Shading scales the colour channels only. Alpha is the block's
-            // opacity and has nothing to do with how lit the face is.
-            const glm::vec3 shaded = glm::vec3(blockColor)
-                * (ChunkMesher::LightFloor
-                    + (1.0f - ChunkMesher::LightFloor) * lit);
-
             mesh.Vertices.push_back(
-                { blockOrigin + face.Corner[i], glm::vec4(shaded, blockColor.a) });
+                { blockOrigin + face.Corner[i],
+                  VoxelFaces::ShadeVertex(blockColor, face.Shade, ao[i], light[i]) });
         }
 
         // Splitting a quad along its darker diagonal keeps the shading gradient
@@ -281,7 +195,7 @@ namespace
                 continue;
 
             AddFace(mesh, cells, blockCell, blockOrigin,
-                Faces[f], steps[f], color);
+                VoxelFaces::All[f], steps[f], color);
         }
     }
 }
@@ -299,9 +213,9 @@ ChunkMeshData ChunkMesher::Build(const World& world, int chunkX, int chunkY, int
     FaceSteps steps[6];
     for (int f = 0; f < 6; ++f)
         steps[f] = {
-            Neighbourhood::Step(Faces[f].Normal),
-            Neighbourhood::Step(Faces[f].U),
-            Neighbourhood::Step(Faces[f].V) };
+            Neighbourhood::Step(VoxelFaces::All[f].Normal),
+            Neighbourhood::Step(VoxelFaces::All[f].U),
+            Neighbourhood::Step(VoxelFaces::All[f].V) };
 
     for (int z = 0; z < Chunk::Depth; ++z)
     {

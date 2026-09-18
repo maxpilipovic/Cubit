@@ -424,7 +424,7 @@ TEST_CASE("Ambient occlusion darkens exactly the occluded corner, not its neighb
     // Every existing AO test that goes through Build is permutation-invariant:
     // the lone-block tests have all four corners equal, and the inside-corner
     // test only checks the darkest value across a whole plane. Nothing pins
-    // FaceGeometry's CornerU/CornerV signs to a specific vertex, so permuting
+    // VoxelFaces::Face's CornerU/CornerV signs to a specific vertex, so permuting
     // them would still pass every other test. This one binds the dark corner
     // to its exact position.
     World world(1, 1, 1);
