@@ -23,6 +23,10 @@ Mesh::Mesh(const MeshGeometry& geometry)
 
 Mesh::~Mesh() = default;
 
+//Each member here is a unique_ptr, and a unique_ptr's own move already
+//transfers ownership and nulls the source, so there is no raw handle left
+//for this type to null by hand - unlike VertexArray or IndexBuffer, which
+//own a raw m_RendererId and so write their moves themselves.
 Mesh::Mesh(Mesh&& other) noexcept = default;
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept = default;

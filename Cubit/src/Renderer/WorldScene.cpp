@@ -5,6 +5,8 @@
 #include "Cubit/Renderer/Mesh.h"
 #include "Cubit/Renderer/Renderer.h"
 
+#include "Core/CoreLogger.h"
+
 #include <string_view>
 
 WorldScene::WorldScene()
@@ -63,6 +65,7 @@ void WorldScene::Render(const PerspectiveCamera& camera, const glm::vec3& worldO
     const glm::vec3& fogColor, float fogDensity)
 {
     Renderer::BeginScene(camera);
+    m_HasRendered = true;
 
     //u_Transform already carries worldOffset and the camera position is in that
     //same space - the invariant the transparency sort also relies on - so the
@@ -83,6 +86,13 @@ void WorldScene::Render(const PerspectiveCamera& camera, const glm::vec3& worldO
 
 void WorldScene::DrawMesh(const Mesh& mesh, const glm::mat4& transform, float brightness)
 {
+    //Renderer::Submit reads a view-projection that only BeginScene sets, and
+    //EndScene never clears it, so calling this before Render has ever run
+    //would not fail - it would draw with whatever matrix (or none) happens
+    //to be sitting in the renderer's static state. That is a silently wrong
+    //frame, which is worse than a crash, so catch it here instead.
+    CB_CORE_ASSERT(m_HasRendered, "DrawMesh called before WorldScene::Render set a camera");
+
     if (mesh.Empty())
         return;
 

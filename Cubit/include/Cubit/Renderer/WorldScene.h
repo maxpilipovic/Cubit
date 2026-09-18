@@ -55,7 +55,8 @@ public:
     //`transform` carries the mesh's world offset the same way the chunk
     //draw's does; `brightness` is how lit the thing is where it stands - the
     //scene does not work that out, because the scene does not know what a
-    //model is. Uses the camera set by the last Render, so call it there.
+    //model is. Uses the camera set by the last Render, so call it there; in
+    //debug builds this is enforced by an assert, not only by this comment.
     void DrawMesh(const Mesh& mesh, const glm::mat4& transform, float brightness);
 
     //What the last Render drew, for a readout.
@@ -67,6 +68,11 @@ public:
 private:
     WorldRenderer m_Renderer;
     std::unique_ptr<Shader> m_Shader;
+
+    //Set once Render has run, so DrawMesh's assert can tell a real Renderer
+    //view-projection from one that was never set. See DrawMesh's definition
+    //for why this matters.
+    bool m_HasRendered = false;
 };
 
 #ifdef _MSC_VER
