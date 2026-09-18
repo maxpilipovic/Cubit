@@ -658,6 +658,23 @@ git push origin master
 
 ### Task 6: One premake file per project
 
+**Done 2026-09-18, with two deviations and one finding.**
+1. **Paths did not stay unchanged.** Step 1 says premake resolves an included file's paths
+   from the root; it does not — it resolves them from the script's own directory, which is
+   why Task 3's `game/premake5.lua` was already full of `../`. Every path had to be rebased:
+   `Cubit/src/**` became `src/**`, `vendor/GLM` became `../vendor/GLM`, `bin/` became
+   `../bin/`. `postbuildcommands` were the exception and stayed as they were, because those
+   run with the project directory as the working directory rather than the script's.
+2. **The `.vcxproj` files are gitignored**, so Step 3's `git diff` on them shows nothing.
+   They were copied to a scratch directory before the change and compared afterwards
+   instead: all 16 generated files byte-identical, and premake printed no "Generated" line
+   at all, which is the same statement in its own words.
+3. **Finding, Step 4: the harness names a game path.** `Sandbox/premake5.lua` copies
+   `../game/assets` next to its executable, and six engine test files open
+   `game/assets/maps/*.vox`. The engine itself is clean. So the game cannot leave in one
+   `git subtree split` without taking the harness's and the suite's maps with it. Raised
+   with the user rather than decided here.
+
 **Files:**
 - Create: `Cubit/premake5.lua`, `Sandbox/premake5.lua`, `Tests/premake5.lua`,
   `vendor/premake5.lua`
@@ -668,13 +685,13 @@ git push origin master
 - Consumes: nothing.
 - Produces: `outputdir` as a workspace-level variable the included files read.
 
-- [ ] **Step 1: Move each project block into its own file**
+- [x] **Step 1: Move each project block into its own file**
 
 Cut each `project "X"` block into `X/premake5.lua` verbatim, with paths unchanged — premake
 resolves them from the root because `include` runs the file in place. The dependency blocks
 (`GLAD`, `GLFW`, `ENet`) go to `vendor/premake5.lua` under their `group "Dependencies"`.
 
-- [ ] **Step 2: Leave the root file with the workspace only**
+- [x] **Step 2: Leave the root file with the workspace only**
 
 The root keeps the `workspace`, `architecture`, `configurations`, `startproject`,
 `outputdir`, and:
@@ -687,18 +704,18 @@ include "Tests"
 include "game"
 ```
 
-- [ ] **Step 3: Regenerate and build**
+- [x] **Step 3: Regenerate and build**
 
 Run: `C:\dev\premake\premake5 vs2026`, then the Debug build, then Release.
 Expected: the same projects, the same outputs, both suites green. `git diff` on the
 generated `.vcxproj` files should show no meaningful change beyond ordering.
 
-- [ ] **Step 4: Check the engine cannot see the game**
+- [x] **Step 4: Check the engine cannot see the game**
 
 Run: `grep -rn "game/" Cubit/premake5.lua Sandbox/premake5.lua Tests/premake5.lua`
 Expected: no matches. The engine, harness and engine tests name no game path.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
