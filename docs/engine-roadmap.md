@@ -392,14 +392,30 @@ them. Every item was checked in the code unless it says otherwise. References ar
   PLY-02, POL-04.
 - [ ] **B7. Audio.** No audio library in `vendor/` and no audio code. Scope doc POL-01,
   which the doc puts in the prototype band.
-- [ ] **B8. A separate game target.** The projects are GLAD, GLFW, ENet, Cubit, Sandbox,
-  MapGen, Server and Tests; game code has grown inside `Sandbox.cpp` (1,069 lines). Scope
-  doc ENG-01 asks for engine, sandbox and game to build separately.
+- [x] **B8. A separate game target.** Done 2026-09-18, in seven tasks recorded in
+  `docs/superpowers/plans/2026-09-17-b8-engine-game-split.md`. The engine holds no game
+  numbers: health, damage, shot range, fire rate and dig reach became a `MatchRules` value
+  the game supplies. The Sandbox became an engine-only harness, and the game — the player,
+  tools, shooting, the HUD, the client wiring, the server, the map generator and its own
+  suite — moved under `game/`, so a repository split is a directory move. Each project now
+  describes itself in a `premake5.lua` beside its own sources.
   `TerrainGen` stays in the engine even though the battlefield it draws is the game's
   content, because `SpawnFinderTests`, `MapHashTests` and `VoxWriterTests` all build their
   worlds with it. Moving it game-side is its own item, worth doing only if the engine is
   ever shipped without the game's terrain — the tests would need a world builder of their
   own first.
+- [ ] **B8a. The maps are on the wrong side of the split.** `Sandbox/premake5.lua` copies
+  `../game/assets` next to the harness, and six engine test files open
+  `game/assets/maps/*.vox`. The code splits cleanly; the content does not, so
+  `git subtree split -P game` would take the harness's and the suite's maps with it. Either
+  give the engine side its own fixture maps, or have the harness and those tests build
+  their worlds with `TerrainGen` instead of loading a file — which would cost `.vox`
+  loading its real-file coverage, so it is a decision, not a chore.
+- [ ] **B8b. A player dies before the game starts.** `GameApp` logs
+  "Player 1 was defeated by player 2" about ten milliseconds after the window opens, before
+  it has connected to anything, on every connected run. A `PlayerDiedEvent` is reaching the
+  bus when no match exists yet. Harmless as far as anything observed, and unrelated to the
+  split — found while verifying it on 2026-09-18.
 - [ ] **B9. Crouch and step-up.** `CharacterController` has neither; the README already
   notes there is no step-up assist. Scope doc PLY-01.
 

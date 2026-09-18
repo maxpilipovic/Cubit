@@ -727,6 +727,32 @@ git push origin master
 
 ### Task 7: Verify both apps, then document
 
+**Done 2026-09-18, with one expectation wrong and one check left open.**
+1. **Both apps run.** The harness draws the battlefield with `POS`, `OCEAN`, `FACES`,
+   `DRAWN 995/2408`, `PENDING`, `STEPS`, `UNDO`, `FPS 143`, and edits work in it. The game
+   draws the same world with `POS`, `GND 1`, `OCEAN`, the renderer counters, `FPS 144` and a
+   crosshair.
+2. **Step 2's expectation was wrong.** It wanted `HEALTH 100` in the game's single-player
+   HUD. Health is a connected-only line by design — single-player draws nothing below `FPS`,
+   which is what keeps its readout identical to the pre-networking one. `HEALTH 100` appears
+   in the connected run instead, which is where it belongs.
+3. **The two-process match connects and is clean**: `CONNECTED 1`, `NET 17`, `HEALTH 100`,
+   ~7,100 snapshots over two minutes, zero corrections, both processes exiting on their own
+   and logging their summaries.
+4. **The edit across the wire was not seen.** Five runs, and the server logged
+   `0 edits accepted` every time. Instrumenting the click path showed **no mouse button
+   event ever reached the application** — not even the branch where a click is spent
+   recapturing the cursor — so this is not the edit path failing. Synthetic input does not
+   reach the GL window from a background script, and the runs that a human was asked to
+   click in were blocking tool calls they were not watching. Left open, with
+   `scratchpad/match-yours.ps1` for a hands-on run.
+
+**Worth keeping from the instrumenting:** the connected edit path logged nothing at all,
+while single-player logged `Broke block at x,y,z`. A click that never became an edit and a
+click that never happened therefore looked identical in the log, which is what made this
+take five runs to pin down. `GameApp.cpp` now logs `Requested break at x,y,z` when it asks
+the server, and that line stays.
+
 **Files:**
 - Modify: `README.md` (projects, layout, how to run each app, test counts)
 - Modify: `docs/engine-roadmap.md` (tick B8 with how, and the repo-split note)
@@ -735,7 +761,7 @@ git push origin master
 - Consumes: everything above.
 - Produces: the documentation that says what the layout is and why.
 
-- [ ] **Step 1: Run the harness and screenshot it**
+- [x] **Step 1: Run the harness and screenshot it**
 
 Launch `bin\Debug-windows-x86_64\Sandbox\Sandbox.exe` from its own directory, move the GL
 window to a known rect, and capture it (see
@@ -744,32 +770,32 @@ the `GLFW30` window, not `MainWindowHandle`; allow time for the budgeted mesher;
 `WM_CLOSE`). Expected: the battlefield renders, the readout shows `FACES`, `DRAWN`,
 `PENDING`, `FPS` and a camera `POS`.
 
-- [ ] **Step 2: Run the game and screenshot it**
+- [x] **Step 2: Run the game and screenshot it**
 
 Launch `bin\Debug-windows-x86_64\GameApp\GameApp.exe` the same way. Expected: the player
 stands on the map, the HUD shows `HEALTH 100`, and a left click breaks a block.
 
-- [ ] **Step 3: Run a match across two processes**
+- [x] **Step 3: Run a match across two processes**
 
 Start `bin\Debug-windows-x86_64\Server\Server.exe`, then
 `GameApp.exe --connect 127.0.0.1`. Expected: the client's log says it joined; an edit made on
 the client appears in the server's log; both exit cleanly. Read both log files under each
 executable's `logs/`.
 
-- [ ] **Step 4: Update the README**
+- [x] **Step 4: Update the README**
 
 The project list, the directory layout, the two executables and how to run them, and the two
 test counts. Say plainly that the game lives under `game/` so it can move to its own
 repository, and that the engine holds no game rules.
 
-- [ ] **Step 5: Tick B8 in the roadmap**
+- [x] **Step 5: Tick B8 in the roadmap**
 
 Record: the layout, the rules extraction, what stayed engine-side and why (`TerrainGen`),
 the Sandbox's new job and what that cost (gameplay screenshots retarget to `GameApp`), the
 `git subtree split -P game` path for the eventual repository split, and that sending rules in
 `Welcome` is the recorded answer if client and server builds can ever differ.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A

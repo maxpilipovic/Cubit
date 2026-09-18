@@ -8,9 +8,13 @@ A C++ voxel engine, built alongside a sandbox application that exercises each sy
 it lands. The target is an Ace of Spades style multiplayer FPS: destructible terrain,
 building, shooting, and team-based matches.
 
-The engine builds as a DLL (`Cubit`). `Sandbox` is the executable that drives it,
-`Server` is a headless authoritative match server, and `MapGen` is an offline tool that
-writes map files.
+The engine builds as a DLL (`Cubit`) and knows no game rules: health, damage, shot
+range, fire rate and dig reach are a `MatchRules` value the game supplies. `Sandbox` is
+the harness that exercises the engine — a map, a free camera, editing, save and reload,
+and the timing readouts. The game itself lives under `game/`: `GameApp` is the player's
+executable, `Server` is a headless authoritative match server, `MapGen` writes map
+files, and `GameTests` is the game's own suite. One directory, so the game can become
+its own repository with a single `git subtree split -P game`.
 
 Full scope and feature spec lives in `Documentation/Cubit.pdf`.
 
@@ -155,21 +159,26 @@ GenerateProjects.bat
 ```
 
 Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, then run
-`Sandbox`. `Cubit.dll` and the `assets` directory are copied next to the executable as
-post-build steps, so the running app resolves `assets/...` the way a shipped build
-would.
+either application: `Sandbox` for the engine harness, `GameApp` for the game.
+`Cubit.dll` and the `assets` directory are copied next to each executable as post-build
+steps, so a running app resolves `assets/...` the way a shipped build would.
+
+Each project describes itself in a `premake5.lua` beside its own sources, and the root
+file is the workspace and a list of `include` lines. A project's paths are relative to
+its own build file, because premake resolves a script's paths from that script's
+directory.
 
 Premake expands its file lists when it generates the projects, so a new source file
 needs the projects regenerated. `GenerateProjects.bat` deletes `bin/` and `bin-int/`
 first; `premake5 vs2026` on its own regenerates without the clean rebuild.
 
 To regenerate the map, build and run `MapGen` with the size and output path you want
-it written to, then rebuild `Sandbox` so the new file is copied next to the executable.
+it written to, then rebuild the app you want it copied next to.
 The shipped map is 512x64x512, which needs an explicit `--size` since `MapGen`
 defaults to 256x64x256:
 
 ```bat
-MapGen.exe --size 512 64 512 <repo>\Sandbox\assets\maps\battlefield512.vox
+MapGen.exe --size 512 64 512 <repo>gamessetsmapsattlefield512.vox
 ```
 
 ## Playing a match
@@ -178,7 +187,7 @@ Start the server, then connect clients:
 
 ```bat
 Server.exe
-Sandbox.exe --connect 127.0.0.1
+GameApp.exe --connect 127.0.0.1
 ```
 
 Both read the map from `assets/` in the working directory, which the build copies next
@@ -188,42 +197,53 @@ the port on either side. `--latency <ms>` (round trip) and `--loss <percent>` ad
 simulated bad network to either end, which is how to see prediction and lag
 compensation working on one machine. `--duration <seconds>` stops the server by itself,
 for scripts; otherwise `Ctrl+C` stops it and tells every client. With no arguments,
-`Sandbox` is the single-player app, with no socket anywhere.
+`GameApp` is the single-player game, with no socket anywhere.
 
 ## Tests
 
-`Tests` is a doctest suite — 571 cases — covering everything that can be checked
+There are two suites, divided by what a failing test would point at. `Tests` is the
+engine's — 574 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's
 invariants, the wire protocol, and the netcode end to end under simulated latency and
 loss — prediction, corrections, predicted edits, lag compensation and input delay. The
 crash handler is tested by running the test executable itself as a child process that
-crashes on purpose. The suite runs automatically after building, so a failing test
-breaks the build.
+crashes on purpose. `GameTests` is the game's — 3 cases — covering the numbers the game
+states for itself and the labels its HUD draws. Both suites run automatically after
+building, so a failing test breaks the build.
 
-Rendering, windowing, and input are not unit tested. Those are checked by running the
-sandbox and looking at the result.
+Rendering, windowing, and input are not unit tested. Those are checked by running an
+application and looking at the result.
 
 ## Layout
 
 ```text
-Cubit/         Engine, built as a DLL
-  include/     Public headers
-  src/         Implementation; engine-only code under Core/
-Sandbox/       Executable that drives the engine
-  assets/maps/ The .vox maps it loads
-Server/        Headless match server
-MapGen/        Offline map generator
-Tests/         doctest suite
-docs/          Roadmap, performance notes, designs and plans
-Documentation/ Scope spec and per-commit design notes
-vendor/        GLFW, GLAD, GLM, ENet, doctest
+Cubit/           Engine, built as a DLL
+  include/       Public headers
+  src/           Implementation; engine-only code under Core/
+Sandbox/         The engine's harness
+Tests/           The engine's doctest suite
+game/            The game, laid out to become its own repository
+  Game/src/      Static library: rules, options, the player layer, the HUD
+  GameApp/src/   The player's executable
+  Server/src/    Headless match server
+  MapGen/src/    Offline map generator
+  GameTests/src/ The game's doctest suite
+  assets/maps/   The .vox maps
+docs/            Roadmap, performance notes, designs and plans
+Documentation/   Scope spec and per-commit design notes
+vendor/          GLFW, GLAD, GLM, ENet, doctest
 ```
 
-Public headers live under `Cubit/include/Cubit` and are exported with `CB_API`. The
-sandbox only includes that directory, so it gets the `CB_*` logging and assert macros
-but not the engine-internal `CB_CORE_*` ones.
+Public headers live under `Cubit/include/Cubit` and are exported with `CB_API`. Both
+applications only include that directory, so they get the `CB_*` logging and assert
+macros but not the engine-internal `CB_CORE_*` ones.
+
+The engine names nothing under `Sandbox/` or `game/`. Two threads still cross the other
+way: the harness copies the game's `assets/` next to its executable, and six engine test
+files open maps from it — so the maps would have to be sorted out before a repository
+split actually happens. That is recorded as its own roadmap item rather than hidden.
 
 `bin/`, `bin-int/`, and the Visual Studio project files are generated.
 

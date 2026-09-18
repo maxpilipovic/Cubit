@@ -689,6 +689,16 @@ private:
             // it is legal; the server applies it on the same tick and only a
             // refusal ever takes it back. Single-player below still applies
             // edits directly and keeps its undo stack.
+            // Requested, not done: the line below only asks. Single-player
+            // logs the edit it applied, and without this the connected path
+            // logged nothing at all - so a click that never became an edit and
+            // a click that never happened looked identical in the log, which
+            // cost a verification session on 2026-09-18.
+            CB_INFO(
+                std::string("Requested ") + (button == MouseCode::Left ? "break" : "place") +
+                " at " + std::to_string(target.x) + "," +
+                std::to_string(target.y) + "," + std::to_string(target.z));
+
             m_Client->RequestEdit(edit);
             return true;
         }
