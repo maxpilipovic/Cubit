@@ -567,6 +567,26 @@ git push origin master
 
 ### Task 5: Split the test suites
 
+**Done 2026-09-18, with three deviations.**
+1. **The label list the plan wrote down was stale.** It named `UNDO`, which Task 3 moved to
+   the harness, and left out `FACES`, `DRAWN`, `PENDING`, `CONNECTED`, `NET`, `DISCONNECTED`,
+   `HIT` and `KILLED`, which the game's readout draws. The real list came from reading
+   `DrawReadout`, not from the plan. Write the list from the code that draws it.
+2. **`Labels` went on the layer, not the state.** There is no `GameHudState.h` — Task 3 kept
+   the state beside the layer in `GameHudLayer.h` — and Task 3's harness put `Labels` on
+   `HudLayer`. Two HUDs that look alike are worth more than matching a header name the plan
+   guessed at.
+3. **The drawing still uses literals.** The plan asked for the readout to draw from the list
+   so the two cannot drift; that would make every line read `Labels[4]` instead of `"DRAWN"`,
+   which costs more than it catches. The list plus the comment beside it is the guard, and
+   both tests were proved to bite: a `?` added to each list failed each suite by name.
+
+**Also worth recording:** the engine suite now includes `Sandbox/src`. The harness ships no
+suite of its own, and its one testable rule is that its readout is spelled in letters the
+font has. The include is one way — the Sandbox never includes a test — and it is on the
+`Tests` project, not on `Cubit`, so Task 6's check that the engine cannot see an app still
+holds. Counts afterwards: engine 574 (the label case was renamed, not removed), game 3.
+
 **Files:**
 - Move to `game/GameTests/src/`: `Tests/src/DebugFontTests.cpp` label case only (the font's
   own table stays engine-side — split the file), `Tests/src/HeadingTests.cpp` stays,
@@ -578,14 +598,14 @@ git push origin master
 - Consumes: `GameHudState` and `GameHudLayer` from Task 3.
 - Produces: nothing other tasks read.
 
-- [ ] **Step 1: Decide the division by what a test would break on**
+- [x] **Step 1: Decide the division by what a test would break on**
 
 Engine suite keeps everything that fails when the engine changes: the font's glyph table,
 `CursorCapture`, `EditRules`, the netcode, the voxel systems, `Support`, `BlockEdit`.
 Game suite takes what fails when the game changes: the game's rules (Task 3), and the
 labels the game's HUD draws.
 
-- [ ] **Step 2: Write the game HUD's test**
+- [x] **Step 2: Write the game HUD's test**
 
 Create `game/GameTests/src/GameHudTests.cpp`:
 
@@ -614,19 +634,19 @@ TEST_CASE("Every label the game HUD draws is one the debug font can draw")
   to `GameHudState`, and have `GameHudLayer` draw from that list, so the test and the drawing
   cannot drift apart.
 
-- [ ] **Step 3: Move the label case out of the engine suite**
+- [x] **Step 3: Move the label case out of the engine suite**
 
 Delete the label case added in Task 2 from `Tests/src/DebugFontTests.cpp`, leaving the glyph
 table and `IndexOf` cases. The harness HUD's labels get the same treatment as the game's: add
 `HudState::Labels` in `Sandbox/src/HudLayer.h` and a case in `Tests/src/DebugFontTests.cpp`
 that checks that list.
 
-- [ ] **Step 4: Run both suites in both configurations**
+- [x] **Step 4: Run both suites in both configurations**
 
 Run: the Debug build, then Release.
 Expected: green. Note the two case counts; they sum to at least what the suite had before.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A

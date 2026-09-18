@@ -7,9 +7,10 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
-//Values the sandbox publishes for the overlay to display.
+//Values the game publishes for the overlay to display.
 struct GameHudState
 {
     glm::vec3 PlayerPosition{ 0.0f };
@@ -108,6 +109,16 @@ public:
             });
     }
 
+    //Every word this readout draws, including the two the shot puts in
+    //ShotLabel. GameHudTests checks the list against the font: an unsupported
+    //character draws as a blank rather than failing, so a label that drifts out
+    //of the font silently hides the value beside it.
+    static constexpr std::string_view Labels[] = {
+        "POS", "GND", "OCEAN", "FACES", "DRAWN", "PENDING", "STEPS", "FPS",
+        "NOT CONNECTED", "DISCONNECTED", "CONNECTED", "NET", "HEALTH",
+        "HIT", "KILLED"
+    };
+
 private:
     //Covers the whole screen while submerged. The fog cannot reach the sky, so
     //without this, looking up from underwater shows an untouched clear colour.
@@ -135,7 +146,7 @@ private:
         // The flags are digits. Every label on this readout has to be spelled
         // from DebugFont::Order: an unsupported character still renders as a
         // blank rather than failing, which would silently hide a set flag.
-        // DebugFontTests checks the HUD's own words against the font.
+        // GameHudTests checks the HUD's own words against the font.
         m_Overlay.DrawText(
             std::string("OCEAN ") +
             (m_State->EyeInFluid ? "1" : "0") +
@@ -172,7 +183,7 @@ private:
         //Every label here must be spelled from DebugFont::Order. An unsupported
         //character renders as a blank rather than failing, so a wrong label
         //would silently show as a gap - which is what kept these to CONNECTED
-        //and NET while the font lacked most of the alphabet. DebugFontTests now
+        //and NET while the font lacked most of the alphabet. GameHudTests now
         //checks the words this readout draws.
         y -= lineHeight;
 

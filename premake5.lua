@@ -306,6 +306,9 @@ project "Tests"
         "vendor/GLM",
         "vendor/doctest/doctest",
 
+        -- The harness ships no suite of its own; its HUD labels are checked
+        -- here. Header-only and one way: the Sandbox never includes a test.
+        "Sandbox/src"
     }
 
     links

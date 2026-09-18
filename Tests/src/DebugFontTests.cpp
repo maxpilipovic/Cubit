@@ -2,6 +2,10 @@
 
 #include "Cubit/Renderer/DebugFont.h"
 
+//The harness has no suite of its own, so its one testable rule - that its
+//readout is spelled in letters the font has - is checked from here.
+#include "HudLayer.h"
+
 #include <cstdint>
 #include <set>
 #include <string>
@@ -43,25 +47,25 @@ TEST_CASE("Every glyph is five by seven and no two are the same")
     }
 }
 
-TEST_CASE("The letters the HUD actually uses are all drawable")
+TEST_CASE("Every label the harness HUD draws is one the debug font can draw")
 {
     //An unsupported character falls back to the blank glyph, so a HUD label
     //with a letter missing renders as a gap rather than failing - which is why
     //two stages of HUD were limited to words the old font could spell.
     //
-    //The labels HudLayer::DrawReadout draws, then the ones the shot adds. Keep
-    //this in step with the readout: a label added there and not here is
-    //exactly the silent gap this exists to catch.
-    const std::string_view labels =
-        "POS GND OCEAN FACES DRAWN PENDING STEPS UNDO FPS NOT CONNECTED "
-        "DISCONNECTED NET HEALTH HIT KILLED";
-
-    for (const char character : labels)
+    //Only the harness's words are checked here. The game's are its own, and
+    //GameHudTests checks them against this same font.
+    for (const std::string_view label : HudLayer::Labels)
     {
-        if (character == ' ')
-            continue;
+        CAPTURE(label);
 
-        CAPTURE(character);
-        CHECK(DebugFont::IndexOf(character) != DebugFont::IndexOf(' '));
+        for (const char character : label)
+        {
+            if (character == ' ')
+                continue;
+
+            CAPTURE(character);
+            CHECK(DebugFont::IndexOf(character) != DebugFont::IndexOf(' '));
+        }
     }
 }
