@@ -519,6 +519,13 @@ git push origin master
 
 ### Task 4: Move the map generator game-side
 
+**Done 2026-09-18.** Step 1 was already in the ground: the move and its premake block rode
+along with Task 3's commit, because the root file could not name a project the game
+directory now owned. So this task was the checking, not the moving. The generator, run from
+its own directory, wrote a battlefield byte-identical to the committed
+`game/assets/maps/battlefield.vox` — the same hash — which is the evidence that a move of a
+tool changed nothing about what it makes.
+
 **Files:**
 - Move: `MapGen/src/MapGen.cpp` to `game/MapGen/src/MapGen.cpp`
 - Modify: `game/premake5.lua` (add the `MapGen` project, moved verbatim from
@@ -529,12 +536,12 @@ git push origin master
 - Consumes: nothing new.
 - Produces: nothing new. `MapGen` keeps its command line and its output path.
 
-- [ ] **Step 1: Move the project**
+- [x] **Step 1: Move the project**
 
 `git mv MapGen game/MapGen`, move its premake block into `game/premake5.lua`, and update the
 paths inside it to `game/MapGen/src/**`. Run `C:\dev\premake\premake5 vs2026`.
 
-- [ ] **Step 2: Build, then generate a map and check it loads**
+- [x] **Step 2: Build, then generate a map and check it loads**
 
 Run: the Debug build, then
 `bin\Debug-windows-x86_64\MapGen\MapGen.exe` in its own directory.
@@ -542,13 +549,13 @@ Expected: it writes its `.vox` as before. Then run the engine suite, which loads
 `battlefield512.vox` in `SpawnFinderTests` and the two measurement cases, so a broken asset
 path fails the build.
 
-- [ ] **Step 3: Record the TerrainGen decision**
+- [x] **Step 3: Record the TerrainGen decision**
 
 In `docs/engine-roadmap.md` under B8, note that `TerrainGen` stays in the engine because
 three engine test files build worlds with it, and that moving it is its own item if the
 engine is ever shipped without the game's terrain.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A

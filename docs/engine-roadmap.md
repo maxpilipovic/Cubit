@@ -395,6 +395,11 @@ them. Every item was checked in the code unless it says otherwise. References ar
 - [ ] **B8. A separate game target.** The projects are GLAD, GLFW, ENet, Cubit, Sandbox,
   MapGen, Server and Tests; game code has grown inside `Sandbox.cpp` (1,069 lines). Scope
   doc ENG-01 asks for engine, sandbox and game to build separately.
+  `TerrainGen` stays in the engine even though the battlefield it draws is the game's
+  content, because `SpawnFinderTests`, `MapHashTests` and `VoxWriterTests` all build their
+  worlds with it. Moving it game-side is its own item, worth doing only if the engine is
+  ever shipped without the game's terrain — the tests would need a world builder of their
+  own first.
 - [ ] **B9. Crouch and step-up.** `CharacterController` has neither; the README already
   notes there is no step-up assist. Scope doc PLY-01.
 
