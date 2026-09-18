@@ -89,25 +89,33 @@ TEST_CASE("An empty model meshes to nothing rather than failing")
     CHECK(mesh.Indices.empty());
 }
 
-TEST_CASE("An inside corner is darker than an open face")
+TEST_CASE("Ambient occlusion darkens a corner its neighbours enclose")
 {
-    //Ambient occlusion is what stops a model reading as a flat silhouette. An
-    //L of three voxels has one corner enclosed by its two neighbours; the
-    //vertex there must come out darker than the same model's open corners.
-    VoxModel model = EmptyModel(2, 2, 1);
-    Set(model, 0, 0, 0, 1);
-    Set(model, 1, 0, 0, 1);
-    Set(model, 0, 1, 0, 1);
+    //Two models whose observed voxel has exactly the same six faces exposed:
+    //the occluders are DIAGONAL to it, so they cover none of its faces and
+    //change no face's shade. The only thing that can differ between the two
+    //meshes is how enclosed a corner is - which makes this a test of ambient
+    //occlusion rather than of the per-face shading that swamped the previous
+    //version of it.
+    VoxModel open = EmptyModel(3, 3, 3);
+    Set(open, 1, 1, 1, 1);
 
-    const MeshGeometry mesh = ModelMesher::Build(model);
+    VoxModel enclosed = EmptyModel(3, 3, 3);
+    Set(enclosed, 1, 1, 1, 1);
 
-    float darkest = 2.0f;
-    float brightest = -1.0f;
-    for (const VoxelVertex& vertex : mesh.Vertices)
-    {
-        darkest = std::min(darkest, vertex.Color.r);
-        brightest = std::max(brightest, vertex.Color.r);
-    }
+    //Both sit against the open cell above the observed voxel's top face, one
+    //along each of the two axes that span it, so the corner between them is
+    //occluded from both sides.
+    Set(enclosed, 2, 2, 1, 1);
+    Set(enclosed, 1, 2, 2, 1);
 
-    CHECK(darkest < brightest);
+    float darkestOpen = 2.0f;
+    for (const VoxelVertex& vertex : ModelMesher::Build(open).Vertices)
+        darkestOpen = std::min(darkestOpen, vertex.Color.r);
+
+    float darkestEnclosed = 2.0f;
+    for (const VoxelVertex& vertex : ModelMesher::Build(enclosed).Vertices)
+        darkestEnclosed = std::min(darkestEnclosed, vertex.Color.r);
+
+    CHECK(darkestEnclosed < darkestOpen);
 }
