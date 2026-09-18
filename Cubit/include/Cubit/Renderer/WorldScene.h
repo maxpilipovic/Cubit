@@ -12,14 +12,16 @@
 #include <memory>
 
 class World;
+class Mesh;
 
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4251)
 #endif
 
-//A meshed voxel world drawn with distance fog: the chunk renderer, the shader
-//that colours its vertices, and the one call that puts them on screen.
+//The voxel scene: the world and the things standing in it. Drawn with the
+//same distance fog - the chunk renderer, the shader that colours its
+//vertices, and the calls that put chunks and standalone meshes on screen.
 //
 //Here rather than in an app because both the harness and a game draw the same
 //world the same way, and the shader is the engine's own - a voxel chunk's
@@ -48,6 +50,13 @@ public:
     //at all, which is how a dry camera draws.
     void Render(const PerspectiveCamera& camera, const glm::vec3& worldOffset,
         const glm::vec3& fogColor, float fogDensity);
+
+    //Draws one standalone mesh, such as a player model or a held tool.
+    //`transform` carries the mesh's world offset the same way the chunk
+    //draw's does; `brightness` is how lit the thing is where it stands - the
+    //scene does not work that out, because the scene does not know what a
+    //model is. Uses the camera set by the last Render, so call it there.
+    void DrawMesh(const Mesh& mesh, const glm::mat4& transform, float brightness);
 
     //What the last Render drew, for a readout.
     std::uint32_t TotalFaceCount() const { return m_Renderer.TotalFaceCount(); }
