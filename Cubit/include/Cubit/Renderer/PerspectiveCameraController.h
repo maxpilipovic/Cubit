@@ -38,6 +38,16 @@ public:
     //position seen says nothing about where it is now.
     void ResetMouseTracking() { m_HasMousePosition = false; }
 
+    //Sets the vertical field of view in degrees and rebuilds the projection at
+    //once. Not validated: which range is sensible is the application's call.
+    void SetFieldOfView(float degrees);
+
+    //Sets how many degrees the view turns for each pixel the mouse moves.
+    void SetMouseSensitivity(float degreesPerPixel) { m_MouseSensitivity = degreesPerPixel; }
+
+    float GetFieldOfView() const { return m_FieldOfView; }
+    float GetMouseSensitivity() const { return m_MouseSensitivity; }
+
     const glm::vec3& GetPosition() const { return m_Position; }
     float GetYaw() const { return m_Yaw; }
     float GetPitch() const { return m_Pitch; }

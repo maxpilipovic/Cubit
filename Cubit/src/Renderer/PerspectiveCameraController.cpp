@@ -49,6 +49,12 @@ void PerspectiveCameraController::SetRotation(float yaw, float pitch)
     UpdateCamera();
 }
 
+void PerspectiveCameraController::SetFieldOfView(float degrees)
+{
+    m_FieldOfView = degrees;
+    m_Camera.SetProjection(m_FieldOfView, m_AspectRatio, m_NearClip, m_FarClip);
+}
+
 void PerspectiveCameraController::OnEvent(Event& event)
 {
     EventDispatcher dispatcher(event);

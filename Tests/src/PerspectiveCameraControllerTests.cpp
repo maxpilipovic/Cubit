@@ -3,6 +3,8 @@
 #include "Cubit/Renderer/PerspectiveCameraController.h"
 #include "Cubit/Events/MouseEvent.h"
 
+#include <cmath>
+
 TEST_CASE("Setting rotation aims the camera")
 {
     PerspectiveCameraController controller(16.0f / 9.0f);
@@ -72,4 +74,37 @@ TEST_CASE("After mouse tracking is reset, the next move is a new reference rathe
     MouseMovedEvent onward(910.0, 400.0);
     controller.OnEvent(onward);
     CHECK(controller.GetYaw() == doctest::Approx(2.4f));
+}
+
+TEST_CASE("Setting the field of view rebuilds the projection at once")
+{
+    PerspectiveCameraController controller(16.0f / 9.0f);
+    controller.SetRotation(0.0f, 0.0f);
+
+    //With the camera level, the view leaves the vertical axis alone, so this
+    //entry of view-projection is the projection's own 1 / tan(fov / 2): about
+    //1.732 at the default 60 degrees, and exactly 1 at 90.
+    CHECK(controller.GetCamera().GetViewProjectionMatrix()[1][1] ==
+        doctest::Approx(1.0f / std::tan(glm::radians(30.0f))));
+
+    controller.SetFieldOfView(90.0f);
+
+    CHECK(controller.GetFieldOfView() == doctest::Approx(90.0f));
+    CHECK(controller.GetCamera().GetViewProjectionMatrix()[1][1] == doctest::Approx(1.0f));
+}
+
+TEST_CASE("Mouse sensitivity sets how far a mouse move turns the view")
+{
+    PerspectiveCameraController controller(16.0f / 9.0f);
+    controller.SetRotation(0.0f, 0.0f);
+    controller.SetMouseSensitivity(0.5f);
+
+    MouseMovedEvent first(100.0, 100.0);
+    controller.OnEvent(first);
+    MouseMovedEvent second(110.0, 100.0);
+    controller.OnEvent(second);
+
+    //10 pixels at 0.5 degrees a pixel, where the default 0.12 would give 1.2.
+    CHECK(controller.GetMouseSensitivity() == doctest::Approx(0.5f));
+    CHECK(controller.GetYaw() == doctest::Approx(5.0f));
 }

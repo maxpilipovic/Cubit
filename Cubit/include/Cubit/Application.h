@@ -10,12 +10,17 @@
 
 struct ApplicationData;
 class Window;
+struct WindowProperties;
 
 class CB_API Application
 {
 public:
-    //Creates the engine application and its core systems.
+    //Creates the engine application and its core systems, in a default window.
     Application();
+
+    //Creates the engine application and its core systems, in a window of the
+    //given size and title - for an application whose player chooses them.
+    explicit Application(const WindowProperties& windowProperties);
 
     //Releases all engine systems owned by the application.
     virtual ~Application();

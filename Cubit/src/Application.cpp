@@ -21,6 +21,11 @@ struct ApplicationData
 };
 
 Application::Application()
+    : Application(WindowProperties())
+{
+}
+
+Application::Application(const WindowProperties& windowProperties)
     : m_Data(nullptr)
 {
     CoreLogger::Init();
@@ -28,7 +33,7 @@ Application::Application()
 
     try
     {
-        m_Data = new ApplicationData{ Window::Create() };
+        m_Data = new ApplicationData{ Window::Create(windowProperties) };
         Input::SetWindow(m_Data->WindowInstance.get());
         m_Data->WindowInstance->SetEventCallback(
             [this](Event& event)
