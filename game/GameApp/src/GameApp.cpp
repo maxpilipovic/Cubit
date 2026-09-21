@@ -14,6 +14,7 @@
 #include "GameHudLayer.h"
 #include "GameOptions.h"
 #include "GameRules.h"
+#include "Maps.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
@@ -63,13 +64,6 @@ namespace
     //visual: the shot itself leaves from the eye, on both ends of the wire.
     constexpr float TracerMuzzleRight = 0.25f;
     constexpr float TracerMuzzleDown = 0.2f;
-
-    //Roughly where to start. Only a column: the height, and whether this exact
-    //column is usable at all, are resolved against the loaded map. A hint over
-    //a hill or the river moves to the nearest spot that can hold the player
-    //rather than burying the camera in terrain — which used to render as a
-    //black screen and read as a rendering bug.
-    const glm::ivec2 SpawnHintXZ{ 240, 300 };
 
     //Underwater haze. Roughly half strength at the 12-block reach distance and
     //83% at 30, which reads as murk without hiding what you are aiming at.
@@ -159,7 +153,7 @@ public:
         // launch therefore records a much shorter load, which is honest.
         if (!m_Options.Connect)
         {
-            LoadWorld(CubitGame::MapPath);
+            LoadWorld(CubitGame::DefaultMapPath);
         }
 #ifndef CB_DIST
         Profiler::EndSession();
@@ -915,8 +909,11 @@ private:
         // anyway, so the value is the same either way.
         const glm::vec3 halfExtents = CharacterConfig{}.HalfExtents;
 
+        const glm::ivec2 hint =
+            CubitGame::SpawnHintFor(World_().GetWidth(), World_().GetDepth());
+
         const std::optional<glm::vec3> found =
-            FindSpawn(World_(), SpawnHintXZ, halfExtents);
+            FindSpawn(World_(), hint, halfExtents);
 
         if (found)
         {
@@ -929,13 +926,13 @@ private:
         // silent black screen.
         CB_ERROR(
             "No spawn found within " + std::to_string(MaxSpawnSearchRadius) +
-            " columns of " + std::to_string(SpawnHintXZ.x) + "," +
-            std::to_string(SpawnHintXZ.y) + " - dropping in from above");
+            " columns of " + std::to_string(hint.x) + "," +
+            std::to_string(hint.y) + " - dropping in from above");
 
         m_Spawn = glm::vec3(
-            static_cast<float>(SpawnHintXZ.x) + 0.5f,
+            static_cast<float>(hint.x) + 0.5f,
             static_cast<float>(World_().GetHeight()) - halfExtents.y,
-            static_cast<float>(SpawnHintXZ.y) + 0.5f);
+            static_cast<float>(hint.y) + 0.5f);
     }
 
     //Hands the cursor to the desktop or takes it back, to match m_Cursor.

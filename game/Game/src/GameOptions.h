@@ -14,11 +14,3 @@ struct GameOptions
     double LatencyRtt = 0.0;
     float Loss = 0.0f;
 };
-
-namespace CubitGame
-{
-    //The map a single-player session loads, resolved against the working
-    //directory - the executable's own, where the build puts a copy of the
-    //game's assets.
-    constexpr const char* MapPath = "assets/maps/battlefield512.vox";
-}

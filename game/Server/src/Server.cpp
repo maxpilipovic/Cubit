@@ -11,6 +11,7 @@
 #include "Cubit/Voxel/VoxLoader.h"
 
 #include "GameRules.h"
+#include "Maps.h"
 
 #include <glm/glm.hpp>
 
@@ -35,11 +36,6 @@
 namespace
 {
     constexpr std::uint16_t DefaultPort = 27015;
-    constexpr const char* DefaultMap = "assets/maps/battlefield512.vox";
-
-    //Matches the Sandbox's own hint, so a player spawns where they would in
-    //single-player rather than somewhere unrelated.
-    const glm::ivec2 SpawnHint{ 240, 300 };
 
     //The numbers this server's matches are played by, from the game rather
     //than the engine: see MatchRules. A client of this server comes from the
@@ -94,7 +90,7 @@ int main(int argc, char** argv)
     CrashHandler::Install("Server");
     Logger::OpenFile("Server");
 
-    std::string mapPath = DefaultMap;
+    std::string mapPath = CubitGame::DefaultMapPath;
     std::uint16_t port = DefaultPort;
 
     //Round-trip milliseconds, halved into the one-way latency NetworkSim wants.
@@ -155,7 +151,7 @@ int main(int argc, char** argv)
         const glm::vec3 halfExtents = CharacterConfig{}.HalfExtents;
 
         const std::optional<glm::vec3> spawn =
-            FindSpawn(world, SpawnHint, halfExtents);
+            FindSpawn(world, CubitGame::SpawnHintFor(world.GetWidth(), world.GetDepth()), halfExtents);
 
         if (!spawn.has_value())
         {
