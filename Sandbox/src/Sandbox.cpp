@@ -104,7 +104,7 @@ namespace
 class SandboxLayer final : public Layer
 {
 public:
-    explicit SandboxLayer(std::shared_ptr<HudState> hudState)
+    SandboxLayer(std::shared_ptr<HudState> hudState, const std::string& mapPath)
         : m_HudState(std::move(hudState)),
           m_CameraController(16.0f / 9.0f)
     {
@@ -123,11 +123,16 @@ public:
         //
         //EnsureMap runs first and outside the session, so the one run that has
         //to generate the map does not put generation into a capture of load.
-        EnsureMap(MapPath);
+        //
+        //Only the harness's own map is generated when missing. A path named on
+        //the command line is loaded as given, and a missing one is an error -
+        //generating something in its place would hide the typo.
+        if (mapPath == MapPath)
+            EnsureMap(MapPath);
 #ifndef CB_DIST
         Profiler::BeginSession("load", "profile-load.json");
 #endif
-        LoadWorld(MapPath);
+        LoadWorld(mapPath.c_str());
 #ifndef CB_DIST
         Profiler::EndSession();
 #endif
@@ -567,11 +572,11 @@ private:
 class SandboxApplication final : public Application
 {
 public:
-    SandboxApplication()
+    explicit SandboxApplication(const std::string& mapPath)
     {
         auto hudState = std::make_shared<HudState>();
 
-        PushLayer(std::make_unique<SandboxLayer>(hudState));
+        PushLayer(std::make_unique<SandboxLayer>(hudState, mapPath));
         PushOverlay(std::make_unique<HudLayer>(
             hudState,
             GetWindow().GetFramebufferWidth(),
@@ -581,15 +586,17 @@ public:
 
 int main(int argc, char** argv)
 {
-    (void)argc;
-    (void)argv;
+    std::string mapPath = MapPath;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--map" && i + 1 < argc)
+            mapPath = argv[++i];
 
     CrashHandler::Install("Sandbox");
     Logger::OpenFile("Sandbox");
 
     try
     {
-        SandboxApplication app;
+        SandboxApplication app(mapPath);
         app.Run();
     }
     catch (const std::exception& error)

@@ -169,8 +169,10 @@ GenerateProjects.bat
 
 Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, then run
 either application: `Sandbox` for the engine harness, `GameApp` for the game.
-`Cubit.dll` and the `assets` directory are copied next to each executable as post-build
-steps, so a running app resolves `assets/...` the way a shipped build would.
+`Cubit.dll` is copied next to each executable as a post-build step, and the game's
+`assets` directory next to the game's executables, so a running game resolves
+`assets/...` the way a shipped build would. The harness copies nothing: it writes its
+own map on first run.
 
 Each project describes itself in a `premake5.lua` beside its own sources, and the root
 file is the workspace and a list of `include` lines. A project's paths are relative to
@@ -187,7 +189,7 @@ The shipped map is 512x64x512, which needs an explicit `--size` since `MapGen`
 defaults to 256x64x256:
 
 ```bat
-MapGen.exe --size 512 64 512 <repo>gamessetsmapsattlefield512.vox
+MapGen.exe --size 512 64 512 <repo>\game\assets\maps\battlefield512.vox
 ```
 
 ## Playing a match
@@ -207,6 +209,28 @@ simulated bad network to either end, which is how to see prediction and lag
 compensation working on one machine. `--duration <seconds>` stops the server by itself,
 for scripts; otherwise `Ctrl+C` stops it and tells every client. With no arguments,
 `GameApp` is the single-player game, with no socket anywhere.
+
+## Settings
+
+`GameApp` reads `settings.cfg` from its working directory, and writes it with the
+defaults if it is not there:
+
+| Setting | Default | Range |
+|---|---|---|
+| `mouse_sensitivity` | 0.12 | 0.01 – 2.0 |
+| `field_of_view` | 60 | 30 – 120 |
+| `window_width` | 1280 | 640 – 7680 |
+| `window_height` | 720 | 360 – 4320 |
+
+`--sensitivity`, `--fov`, `--width` and `--height` override the file for one run. A
+value out of range is clamped, and a line that cannot be read is skipped; both are
+warned about in the log, and neither stops the game. The log's `Settings:` line says
+what a run actually used, which is worth checking when a scripted screenshot looks
+wider or narrower than expected — an edited `settings.cfg` left in `bin/` changes every
+run after it.
+
+`--map <path>` loads another map in single-player, and does the same for the harness.
+Connected, the server names the map.
 
 ## Tests
 

@@ -443,7 +443,33 @@ them. Every item was checked in the code unless it says otherwise. References ar
   `Publish` copies the callback vector on every call. `LayerStack` can push
   (`LayerStack.h:26–29`) but never pop. Menus, map rotation and leaving a match all remove
   things.
-- [ ] **B6. Configuration and settings.** Mouse sensitivity
+- [x] **B6. Configuration and settings.** **Done 2026-09-21**, from
+  [the spec](superpowers/specs/2026-09-21-settings-design.md). The five constants were
+  not one kind of thing, and each got the fix its kind needed:
+  - **Player settings** — sensitivity, field of view, window size — are read from
+    `settings.cfg` beside `GameApp`, written with the defaults on first run, with
+    `--sensitivity`, `--fov`, `--width` and `--height` on top. The engine parses the file
+    (`SettingsFile`) and the game owns the keys, defaults and ranges (`GameSettings`). A
+    bad value warns and keeps its default, an out-of-range one is clamped, and neither
+    stops the game.
+  - **The map** is `--map` for single-player and the harness; the server already took a
+    path.
+  - **The spawn hint and the default map path** each had a second copy on the server. Both
+    now live once, in `game/Game/src/Maps.h`. `SpawnHintFor` falls back to the map's
+    centre on a map the hint is off the edge of: the server has always accepted any map
+    path, so a player could be dropped in above a column outside the world and fall
+    forever.
+  - **Found on the way:** `GameApp` built its camera for 16:9 regardless of the window.
+    Nothing sends a resize at startup, so any other shape started stretched. It now
+    uses the window's real aspect.
+
+  **Tests:** 12 engine cases for the parser, 2 for the camera's new setters, 9 game
+  cases for the policy — including that the default file reads back as exactly the
+  defaults — and 4 for the maps. Verified by running: a first run writes the file; an
+  edited file changes the field of view and window; a flag wins and is clamped; a bad
+  line is skipped; and `--map` loads the 256 map and spawns at its centre.
+
+  The original entry follows. Mouse sensitivity
   (`PerspectiveCameraController.h:57`), field of view (`:49`), the map path
   (`Sandbox.cpp:110`), the spawn hint (`Sandbox.cpp:87`, with a second copy in
   `Server.cpp`) and the resolution are all compile-time constants. Scope doc ENG-06,
