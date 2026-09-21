@@ -493,6 +493,38 @@ TEST_CASE("A quad flips to split along its darker diagonal, at the right vertex"
     CHECK(mesh.Opaque.Indices[indexBase + 5] == first + 1);
 }
 
+TEST_CASE("A quad does not flip when its darker diagonal is already the split")
+{
+    // With ao = {2, 3, 3, 3} (index 0 is the occluded corner at (8,9,9)),
+    // ao[0]+ao[2] = 5 is not greater than ao[1]+ao[3] = 6, so the quad must
+    // stay unflipped: indices first+0,+1,+2,+2,+3,+0 rather than the flipped
+    // 1,2,3,3,0,1.
+    World world(1, 1, 1);
+    world.SetBlock(8, 8, 8, BlockId{1});
+    world.SetBlock(7, 9, 9, BlockId{1});
+    FloodFullDaylight(world);
+
+    const ChunkMeshData mesh = ChunkMesher::Build(world, 0, 0, 0);
+
+    const glm::vec3 corners[4] =
+    {
+        { 8.0f, 9.0f, 9.0f }, { 9.0f, 9.0f, 9.0f },
+        { 9.0f, 9.0f, 8.0f }, { 8.0f, 9.0f, 8.0f },
+    };
+    const std::size_t quad = FindQuadByCorners(mesh, corners);
+    REQUIRE(quad != static_cast<std::size_t>(-1));
+
+    const std::uint32_t first = static_cast<std::uint32_t>(quad) * 4;
+    const std::size_t indexBase = quad * 6;
+
+    CHECK(mesh.Opaque.Indices[indexBase + 0] == first + 0);
+    CHECK(mesh.Opaque.Indices[indexBase + 1] == first + 1);
+    CHECK(mesh.Opaque.Indices[indexBase + 2] == first + 2);
+    CHECK(mesh.Opaque.Indices[indexBase + 3] == first + 2);
+    CHECK(mesh.Opaque.Indices[indexBase + 4] == first + 3);
+    CHECK(mesh.Opaque.Indices[indexBase + 5] == first + 0);
+}
+
 namespace
 {
     //Finds the vertex at one corner of a face, among vertices already narrowed
