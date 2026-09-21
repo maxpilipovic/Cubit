@@ -14,6 +14,7 @@
 #include "GameHudLayer.h"
 #include "GameOptions.h"
 #include "GameRules.h"
+#include "GameSettings.h"
 #include "Maps.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -84,6 +86,41 @@ namespace
     constexpr int PlaceableBlockCount =
         static_cast<int>(sizeof(PlaceableBlocks) / sizeof(PlaceableBlocks[0]));
 
+    //The settings this run uses: the file beside the executable - written out
+    //with the defaults if it is not there - and then the command line on top.
+    //Whatever could not be used goes into warnings, to be logged once the
+    //logger exists.
+    CubitGame::GameSettings LoadSettings(const std::string& overrides,
+        std::vector<std::string>& warnings)
+    {
+        CubitGame::GameSettings settings;
+
+        try
+        {
+            const std::optional<SettingsFile> file =
+                SettingsFile::Load(CubitGame::SettingsFileName);
+
+            if (file)
+            {
+                CubitGame::Apply(*file, settings, warnings);
+            }
+            else
+            {
+                std::ofstream out(CubitGame::SettingsFileName, std::ios::binary);
+                out << CubitGame::DefaultFileText();
+                if (!out)
+                    warnings.push_back(std::string("Could not write ") +
+                        CubitGame::SettingsFileName + "; running with the defaults");
+            }
+        }
+        catch (const std::exception& error)
+        {
+            warnings.push_back(std::string(error.what()) + "; running with the defaults");
+        }
+
+        CubitGame::Apply(SettingsFile::Parse(overrides), settings, warnings);
+        return settings;
+    }
 }
 
 class PlayerLayer final : public Layer
@@ -91,12 +128,16 @@ class PlayerLayer final : public Layer
 public:
     //Subscribes the player layer to typed gameplay notifications.
     PlayerLayer(EventBus& eventBus, std::shared_ptr<GameHudState> hudState,
-        const GameOptions& options)
+        const GameOptions& options, const CubitGame::GameSettings& settings,
+        float aspectRatio)
         : m_EventBus(eventBus),
           m_HudState(std::move(hudState)),
           m_Options(options),
-          m_CameraController(16.0f / 9.0f)
+          m_CameraController(aspectRatio)
     {
+        m_CameraController.SetFieldOfView(settings.FieldOfView);
+        m_CameraController.SetMouseSensitivity(settings.MouseSensitivity);
+
         Input::SetCursorCaptured(m_Cursor.Captured());
 
         //Held as a member: the callback captures `this`, so the subscription must
@@ -153,7 +194,7 @@ public:
         // launch therefore records a much shorter load, which is honest.
         if (!m_Options.Connect)
         {
-            LoadWorld(CubitGame::DefaultMapPath);
+            LoadWorld(m_Options.MapPath.c_str());
         }
 #ifndef CB_DIST
         Profiler::EndSession();
@@ -1042,18 +1083,43 @@ private:
 class GameApplication final : public Application
 {
 public:
-    //Creates the game layers.
-    explicit GameApplication(const GameOptions& options)
+    //Creates the game layers, in a window of the size the settings ask for.
+    GameApplication(const GameOptions& options, const CubitGame::GameSettings& settings,
+        const std::vector<std::string>& settingsWarnings)
+        : Application(WindowProperties{ "Cubit",
+            static_cast<std::uint32_t>(settings.WindowWidth),
+            static_cast<std::uint32_t>(settings.WindowHeight) })
     {
+        //Logged here rather than where they were found: the settings are read
+        //before the application exists, and the logger with it.
+        for (const std::string& warning : settingsWarnings)
+            CB_WARN(warning);
+
+        const std::uint32_t width = GetWindow().GetFramebufferWidth();
+        const std::uint32_t height = GetWindow().GetFramebufferHeight();
+
+        //What this run is actually using, whatever it came from - the file, the
+        //command line or the defaults. An edited settings.cfg left in bin/
+        //changes every scripted screenshot run after it, and this line is how
+        //that gets noticed. The framebuffer is the window the platform actually
+        //gave, which a high-DPI display can make larger than was asked for.
+        CB_INFO(CubitGame::Describe(settings) + " (framebuffer " +
+            std::to_string(width) + "x" + std::to_string(height) + ")");
+
         //Shared so the overlay can read what the gameplay layer writes, without
         //either layer knowing about the other.
         auto hudState = std::make_shared<GameHudState>();
 
-        PushLayer(std::make_unique<PlayerLayer>(GetEventBus(), hudState, options));
-        PushOverlay(std::make_unique<GameHudLayer>(
-            hudState,
-            GetWindow().GetFramebufferWidth(),
-            GetWindow().GetFramebufferHeight()));
+        //The aspect of the window that was really created, not 16:9. Nothing
+        //sends a resize at startup, so a 4:3 window would start stretched and
+        //stay that way until the player resized it.
+        const float aspectRatio = height > 0
+            ? static_cast<float>(width) / static_cast<float>(height)
+            : 16.0f / 9.0f;
+
+        PushLayer(std::make_unique<PlayerLayer>(
+            GetEventBus(), hudState, options, settings, aspectRatio));
+        PushOverlay(std::make_unique<GameHudLayer>(hudState, width, height));
     }
 };
 
@@ -1070,6 +1136,13 @@ int main(int argc, char** argv)
 
     GameOptions options;
 
+    //Flags that set a setting are gathered as settings-file text and applied
+    //after the file, so they win, and so a flag passes exactly the checks the
+    //line it overrides would.
+    std::string overrides;
+    std::vector<std::string> warnings;
+    bool mapGiven = false;
+
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -1085,9 +1158,29 @@ int main(int argc, char** argv)
             options.LatencyRtt = std::atof(argv[++i]);
         else if (arg == "--loss" && i + 1 < argc)
             options.Loss = static_cast<float>(std::atof(argv[++i])) / 100.0f;
+        else if (arg == "--map" && i + 1 < argc)
+        {
+            options.MapPath = argv[++i];
+            mapGiven = true;
+        }
+        else if (arg == "--fov" && i + 1 < argc)
+            overrides += std::string(CubitGame::FieldOfViewKey) + " = " + argv[++i] + "\n";
+        else if (arg == "--sensitivity" && i + 1 < argc)
+            overrides += std::string(CubitGame::MouseSensitivityKey) + " = " + argv[++i] + "\n";
+        else if (arg == "--width" && i + 1 < argc)
+            overrides += std::string(CubitGame::WindowWidthKey) + " = " + argv[++i] + "\n";
+        else if (arg == "--height" && i + 1 < argc)
+            overrides += std::string(CubitGame::WindowHeightKey) + " = " + argv[++i] + "\n";
     }
 
-    GameApplication app(options);
+    //Connected, the server names the map; a --map as well would be silently
+    //meaningless, so it is said out loud instead.
+    if (options.Connect && mapGiven)
+        warnings.push_back("--map is ignored when connecting: the server names the map");
+
+    const CubitGame::GameSettings settings = LoadSettings(overrides, warnings);
+
+    GameApplication app(options, settings, warnings);
     app.Run();
 
     return 0;

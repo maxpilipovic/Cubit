@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Maps.h"
+
 #include <cstdint>
 #include <string>
 
@@ -13,4 +15,8 @@ struct GameOptions
     //Round-trip milliseconds. Halved into NetworkSim's one-way latency.
     double LatencyRtt = 0.0;
     float Loss = 0.0f;
+
+    //The map single-player loads. --map names another. Connected, the server
+    //names the map and this is not used.
+    std::string MapPath = CubitGame::DefaultMapPath;
 };
