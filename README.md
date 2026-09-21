@@ -218,8 +218,9 @@ character movement, frustum culling, `.vox` loading and writing, the generated t
 invariants, the wire protocol, and the netcode end to end under simulated latency and
 loss — prediction, corrections, predicted edits, lag compensation and input delay. The
 crash handler is tested by running the test executable itself as a child process that
-crashes on purpose. `GameTests` is the game's — 4 cases — covering the numbers the game
-states for itself and the labels its HUD draws. Both suites run automatically after
+crashes on purpose. `GameTests` is the game's — 11 cases — covering the numbers the game
+states for itself, the labels its HUD draws, when a death is announced, and that the maps
+it ships are what the engine generates. Both suites run automatically after
 building, so a failing test breaks the build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running an
@@ -249,10 +250,12 @@ Public headers live under `Cubit/include/Cubit` and are exported with `CB_API`. 
 applications only include that directory, so they get the `CB_*` logging and assert
 macros but not the engine-internal `CB_CORE_*` ones.
 
-The engine names nothing under `Sandbox/` or `game/`. Two threads still cross the other
-way: the harness copies the game's `assets/` next to its executable, and six engine test
-files open maps from it — so the maps would have to be sorted out before a repository
-split actually happens. That is recorded as its own roadmap item rather than hidden.
+The engine names nothing under `Sandbox/` or `game/`, and nothing on the engine's side
+reads the game's content either. The harness writes its own map on first run with
+`TerrainGen` — the same map the game ships as `battlefield512.vox`, which the game's
+suite checks cell for cell — and the engine's suite generates the worlds it needs
+or reads the small `.vox` fixtures in `Tests/fixtures`. So `git subtree split -P game`
+would take only the game.
 
 `bin/`, `bin-int/`, and the Visual Studio project files are generated.
 

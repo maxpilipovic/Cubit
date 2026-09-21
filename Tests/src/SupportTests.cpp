@@ -1,5 +1,7 @@
 #include <doctest.h>
 
+#include "TestMaps.h"
+
 #include "Cubit/Voxel/BlockEdit.h"
 #include "Cubit/Voxel/Support.h"
 #include "Cubit/Voxel/VoxLoader.h"
@@ -8,7 +10,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -185,19 +186,7 @@ TEST_CASE("What the support search costs, measured")
     //Not a gate: the numbers behind MaxSupportSearch. Three cases - a dig into
     //the shipped map's terrain, a crater's worth of emptied cells, and the worst
     //case, a search that runs to the cap and gives up.
-    std::filesystem::path path;
-    for (const char* candidate : {
-            "game/assets/maps/battlefield512.vox",
-            "../game/assets/maps/battlefield512.vox" })
-        if (std::filesystem::exists(candidate))
-        {
-            path = candidate;
-            break;
-        }
-
-    REQUIRE_FALSE(path.empty());
-
-    World world = BuildWorld(VoxLoader::LoadFile(path.string()));
+    World world = BuildWorld(ShippedBattlefield());
 
     const int cx = world.GetWidth() / 2;
     const int cz = world.GetDepth() / 2;

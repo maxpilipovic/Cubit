@@ -462,7 +462,40 @@ them. Every item was checked in the code unless it says otherwise. References ar
   worlds with it. Moving it game-side is its own item, worth doing only if the engine is
   ever shipped without the game's terrain — the tests would need a world builder of their
   own first.
-- [ ] **B8a. The maps are on the wrong side of the split.** `Sandbox/premake5.lua` copies
+- [x] **B8a. The maps are on the wrong side of the split.** **Done 2026-09-21.** The
+  decision below turned out not to be one: generating the map is *cheaper* than reading
+  it (about 0.3 s against 0.9 s in Debug), and only one test ever needed a real file for
+  its own sake, so the engine got both — generated worlds where a test just needs a big
+  one, and small committed fixtures where the file format is the point. Nothing on the
+  engine's side reads `game/` now.
+  - **Three tests** (the relight and support-search costs, and the 512 spawn) build their
+    world with `ShippedBattlefield()` in `Tests/src/TestMaps.h` instead of loading it.
+  - **The stitching test** read the 512 battlefield and compared 16.7M cells against the
+    generator. It now reads `Tests/fixtures/stitched.vox`: 1.7 KB, four models, a dozen
+    voxels each with its own index, placed on both sides of both seams. Its generator is a
+    skipped case beside it. Mutated twice — tiles swapped between axes, and every
+    non-origin tile placed a block out — and it failed both times.
+  - **`starter.vox`** moved to `Tests/fixtures` with its script; nothing in the game used it.
+  - **The game's suite** gained the two checks only the game can make: its 256 map's size,
+    and that its `battlefield512.vox` is exactly `TerrainGen`'s 512 output. That second
+    check is what makes generating the map on the engine side honest.
+  - **The harness** writes its own map on first run with `TerrainGen` and `VoxWriter`, and
+    the asset copy is gone from `Sandbox/premake5.lua`. It still *loads* the file rather
+    than generating straight into a `World`, because its load session is how
+    [performance.md](performance.md) is reproduced, and those are figures for reading a
+    real `.vox`. Generation happens before the session opens. Verified by running with the
+    borrowed assets moved away: the map it wrote is byte-identical to the game's (`cmp`),
+    and `profile-load.json` still holds `LoadFile`, `Parse` and `BuildWorld` with no
+    generation in it.
+
+  **Found on the way, and fixed with it:** two engine cases — the starter map, and the
+  committed 256 battlefield's size — tried only the repo-root path and `return`ed when
+  it was missing. The build runs the suite from `Tests/`, so both ran **zero assertions
+  in every build** and reported green. Measured, not inferred: 0 assertions from `Tests/`,
+  3 from the root. Paths are now absolute, baked in by premake (`CB_TEST_FIXTURES`,
+  `CB_GAME_ASSETS`), and every file-reading case `REQUIRE`s its file instead of skipping.
+
+  The original entry follows. `Sandbox/premake5.lua` copies
   `../game/assets` next to the harness, and six engine test files open
   `game/assets/maps/*.vox`. The code splits cleanly; the content does not, so
   `git subtree split -P game` would take the harness's and the suite's maps with it. Either

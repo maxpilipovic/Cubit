@@ -1,4 +1,4 @@
-# Generates Sandbox/assets/maps/starter.vox: a green floor with four coloured pillars.
+# Generates Tests/fixtures/starter.vox (beside this script): a green floor with four coloured pillars.
 $ErrorActionPreference = "Stop"
 
 $bytes = New-Object System.Collections.Generic.List[byte]

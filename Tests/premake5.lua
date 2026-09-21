@@ -36,7 +36,14 @@ project "Tests"
 
     defines
     {
-        "CB_PLATFORM_WINDOWS"
+        "CB_PLATFORM_WINDOWS",
+
+        -- Where the suite's own .vox files live, as an absolute path. The suite
+        -- runs from Tests/ as a build step and from the repo root by hand, and
+        -- a path relative to either one silently misses in the other - which is
+        -- how two cases ran zero assertions in every build without anyone
+        -- seeing it.
+        'CB_TEST_FIXTURES="' .. _SCRIPT_DIR .. '/fixtures"'
     }
 
     filter "system:windows"

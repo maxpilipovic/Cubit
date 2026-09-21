@@ -1,5 +1,6 @@
 #include "Cubit/Cubit.h"
 #include "Cubit/Voxel/SkyLight.h"
+#include "Cubit/Voxel/TerrainGen.h"
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
@@ -38,15 +39,43 @@ namespace
     constexpr float FogDensity = 0.06f;
 
     //The map the harness loads, resolved against the working directory - the
-    //executable's own, where the build puts a copy of the game's assets.
+    //executable's own. The harness writes it there itself the first time it
+    //runs (see EnsureMap) rather than borrowing the game's copy: the engine
+    //has to run without the game beside it, and the game's suite checks that
+    //its shipped battlefield512.vox is this exact file.
     constexpr const char* MapPath = "assets/maps/battlefield512.vox";
 
+    //The size of that map. MapGen writes the game's copy with default
+    //TerrainConfig at this size and nothing else, so this is all it takes to
+    //reproduce it byte for byte.
+    const glm::ivec3 MapSize{ 512, 64, 512 };
+
     //Where F5 writes the edited world. Deliberately not the map that was
-    //loaded: the assets directory beside the exe is a build artifact that the
-    //next build overwrites, so a save written over battlefield512.vox there
-    //would vanish without warning. Promoting a save into game/assets stays a
-    //deliberate copy.
+    //loaded: EnsureMap only writes the map when it is missing, so a save over
+    //battlefield512.vox would be loaded on every run after it - an edited
+    //world quietly standing in for the one docs/performance.md measures.
     constexpr const char* SavePath = "assets/maps/saved.vox";
+
+    //Writes the harness's map if it is not already beside the executable.
+    //
+    //Generated and then LOADED, rather than generated straight into a World:
+    //the harness's load session is how docs/performance.md's figures are
+    //reproduced, and they are figures for reading a real 24 MB .vox. Skipping
+    //the file would make the capture measure something else under the same
+    //name.
+    void EnsureMap(const char* path)
+    {
+        if (std::filesystem::exists(path))
+            return;
+
+        TerrainConfig config;
+        config.Size = MapSize;
+
+        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+        VoxWriter::WriteFile(TerrainGen::Generate(config), path);
+        CB_INFO(std::string("Generated the harness map at ") +
+            std::filesystem::absolute(path).string());
+    }
 
     //Where the camera starts, over the same column the game spawns on, so a
     //screenshot of the harness frames the same ground.
@@ -91,6 +120,10 @@ public:
         //it: BeginSession/EndSession themselves are not macros, so left
         //unguarded they would still open a session, record nothing, and write
         //an empty profile-load.json beside a shipped executable every launch.
+        //
+        //EnsureMap runs first and outside the session, so the one run that has
+        //to generate the map does not put generation into a capture of load.
+        EnsureMap(MapPath);
 #ifndef CB_DIST
         Profiler::BeginSession("load", "profile-load.json");
 #endif

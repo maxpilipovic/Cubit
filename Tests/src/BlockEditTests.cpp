@@ -1,5 +1,7 @@
 #include <doctest.h>
 
+#include "TestMaps.h"
+
 #include "Cubit/Voxel/BlockEdit.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/VoxLoader.h"
@@ -7,7 +9,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -359,19 +360,7 @@ TEST_CASE("What relighting a batch costs on the shipped map, measured")
     //relight for the whole batch instead of one per cell. A ball of air blown
     //into the ground in the middle of the map, at two sizes - a grenade's, and
     //about 5,000 cells for terrain giving way.
-    std::filesystem::path path;
-    for (const char* candidate : {
-            "game/assets/maps/battlefield512.vox",
-            "../game/assets/maps/battlefield512.vox" })
-        if (std::filesystem::exists(candidate))
-        {
-            path = candidate;
-            break;
-        }
-
-    REQUIRE_FALSE(path.empty());
-
-    World world = BuildWorld(VoxLoader::LoadFile(path.string()));
+    World world = BuildWorld(ShippedBattlefield());
     SkyLight::PropagateAll(world);
 
     const int cx = world.GetWidth() / 2;

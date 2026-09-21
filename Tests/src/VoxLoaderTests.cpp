@@ -1,7 +1,9 @@
 #include <doctest.h>
 
+#include "TestMaps.h"
+
 #include "Cubit/Voxel/VoxLoader.h"
-#include "Cubit/Voxel/TerrainGen.h"
+#include "Cubit/Voxel/VoxWriter.h"
 
 #include <cstdint>
 #include <cstring>
@@ -303,9 +305,8 @@ TEST_CASE("LoadFile rejects an empty file")
 
 TEST_CASE("The starter map parses into a single chunk")
 {
-    const std::filesystem::path path = "game/assets/maps/starter.vox";
-    if (!std::filesystem::exists(path))
-        return; // asset not reachable from this working directory; skip
+    const std::filesystem::path path = FixturePath("starter.vox");
+    REQUIRE(std::filesystem::exists(path));
 
     const VoxModel model = VoxLoader::LoadFile(path.string());
     CHECK(model.Size == glm::ivec3(16, 6, 16));
@@ -512,51 +513,98 @@ TEST_CASE("A union extent past the world limit is rejected")
     CHECK_THROWS_AS(VoxLoader::Parse(MakeVoxFile(children)), std::runtime_error);
 }
 
-TEST_CASE("The 512 battlefield survives stitching cell for cell")
+namespace
 {
-    // The only test that exercises a real stitched file end to end: four models
-    // written by the tiling path and read back through the scene graph. It
-    // compares against the generator rather than against itself, so a tile
-    // placed a block out — the seam at x=256 or z=256 the whole design turns
-    // on — fails here and names the first cell that moved.
+    //One voxel the stitched fixture holds, in Cubit space.
+    struct StitchedCell
+    {
+        glm::ivec3 Position;
+        std::uint8_t Index;
+    };
+
+    //The stitched fixture's contents, and the single definition of them: the
+    //case that wrote Tests/fixtures/stitched.vox and the case that reads it
+    //back both use this list, so the two cannot drift apart.
     //
-    // The suite runs from the repo root by hand and from Tests/ as a build
-    // step, so try both rather than silently passing in one of them.
-    std::filesystem::path path;
-    for (const char* candidate : {
-            "game/assets/maps/battlefield512.vox",
-            "../game/assets/maps/battlefield512.vox" })
-        if (std::filesystem::exists(candidate))
-        {
-            path = candidate;
-            break;
-        }
+    //300 on x and z forces two tiles on each - a .vox model addresses at most
+    //256 - so the file holds four models meeting at x=256 and z=256. Every cell
+    //sits in a different place relative to those seams, in all four tiles, and
+    //carries its own index: a tile placed a block out moves a voxel off its
+    //cell, and two tiles swapped put an index where another belongs.
+    const glm::ivec3 StitchedSize{ 300, 4, 300 };
 
-    if (path.empty())
-        return; // asset not reachable from this working directory; skip
+    const StitchedCell StitchedCells[] =
+    {
+        { { 0, 0, 0 }, 1 },         // the origin
+        { { 255, 0, 0 }, 2 },       // last x of the first tile...
+        { { 256, 0, 0 }, 3 },       // ...and first x of the next
+        { { 299, 0, 0 }, 4 },       // the far x edge
+        { { 0, 1, 255 }, 5 },       // last z of the first tile...
+        { { 0, 1, 256 }, 6 },       // ...and first z of the next
+        { { 0, 1, 299 }, 7 },       // the far z edge
+        { { 255, 2, 255 }, 8 },     // the corner of tile (0,0) at the seams
+        { { 256, 2, 256 }, 9 },     // the corner of tile (1,1) at the seams
+        { { 256, 3, 255 }, 10 },    // tile (1,0), against both seams
+        { { 255, 3, 256 }, 11 },    // tile (0,1), against both seams
+        { { 299, 3, 299 }, 12 },    // the far corner
+    };
 
-    TerrainConfig config;
-    config.Size = glm::ivec3(512, 64, 512);
-    const VoxModel expected = TerrainGen::Generate(config);
-    const VoxModel actual = VoxLoader::LoadFile(path.string());
+    VoxModel StitchedModel()
+    {
+        VoxModel model;
+        model.Size = StitchedSize;
+        model.Voxels.assign(
+            static_cast<std::size_t>(StitchedSize.x) * StitchedSize.y * StitchedSize.z, 0);
 
-    REQUIRE(actual.Size == glm::ivec3(512, 64, 512));
-    REQUIRE(actual.Size == expected.Size);
+        for (const StitchedCell& cell : StitchedCells)
+            model.Voxels[static_cast<std::size_t>(cell.Position.x) +
+                static_cast<std::size_t>(StitchedSize.x) *
+                (static_cast<std::size_t>(cell.Position.y) +
+                 static_cast<std::size_t>(StitchedSize.y) * cell.Position.z)] = cell.Index;
 
-    // The position of the first disagreement, not a bool: 16.7M cells is far
-    // too many to assert one at a time, and a seam bug is only diagnosable if
-    // the failure says where it is.
-    glm::ivec3 firstBad(-1);
-    for (int z = 0; z < expected.Size.z && firstBad.x < 0; ++z)
-        for (int y = 0; y < expected.Size.y && firstBad.x < 0; ++y)
-            for (int x = 0; x < expected.Size.x; ++x)
-                if (actual.At(x, y, z) != expected.At(x, y, z))
-                {
-                    firstBad = glm::ivec3(x, y, z);
-                    break;
-                }
+        return model;
+    }
+}
 
-    CHECK(firstBad == glm::ivec3(-1));
+//Not a test: how Tests/fixtures/stitched.vox was made, kept beside the case
+//that reads it. Skipped so the suite never rewrites its own fixture - a
+//fixture regenerated on every run would only ever agree with today's writer,
+//and the point of a committed file is to catch a reader that stops accepting
+//yesterday's. Run by hand with -tc="Write the stitched fixture" --no-skip.
+TEST_CASE("Write the stitched fixture" * doctest::skip())
+{
+    VoxWriter::WriteFile(StitchedModel(), FixturePath("stitched.vox").string());
+}
+
+TEST_CASE("A stitched file reads back with every tile in its place")
+{
+    // The only case that reads a real multi-model file written by the tiling
+    // path. It used to read the game's 512 battlefield and compare 16.7M cells
+    // against the generator; the engine cannot read the game's maps, and a
+    // dozen cells placed on the seams test the seams more directly than a
+    // terrain that happens to cross them.
+    const std::filesystem::path path = FixturePath("stitched.vox");
+    REQUIRE(std::filesystem::exists(path));
+
+    const VoxModel model = VoxLoader::LoadFile(path.string());
+    REQUIRE(model.Size == StitchedSize);
+
+    for (const StitchedCell& cell : StitchedCells)
+    {
+        CAPTURE(cell.Position.x);
+        CAPTURE(cell.Position.y);
+        CAPTURE(cell.Position.z);
+        CHECK(model.At(cell.Position.x, cell.Position.y, cell.Position.z) == cell.Index);
+    }
+
+    // And nothing else: a tile that lands twice, or a model read as if it
+    // were another, would add voxels the list does not have.
+    std::size_t filled = 0;
+    for (const std::uint8_t index : model.Voxels)
+        if (index != 0)
+            ++filled;
+
+    CHECK(filled == std::size(StitchedCells));
 }
 
 //The invariant BuildWorld's speed depends on. It fills the world with

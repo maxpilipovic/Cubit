@@ -1,12 +1,13 @@
 #include <doctest.h>
 
+#include "TestMaps.h"
+
 #include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/World.h"
 
 #include <cmath>
-#include <filesystem>
 
 namespace
 {
@@ -175,22 +176,7 @@ TEST_CASE("The same world and hint always give the same spawn")
 
 TEST_CASE("A spawn on the shipped 512 battlefield is standable")
 {
-    //The suite runs from the repo root by hand and from Tests/ as a build step,
-    //so try both. REQUIRE rather than an early return: a path-guarded test that
-    //silently skips looks green while proving nothing.
-    std::filesystem::path path;
-    for (const char* candidate : {
-            "game/assets/maps/battlefield512.vox",
-            "../game/assets/maps/battlefield512.vox" })
-        if (std::filesystem::exists(candidate))
-        {
-            path = candidate;
-            break;
-        }
-
-    REQUIRE_FALSE(path.empty());
-
-    const World world = BuildWorld(VoxLoader::LoadFile(path.string()));
+    const World world = BuildWorld(ShippedBattlefield());
 
     const glm::ivec2 hint(world.GetWidth() / 2, world.GetDepth() / 2);
     const std::optional<glm::vec3> spawn = FindSpawn(world, hint, PlayerHalfExtents);

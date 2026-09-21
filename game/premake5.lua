@@ -253,7 +253,13 @@ project "GameTests"
 
     defines
     {
-        "CB_PLATFORM_WINDOWS"
+        "CB_PLATFORM_WINDOWS",
+
+        -- The game's own assets, as an absolute path, for the same reason as
+        -- CB_TEST_FIXTURES in Tests/premake5.lua: the suite runs from
+        -- game/GameTests as a build step and from the repo root by hand, and a
+        -- relative path silently misses in one of them.
+        'CB_GAME_ASSETS="' .. _SCRIPT_DIR .. '/assets"'
     }
 
     filter "system:windows"

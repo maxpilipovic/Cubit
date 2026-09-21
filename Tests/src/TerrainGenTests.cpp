@@ -3,7 +3,6 @@
 #include "Cubit/Voxel/TerrainGen.h"
 #include "Cubit/Voxel/VoxLoader.h"
 
-#include <filesystem>
 
 namespace
 {
@@ -199,16 +198,6 @@ TEST_CASE("Colours mirror across x everywhere except the team-coloured forts")
                     continue; // forts are intentionally recoloured by side
                 CHECK(a == b);
             }
-}
-
-TEST_CASE("The committed battlefield map loads at the expected size")
-{
-    const std::filesystem::path path = "game/assets/maps/battlefield.vox";
-    if (!std::filesystem::exists(path))
-        return; // asset not reachable from this working directory; skip
-
-    const VoxModel m = VoxLoader::LoadFile(path.string());
-    CHECK(m.Size == glm::ivec3(256, 64, 256));
 }
 
 TEST_CASE("Water is the only transparent entry in the map palette")

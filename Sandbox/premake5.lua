@@ -45,13 +45,12 @@ project "Sandbox"
         --they are relative to Sandbox/ rather than to this script.
         postbuildcommands
         {
-            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Sandbox"),
+            ("{COPY} ../bin/" .. outputdir .. "/Cubit/Cubit.dll ../bin/" .. outputdir .. "/Sandbox")
 
-            --The maps live with the game, which is the only thing that
-            --authors them. The harness borrows a copy to have something to
-            --load; it is the one path here that reaches across, and it is
-            --content, not code.
-            ('{COPYDIR} "../game/assets" "%{cfg.targetdir}/assets"')
+            --No assets are copied. The harness used to borrow the game's maps,
+            --the one path here that reached across the split; it now writes
+            --its own map on first run with the engine's TerrainGen, so nothing
+            --under game/ is needed to build or run it.
         }
 
     filter "configurations:Debug"
