@@ -5,7 +5,6 @@
 #include "Cubit/Voxel/Block.h"
 #include "Cubit/Voxel/VoxLoader.h"
 
-#include "Core/CoreLogger.h"
 #include "Voxel/VoxelFaces.h"
 
 namespace
@@ -23,62 +22,19 @@ namespace
         return IsPresent(model.At(x, y, z));
     }
 
-    //Mirrors ChunkMesher's CornerAoLevel, but against a model's own voxels
-    //rather than a world: two walls meeting at a right angle seal the corner,
-    //so what sits diagonally behind them cannot lighten it.
-    int CornerAo(const VoxModel& model, const glm::ivec3& openCell,
-        const glm::ivec3& sideA, const glm::ivec3& sideB)
+    //What VoxelFaces::CornerAo needs from a model. A model has no notion of a
+    //see-through block, so anything present occludes: presence is opacity here,
+    //and that single difference is the whole reason this adapter exists rather
+    //than a second copy of the occlusion rule.
+    struct ModelCells
     {
-        const glm::ivec3 cellA = openCell + sideA;
-        const glm::ivec3 cellB = openCell + sideB;
+        const VoxModel& Model;
 
-        const bool presentA = Present(model, cellA.x, cellA.y, cellA.z);
-        const bool presentB = Present(model, cellB.x, cellB.y, cellB.z);
-
-        if (presentA && presentB)
-            return 0;
-
-        const glm::ivec3 cellCorner = openCell + sideA + sideB;
-        const bool presentCorner =
-            Present(model, cellCorner.x, cellCorner.y, cellCorner.z);
-
-        return 3
-            - static_cast<int>(presentA)
-            - static_cast<int>(presentB)
-            - static_cast<int>(presentCorner);
-    }
-
-    //Adds two triangles referencing the four vertices most recently appended,
-    //split along whichever diagonal is darker so the shading gradient stays
-    //smooth instead of seaming across the quad.
-    void AddFaceIndices(MeshGeometry& mesh, bool flip)
-    {
-        CB_CORE_ASSERT(
-            mesh.Vertices.size() >= 4,
-            "A face must append its four vertices before its indices");
-
-        const std::uint32_t firstVertex =
-            static_cast<std::uint32_t>(mesh.Vertices.size()) - 4;
-
-        if (flip)
+        bool IsOpaque(const glm::ivec3& cell) const
         {
-            mesh.Indices.push_back(firstVertex + 1);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 0);
-            mesh.Indices.push_back(firstVertex + 1);
+            return Present(Model, cell.x, cell.y, cell.z);
         }
-        else
-        {
-            mesh.Indices.push_back(firstVertex + 0);
-            mesh.Indices.push_back(firstVertex + 1);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 0);
-        }
-    }
+    };
 
     //Emits one face of one voxel: four vertices shaded by their own corner
     //occlusion, then the two triangles joining them.
@@ -97,21 +53,27 @@ namespace
             const glm::ivec3 sideA = face.U * face.CornerU[i];
             const glm::ivec3 sideB = face.V * face.CornerV[i];
 
-            ao[i] = CornerAo(model, openCell, sideA, sideB);
+            ao[i] = VoxelFaces::CornerAo(ModelCells{ model }, openCell, sideA, sideB);
         }
 
         for (int i = 0; i < 4; ++i)
         {
-            //Light is 1.0 because a model is meshed as if fully lit: how bright it
-            //actually is depends on where it is standing, which is a per-draw
-            //value the scene supplies. At 1.0 the shading floor has no effect,
-            //which is the intent - a model is never dimmed at mesh time.
+            //Light is 1.0 because a model is meshed as if fully lit: how bright
+            //it actually is depends on where it is standing, which is a per-draw
+            //value the scene supplies.
+            //
+            //The shading floor still applies at 1.0 - it is a floor on the
+            //finished shading, not on light. What it bakes is face shade times
+            //AO compressed into [LightFloor, 1]: only a fully open top face,
+            //whose shade and AO are both 1.0, comes out unchanged, while a fully
+            //open front face's 0.86 comes out as 0.15 + 0.85 * 0.86 = 0.881. The
+            //per-draw brightness then scales that baked result.
             mesh.Vertices.push_back(
                 { glm::vec3(cell) + face.Corner[i],
                   VoxelFaces::ShadeVertex(color, face.Shade, ao[i], 1.0f) });
         }
 
-        AddFaceIndices(mesh, ao[0] + ao[2] > ao[1] + ao[3]);
+        VoxelFaces::AddFaceIndices(mesh, ao);
     }
 }
 

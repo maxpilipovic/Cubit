@@ -7,7 +7,6 @@
 #include "Cubit/Voxel/World.h"
 #include "Cubit/Profiler.h"
 
-#include "Core/CoreLogger.h"
 #include "Voxel/Neighbourhood.h"
 #include "Voxel/VoxelFaces.h"
 
@@ -31,31 +30,6 @@ namespace
             return Cells.GetSkyLight(cell.x, cell.y, cell.z);
         }
     };
-
-    //How exposed one corner is. Written against anything that can answer
-    //IsOpaque and Light, so the chunk cache and a bare world share one rule
-    //rather than drifting apart as two copies. A cell is whatever that source
-    //addresses cells by — a flat index for the cache, a position for the world
-    //— and a side is a step in the same terms.
-    template <typename Cells, typename Cell, typename Side>
-    int CornerAo(const Cells& cells, const Cell& openCell,
-        const Side& sideA, const Side& sideB)
-    {
-        const bool opaqueA = cells.IsOpaque(openCell + sideA);
-        const bool opaqueB = cells.IsOpaque(openCell + sideB);
-
-        // Two walls meeting at a right angle seal the corner completely, so what
-        // sits diagonally behind them cannot lighten it.
-        if (opaqueA && opaqueB)
-            return 0;
-
-        const bool opaqueCorner = cells.IsOpaque(openCell + sideA + sideB);
-
-        return 3
-            - static_cast<int>(opaqueA)
-            - static_cast<int>(opaqueB)
-            - static_cast<int>(opaqueCorner);
-    }
 
     //The light sitting at one corner: the mean of the open cells touching it.
     template <typename Cells, typename Cell, typename Side>
@@ -91,37 +65,6 @@ namespace
             (static_cast<float>(counted) * SkyLight::Max);
     }
 
-    //Adds two triangles referencing the four vertices most recently appended.
-    //A quad can be split along either diagonal; flipping picks the other one.
-    void AddFaceIndices(MeshGeometry& mesh, bool flip)
-    {
-        CB_CORE_ASSERT(
-            mesh.Vertices.size() >= 4,
-            "A face must append its four vertices before its indices");
-
-        const std::uint32_t firstVertex =
-            static_cast<std::uint32_t>(mesh.Vertices.size()) - 4;
-
-        if (flip)
-        {
-            mesh.Indices.push_back(firstVertex + 1);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 0);
-            mesh.Indices.push_back(firstVertex + 1);
-        }
-        else
-        {
-            mesh.Indices.push_back(firstVertex + 0);
-            mesh.Indices.push_back(firstVertex + 1);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 2);
-            mesh.Indices.push_back(firstVertex + 3);
-            mesh.Indices.push_back(firstVertex + 0);
-        }
-    }
-
     //Emits one face: four vertices shaded by their own corner occlusion, then
     //the two triangles joining them.
     //A face's normal and tangent axes as flat neighbourhood offsets, worked out
@@ -152,7 +95,7 @@ namespace
             const int sideA = steps.U * face.CornerU[i];
             const int sideB = steps.V * face.CornerV[i];
 
-            ao[i] = CornerAo(cells, openCell, sideA, sideB);
+            ao[i] = VoxelFaces::CornerAo(cells, openCell, sideA, sideB);
             light[i] = CornerLight(cells, openCell, sideA, sideB);
         }
 
@@ -163,9 +106,7 @@ namespace
                   VoxelFaces::ShadeVertex(blockColor, face.Shade, ao[i], light[i]) });
         }
 
-        // Splitting a quad along its darker diagonal keeps the shading gradient
-        // smooth; splitting the other way leaves a visible seam across it.
-        AddFaceIndices(mesh, ao[0] + ao[2] > ao[1] + ao[3]);
+        VoxelFaces::AddFaceIndices(mesh, ao);
     }
 
     //Emits the faces of one block that are exposed to air. Neighbours are looked
@@ -250,7 +191,7 @@ int ChunkMesher::CornerAoLevel(
     const glm::ivec3& sideA,
     const glm::ivec3& sideB)
 {
-    return CornerAo(WorldCells{ world }, openCell, sideA, sideB);
+    return VoxelFaces::CornerAo(WorldCells{ world }, openCell, sideA, sideB);
 }
 
 float ChunkMesher::CornerLightShade(

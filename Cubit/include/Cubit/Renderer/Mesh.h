@@ -39,9 +39,6 @@ public:
     //True when there is no geometry to draw.
     bool Empty() const { return m_Indices == nullptr; }
 
-    //Indices in the mesh, zero for an empty one.
-    std::uint32_t IndexCount() const;
-
     //For the scene to draw this mesh; only meaningful when Empty() is false.
     const VertexArray& Array() const { return *m_Array; }
     const IndexBuffer& Indices() const { return *m_Indices; }

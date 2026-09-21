@@ -30,8 +30,3 @@ Mesh::~Mesh() = default;
 Mesh::Mesh(Mesh&& other) noexcept = default;
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept = default;
-
-std::uint32_t Mesh::IndexCount() const
-{
-    return m_Indices != nullptr ? m_Indices->GetCount() : 0;
-}
