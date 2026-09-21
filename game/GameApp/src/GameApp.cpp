@@ -3,6 +3,8 @@
 #include "Cubit/Net/MapHash.h"
 #include "Cubit/Net/MatchClient.h"
 #include "Cubit/Net/SimulatedTransport.h"
+#include "Cubit/Renderer/Mesh.h"
+#include "Cubit/Voxel/ModelMesher.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
@@ -44,11 +46,6 @@ namespace
 
     //Near-black, so the outline reads against both lit terrain and sky.
     const glm::vec4 OutlineColor{ 0.05f, 0.05f, 0.05f, 1.0f };
-
-    //Remote players, as wireframe boxes at their real half extents. Not a
-    //character model: modelling is gameplay, and a model chosen now would be a
-    //guess. Warm, so it separates from the near-black edit outline.
-    const glm::vec4 RemotePlayerColor{ 0.9f, 0.3f, 0.2f, 1.0f };
 
     //The local tracer, drawn the instant the fire button goes down.
     const glm::vec4 TracerColor{ 1.0f, 0.9f, 0.4f, 1.0f };
@@ -119,6 +116,18 @@ public:
             {
                 OnPlayerDied(event);
             });
+
+        //Loaded once and drawn for every remote player. A missing file throws, the
+        //same way a missing map does: it is an asset the game ships, and falling
+        //back to wireframes would hide a broken build rather than report it.
+        const VoxModel model = VoxLoader::LoadFile("assets/models/player.vox");
+        m_PlayerModelHeight = static_cast<float>(model.Size.y);
+        //model.Size.x is front-to-back and model.Size.z is shoulder-to-shoulder
+        //for a figure authored facing +x, which is the opposite of what their
+        //ordinary English names would suggest.
+        m_PlayerModelDepth = static_cast<float>(model.Size.x);
+        m_PlayerModelWidth = static_cast<float>(model.Size.z);
+        m_PlayerMesh = std::make_unique<Mesh>(ModelMesher::Build(model));
 
         //The world starts with every chunk dirty, so the first render meshes it.
         //A game that cannot load its map has nothing to do, so this
@@ -517,7 +526,7 @@ private:
         DebugDraw::Box(min, max, OutlineColor);
     }
 
-    //Draws everyone else in the match as a wireframe box.
+    //Draws everyone else in the match as the player model.
     //
     //Drawn from MatchClient's interpolation ring, six ticks behind the newest
     //server tick this client has seen, rather than snapped to the newest or
@@ -535,12 +544,52 @@ private:
 
             //From the interpolation ring rather than from the character, which
             //holds whatever the last snapshot said and steps between packets.
-            //The character is still what supplies the box: how big a player is
+            //The character is still what supplies the size: how big a player is
             //is simulation, where they are drawn is not.
             const MatchClient::RemotePose pose = m_Client->PoseOf(player, alpha);
             const glm::vec3 half = character.Config().HalfExtents;
-            DebugDraw::Box(pose.Position - half, pose.Position + half, RemotePlayerColor);
+
+            //The model is meshed in its own voxel units, so it is scaled to the
+            //height the simulation says a player is. An artist can rebuild the
+            //model at any resolution and it still fits: nothing here knows how
+            //many voxels tall it is except by asking the file.
+            const float scale = (half.y * 2.0f) / m_PlayerModelHeight;
+
+            //Feet at the bottom of the collision box, centred on it, turned to
+            //face where the player faces. The model is authored facing +x, which
+            //is what yaw 0 means everywhere else in Cubit (see Heading.h).
+            //
+            //Negated: glm::rotate turns +x toward -z as its angle grows, while
+            //Heading.h's yaw turns +x toward +z, so undoing that mismatch takes
+            //-pose.Yaw here, not +pose.Yaw. Checked against Heading.h's formula
+            //by hand (rotating the model's local +x by -yaw reproduces
+            //HeadingForward(yaw) exactly) and then against a fixed-position,
+            //fixed-yaw probe standing next to the player in single-player: at
+            //yaw 90 the model turned a quarter-turn from its yaw-0 pose, the
+            //way HeadingForward(90) turning toward +z says it should.
+            glm::mat4 transform = glm::translate(glm::mat4(1.0f),
+                WorldOffset + pose.Position - glm::vec3(0.0f, half.y, 0.0f));
+            transform = glm::rotate(transform, glm::radians(-pose.Yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+            transform = glm::scale(transform, glm::vec3(scale));
+            transform = glm::translate(transform,
+                glm::vec3(-0.5f * m_PlayerModelDepth, 0.0f, -0.5f * m_PlayerModelWidth));
+
+            m_Scene.DrawMesh(*m_PlayerMesh, transform, BrightnessAt(pose.Position));
         }
+    }
+
+    //How lit a model standing here should be: the world's sky light where its
+    //middle is, with a floor so someone in a sealed tunnel is dim rather than
+    //invisible. One sample for the whole model - it is a person, not terrain,
+    //and re-shading its vertices every frame it moves would cost far more than
+    //this is worth.
+    float BrightnessAt(const glm::vec3& position) const
+    {
+        const glm::ivec3 cell = glm::ivec3(glm::floor(position));
+        const float light = static_cast<float>(World_().GetSkyLight(cell.x, cell.y, cell.z))
+            / static_cast<float>(SkyLight::Max);
+
+        return ChunkMesher::LightFloor + (1.0f - ChunkMesher::LightFloor) * light;
     }
 
     //What the player is asking for this instant: the movement keys held, the
@@ -915,6 +964,15 @@ private:
     bool m_TracerActive = false;
 
     WorldScene m_Scene;
+
+    //The player model, meshed once at load and drawn at every remote player's
+    //pose. Dimensions read from the file rather than hardcoded, so rebuilding
+    //the model at a different resolution or proportions needs no code change.
+    std::unique_ptr<Mesh> m_PlayerMesh;
+    float m_PlayerModelHeight = 0.0f;
+    float m_PlayerModelDepth = 0.0f;
+    float m_PlayerModelWidth = 0.0f;
+
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };
     //Counted across the current frame's steps and published by OnFrameUpdate.
