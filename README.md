@@ -22,11 +22,13 @@ Full scope and feature spec lives in `Documentation/Cubit.pdf`.
 
 You load a map, walk around it under gravity, and dig into it or build on it, lit by
 sky light and ambient occlusion — alone, or in a match with other players over the
-network, where you can shoot each other. Water is see-through and you swim through it
-rather than walking on it, with the screen washing blue and hazing out while you are
-under. Swimming alone will not get you up the banks, though — there is no step-up
-assist, so climbing out means digging or building a way up, same as anywhere else on
-the map. The current map is a 512x64x512 battlefield.
+network, where you can shoot each other. Each other player is drawn as a model — a
+`.vox` like the map itself, meshed the same way, and lit by one sample of the world's
+light where it stands. Water is see-through and you swim through it rather than walking
+on it, with the screen washing blue and hazing out while you are under. Swimming alone
+will not get you up the banks, though — there is no step-up assist, so climbing out
+means digging or building a way up, same as anywhere else on the map. The current map
+is a 512x64x512 battlefield.
 
 **Platform and core loop**
 
@@ -66,8 +68,12 @@ the map. The current map is a 512x64x512 battlefield.
   frustum
 - Two-pass drawing: opaque geometry first, then transparent geometry sorted back
   to front with depth writes off, so water blends over the riverbed beneath it
+- `Mesh`: a standalone GPU mesh, uploaded once from a `MeshGeometry` and drawn at any
+  transform by `WorldScene::DrawMesh`, which multiplies in a single brightness value
+  before the fog mix — the same shader and vertex format as a chunk's mesh, for
+  geometry that is not one
 - `DebugDraw`: world-space lines and wireframe boxes callable from anywhere, used to
-  outline the block under the crosshair and to draw other players
+  outline the block under the crosshair and to trace a shot from muzzle to impact
 
 **Voxel world**
 
@@ -79,6 +85,9 @@ the map. The current map is a 512x64x512 battlefield.
   seam. It copies the chunk plus its one-block shell into a flat 18³ array once per
   mesh and samples that by flat index, rather than resolving every read through the
   world
+- `ModelMesher`: the same face table, ambient occlusion and diagonal-split rule as
+  `ChunkMesher`, applied to a standalone `.vox` model instead of a chunk — a sibling
+  mesher, not a wrapper around the chunk one
 - Per-vertex ambient occlusion, plus sky light averaged over the open cells at each
   face corner, so shading graduates smoothly across a surface. Each quad is split along
   its darker diagonal to keep that gradient seam-free
