@@ -44,8 +44,10 @@ engine needs JSON). An in-game settings menu waits for B4.
   file must not stop the game starting.
 - `std::optional<float> GetFloat(key)`, `std::optional<int> GetInt(key)`,
   `std::optional<std::string> GetString(key)`. A key that is present but does not parse
-  as the requested type returns empty and is recorded in `Problems()`. `GetInt("x")` on
-  `x = 12abc` is empty, not 12: a partial parse would hide the typo.
+  as the requested type returns empty, the same as a missing key; reporting it is the
+  caller's job, since only the caller knows whether the key matters. The getters are
+  `const` and `Problems()` holds only what `Parse` found. `GetInt("x")` on `x = 12abc` is
+  empty, not 12: a partial parse would hide the typo.
 - `Keys()` lists every key present, so a caller can report the ones it does not know.
 
 **`Application(const WindowProperties&)`** — a new constructor. The default constructor
@@ -107,7 +109,7 @@ settings beyond `--map`. The server has no player settings.
 - **Engine suite, `SettingsFileTests`:** a key and value with surrounding whitespace;
   comments, whole-line and trailing; blank lines; a repeated key (last wins); a line with
   no `=` recorded as a problem with its line number while the rest still loads; `GetInt`
-  on a value with trailing garbage is empty and recorded; `GetFloat` on an integer
+  on a value with trailing garbage is empty; `GetFloat` on an integer
   literal succeeds; `Load` of a missing file is empty rather than throwing.
 - **Game suite, `GameSettingsTests`:** `Apply` on an empty file leaves the defaults; each
   key overrides; a bad value keeps the default and warns; an out-of-range value clamps and
