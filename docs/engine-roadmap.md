@@ -469,11 +469,34 @@ them. Every item was checked in the code unless it says otherwise. References ar
   give the engine side its own fixture maps, or have the harness and those tests build
   their worlds with `TerrainGen` instead of loading a file — which would cost `.vox`
   loading its real-file coverage, so it is a decision, not a chore.
-- [ ] **B8b. A player dies before the game starts.** `GameApp` logs
-  "Player 1 was defeated by player 2" about ten milliseconds after the window opens, before
-  it has connected to anything, on every connected run. A `PlayerDiedEvent` is reaching the
-  bus when no match exists yet. Harmless as far as anything observed, and unrelated to the
-  split — found while verifying it on 2026-09-18.
+- [x] **B8b. A player dies before the game starts.** **Done 2026-09-21.** Nothing was
+  reaching the bus by accident: `GameApplication`'s constructor published a literal
+  `PlayerDiedEvent{ 1, 2 }`, which is exactly the "Player 1 was defeated by player 2" in
+  the log. It was added by `77b71c3` to demonstrate the new event bus and carried into the
+  game by the split, and it was the only `Publish` call anywhere in `game/` or `Sandbox/` —
+  so the bus's one demonstration was a fake one.
+  - Deleting it alone would have left `PlayerDiedEvent`, the subscription and `OnPlayerDied`
+    as dead code, so the real signal was wired up instead: the server already rules on
+    deaths, and `MatchClient::ShotReport` already carries `Killed` and `Victim`.
+  - `CubitGame::DeathAnnouncer` (`game/Game/src/DeathAnnouncer.h`) turns those rulings into
+    at most one announcement each. It exists because `LastShot` deliberately HOLDS the most
+    recent ruling so its impact marker can be drawn for many frames — so a caller that
+    published whenever it saw a kill would announce the same death every frame of that
+    window. It lives in `Game/` rather than `GameApp/` because `GameTests` compiles
+    `Game/src` and not `GameApp/src`: logic left in the executable cannot be tested.
+  - Published from `OnFrameUpdate`, not from `DrawShots` which reads the same ruling:
+    `DrawShots` gives up early once the marker's window has passed, so a frame lost to a
+    stall would drop the announcement with it. A marker may be missed; a death may not.
+
+  **Tests (5 cases, game suite):** a shot that killed nobody announces nothing; a killing
+  shot names the victim and the killer the right way round; the same ruling held across
+  frames announces once; a later death still announces; and a death on tick zero announces
+  — that last one pins the sentinel, since an announcer remembering "none yet" as zero
+  would swallow the first kill of a match.
+
+  **Verified by running:** the pre-fix log
+  (`Game-20260921-083901`) has the death line one second after "Application created"; the
+  post-fix run goes straight from "Application created" to "Engine running".
 - [ ] **B9. Crouch and step-up.** `CharacterController` has neither; the README already
   notes there is no step-up assist. Scope doc PLY-01.
 

@@ -10,6 +10,7 @@
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
+#include "DeathAnnouncer.h"
 #include "GameHudLayer.h"
 #include "GameOptions.h"
 #include "GameRules.h"
@@ -27,12 +28,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-struct PlayerDiedEvent
-{
-    int Player;
-    int Killer;
-};
 
 namespace
 {
@@ -103,7 +98,8 @@ public:
     //Subscribes the player layer to typed gameplay notifications.
     PlayerLayer(EventBus& eventBus, std::shared_ptr<GameHudState> hudState,
         const GameOptions& options)
-        : m_HudState(std::move(hudState)),
+        : m_EventBus(eventBus),
+          m_HudState(std::move(hudState)),
           m_Options(options),
           m_CameraController(16.0f / 9.0f)
     {
@@ -111,8 +107,8 @@ public:
 
         //Held as a member: the callback captures `this`, so the subscription must
         //end when this layer does.
-        m_DeathSubscription = eventBus.Subscribe<PlayerDiedEvent>(
-            [this](const PlayerDiedEvent& event)
+        m_DeathSubscription = eventBus.Subscribe<CubitGame::PlayerDiedEvent>(
+            [this](const CubitGame::PlayerDiedEvent& event)
             {
                 OnPlayerDied(event);
             });
@@ -270,6 +266,26 @@ public:
         (void)timestep;
         m_HudState->StepsPerFrame = m_StepsThisFrame;
         m_StepsThisFrame = 0;
+
+        AnnounceDeaths();
+    }
+
+    //Publishes one death for each new killing ruling the server sends.
+    //
+    //Done here rather than in DrawShots, which reads the same ruling: that
+    //gives up early once the impact marker's window has passed, so a frame
+    //lost to a stall would drop the announcement with it. A marker is a
+    //decoration and can be missed; a death is not.
+    void AnnounceDeaths()
+    {
+        if (!m_Client || !m_Client->LastShot().has_value())
+            return;
+
+        const std::optional<CubitGame::PlayerDiedEvent> died =
+            m_DeathAnnouncer.Observe(*m_Client->LastShot());
+
+        if (died.has_value())
+            m_EventBus.Publish(*died);
     }
 
     //Draws the meshed voxel world through Cubit's scene renderer.
@@ -824,7 +840,7 @@ private:
     }
 
     //Logs a player-death notification received from the gameplay event bus.
-    void OnPlayerDied(const PlayerDiedEvent& event)
+    void OnPlayerDied(const CubitGame::PlayerDiedEvent& event)
     {
         CB_INFO(
             std::string("Player ") + std::to_string(event.Player) +
@@ -958,6 +974,9 @@ private:
         return false;
     }
 
+    //The application's bus, which outlives every layer on it. Held so a death
+    //ruled by the server can be published, not only listened for.
+    EventBus& m_EventBus;
     std::shared_ptr<GameHudState> m_HudState;
     GameOptions m_Options;
 
@@ -1016,12 +1035,17 @@ private:
 
     //This layer's place on the gameplay event bus, ended by its destructor.
     Subscription m_DeathSubscription;
+
+    //Which killing ruling has already been announced. LastShot holds the most
+    //recent one for as long as its marker is drawn, so without this the same
+    //death would be published every frame of that window.
+    CubitGame::DeathAnnouncer m_DeathAnnouncer;
 };
 
 class GameApplication final : public Application
 {
 public:
-    //Creates the game layers and publishes a gameplay event.
+    //Creates the game layers.
     explicit GameApplication(const GameOptions& options)
     {
         //Shared so the overlay can read what the gameplay layer writes, without
@@ -1033,7 +1057,6 @@ public:
             hudState,
             GetWindow().GetFramebufferWidth(),
             GetWindow().GetFramebufferHeight()));
-        GetEventBus().Publish(PlayerDiedEvent{ 1, 2 });
     }
 };
 
