@@ -211,14 +211,14 @@ for scripts; otherwise `Ctrl+C` stops it and tells every client. With no argumen
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 574 cases — covering everything that can be checked
+engine's — 579 cases — covering everything that can be checked
 without a GPU or a window: chunk and world storage, meshing and its face counts,
 ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
 character movement, frustum culling, `.vox` loading and writing, the generated terrain's
 invariants, the wire protocol, and the netcode end to end under simulated latency and
 loss — prediction, corrections, predicted edits, lag compensation and input delay. The
 crash handler is tested by running the test executable itself as a child process that
-crashes on purpose. `GameTests` is the game's — 3 cases — covering the numbers the game
+crashes on purpose. `GameTests` is the game's — 4 cases — covering the numbers the game
 states for itself and the labels its HUD draws. Both suites run automatically after
 building, so a failing test breaks the build.
 

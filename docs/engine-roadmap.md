@@ -366,7 +366,8 @@ them. Every item was checked in the code unless it says otherwise. References ar
   not part of it. See B3a and B3b.
 
   **Tests:** `ModelMesher` has five engine tests, and the placeholder asset has one
-  game test checking it parses with plausible dimensions. The drawing path itself —
+  game test checking it parses to the generator's exact dimensions, not a loose
+  sanity range. The drawing path itself —
   `Mesh`, `DrawMesh`, and `DrawRemotePlayers` — has no automated coverage, by the same
   precedent the rest of the renderer follows: GPU output is verified by running the
   app and looking at a frame. The original entry follows. There is no `Mesh` type and
