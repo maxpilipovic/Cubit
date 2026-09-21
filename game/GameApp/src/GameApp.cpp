@@ -117,10 +117,34 @@ public:
                 OnPlayerDied(event);
             });
 
+        //Load is the phase worth a capture: it is one-shot, it is the largest
+        //remaining cost in the engine, and it is what docs/performance.md P8
+        //tabulates. Written beside the executable, like the assets it loads.
+        //Opened before the first asset is touched rather than after, so "load"
+        //in the capture means the same thing as load does here — a session that
+        //starts partway through would quietly stop tabulating whatever moved
+        //above it.
+        //
+        //Guarded on CB_DIST even though the macros already compile out under it:
+        //BeginSession/EndSession themselves are not macros, so left unguarded
+        //they would still open a session, record nothing, and write an empty
+        //profile-load.json beside a shipped executable on every launch.
+#ifndef CB_DIST
+        Profiler::BeginSession("load", "profile-load.json");
+#endif
+
         //Loaded once and drawn for every remote player. A missing file throws, the
         //same way a missing map does: it is an asset the game ships, and falling
         //back to wireframes would hide a broken build rather than report it.
         const VoxModel model = VoxLoader::LoadFile("assets/models/player.vox");
+
+        //Same argument one line up, for a file that parsed but says the figure
+        //is nothing tall: the draw scales by this height, so a zero would put an
+        //inf through the transform and draw garbage somewhere off in space.
+        //A broken asset should say so here, not be inferred from a missing
+        //player later.
+        CB_ASSERT(model.Size.y > 0, "The player model needs a height to be scaled by");
+
         m_PlayerModelHeight = static_cast<float>(model.Size.y);
         //model.Size.x is front-to-back and model.Size.z is shoulder-to-shoulder
         //for a figure authored facing +x, which is the opposite of what their
@@ -132,17 +156,7 @@ public:
         //The world starts with every chunk dirty, so the first render meshes it.
         //A game that cannot load its map has nothing to do, so this
         //does not catch — the failure propagates out of the constructor.
-        //Load is the phase worth a capture: it is one-shot, it is the largest
-        //remaining cost in the engine, and it is what docs/performance.md P8
-        //tabulates. Written beside the executable, like the assets it loads.
         //
-        //Guarded on CB_DIST even though the macros already compile out under it:
-        //BeginSession/EndSession themselves are not macros, so left unguarded
-        //they would still open a session, record nothing, and write an empty
-        //profile-load.json beside a shipped executable on every launch.
-#ifndef CB_DIST
-        Profiler::BeginSession("load", "profile-load.json");
-#endif
         // Connected, the map arrives by name in Welcome and MatchClient's
         // loader builds it. Loading here as well would pay the whole 23.8 MB
         // load twice and leave a second world nothing ever reads. A connected
@@ -583,6 +597,23 @@ private:
     //invisible. One sample for the whole model - it is a person, not terrain,
     //and re-shading its vertices every frame it moves would cost far more than
     //this is worth.
+    //
+    //This floor is not the floor ChunkMesher::LightFloor documents, and a model
+    //in the dark is darker than the wall behind it. A chunk vertex is floored
+    //once, on the finished product of face shade, AO and light. A model is
+    //floored twice on two separate terms: ModelMesher bakes
+    //LightFloor + 0.85 * (shade * AO) at mesh time, and this floors the sky
+    //term again, so what reaches the screen is their product. In a sealed
+    //tunnel that is 0.881 * 0.15 = 0.132 on an open front face and
+    //0.4305 * 0.15 = 0.065 on a fully occluded bottom one, against the 0.15 a
+    //chunk face beside it is guaranteed. At full sky light the two agree
+    //exactly, which is why this is only visible in the dark.
+    //
+    //Not fixed here because no per-draw multiplier can floor a product whose
+    //other half varies per vertex. The fix is for the model to bake raw
+    //shade * AO and the shader to apply the floor after multiplying by light,
+    //which needs the shader to know a model vertex from a chunk one. Written up
+    //as B3c in docs/engine-roadmap.md.
     float BrightnessAt(const glm::vec3& position) const
     {
         const glm::ivec3 cell = glm::ivec3(glm::floor(position));

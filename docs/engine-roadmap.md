@@ -379,6 +379,28 @@ them. Every item was checked in the code unless it says otherwise. References ar
 - [ ] **B3b. A first-person held tool.** B3 named this and did not deliver it. Nothing
   draws anything in the local player's own view beyond the crosshair outline; a held
   tool needs its own model and its own placement in view space, not world space.
+- [ ] **B3c. One floor on model lighting, not two.** B3 left model shading floored on
+  the wrong term. A chunk vertex is floored once, on the finished product of face shade,
+  AO and light, which is what `ChunkMesher.h:69-73` documents. A model is floored twice
+  on two terms that are then multiplied: `ModelMesher` bakes
+  `LightFloor + 0.85 * (shade * AO)` at mesh time, and `BrightnessAt`
+  (`game/GameApp/src/GameApp.cpp`) floors the sky sample separately. In a sealed tunnel
+  the product is `0.881 * 0.15 = 0.132` on an open front face and `0.4305 * 0.15 = 0.065`
+  on a fully occluded bottom one, against the `0.15` a chunk face beside it is
+  guaranteed. At full sky light the two paths agree exactly, so it shows only in the
+  dark. No per-draw multiplier can fix it, because the baked half varies per vertex: the
+  model has to bake raw `shade * AO` and the shader has to apply the floor after
+  multiplying by `u_Brightness`, which means a uniform telling a model vertex from a
+  chunk one. A shader change, which is why B3 did not make it.
+- [ ] **B3d. A model whose footprint matches the box it is shot at.** The placeholder is
+  scaled by height alone — `scale = (HalfExtents.y * 2) / model.Size.y` — so its other
+  two axes land wherever the authoring happens to put them. `player.vox` is 4 deep,
+  18 tall and 6 wide, and `CharacterConfig::HalfExtents` is `{0.3, 0.9, 0.3}`: at
+  `1.8 / 18 = 0.1` per voxel the model comes out 0.4 deep against the box's 0.6, a third
+  narrower front-to-back than what players actually shoot at, while the width happens to
+  land on `6 * 0.1 = 0.6` exactly. Whoever authors the real model should author it 6
+  deep and 6 wide so both axes match. Content, not code — scaling the axes
+  independently would stretch the figure instead.
 - [ ] **B4. Text and UI beyond the debug font.** `DebugFont` is a 5x7 bitmap with no
   lowercase and no J, Q, X or Z (`DebugFont.h:24`). A scoreboard and menus need more.
   Scope doc ENG-07, POL-03.

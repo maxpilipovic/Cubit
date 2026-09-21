@@ -55,8 +55,15 @@ public:
     //`transform` carries the mesh's world offset the same way the chunk
     //draw's does; `brightness` is how lit the thing is where it stands - the
     //scene does not work that out, because the scene does not know what a
-    //model is. Uses the camera set by the last Render, so call it there; in
-    //debug builds this is enforced by an assert, not only by this comment.
+    //model is. Uses whatever view-projection was last set on the renderer, so
+    //call it inside or after a Render in the same frame.
+    //
+    //The debug assert catches only the one case it can see: that no Render has
+    //ever run. It cannot tell this frame's camera from the last frame's, and it
+    //cannot tell this scene's camera from another BeginScene's — the matrix is
+    //a file-static shared by the whole renderer. Calling this after a stale
+    //Render, or after somebody else's BeginScene, draws with the wrong matrix
+    //and asserts nothing. Ordering it correctly is still the caller's job.
     void DrawMesh(const Mesh& mesh, const glm::mat4& transform, float brightness);
 
     //What the last Render drew, for a readout.
