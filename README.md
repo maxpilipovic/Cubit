@@ -235,17 +235,19 @@ Connected, the server names the map.
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 579 cases — covering everything that can be checked
-without a GPU or a window: chunk and world storage, meshing and its face counts,
-ambient occlusion and light sampling, sky-light propagation, raycasting, collision,
-character movement, frustum culling, `.vox` loading and writing, the generated terrain's
-invariants, the wire protocol, and the netcode end to end under simulated latency and
-loss — prediction, corrections, predicted edits, lag compensation and input delay. The
-crash handler is tested by running the test executable itself as a child process that
-crashes on purpose. `GameTests` is the game's — 11 cases — covering the numbers the game
-states for itself, the labels its HUD draws, when a death is announced, and that the maps
-it ships are what the engine generates. Both suites run automatically after
-building, so a failing test breaks the build.
+engine's — 593 cases, one skipped by default because it only writes a test fixture on
+request — covering everything that can be checked without a GPU or a window: chunk and
+world storage, meshing and its face counts, ambient occlusion and light sampling,
+sky-light propagation, raycasting, collision, character movement, frustum culling,
+`.vox` loading and writing, parsing settings files, the generated terrain's invariants,
+the wire protocol, and the netcode end to end under simulated latency and loss —
+prediction, corrections, predicted edits, lag compensation and input delay. The crash
+handler is tested by running the test executable itself as a child process that
+crashes on purpose. `GameTests` is the game's — 24 cases — covering the numbers the
+game states for itself, the labels its HUD draws, when a death is announced, its
+settings policy, and that the maps it ships and their spawn point are what the engine
+generates. Both suites run automatically after building, so a failing test breaks the
+build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running an
 application and looking at the result.
