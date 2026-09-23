@@ -77,6 +77,38 @@ TEST_CASE("Windows line endings read the same as Unix ones")
     CHECK(file.Problems().empty());
 }
 
+TEST_CASE("A byte-order mark before a comment is not a line the parser complains about")
+{
+    //PowerShell's Out-File and Set-Content -Encoding utf8 both write one, and
+    //so does Notepad's "UTF-8 with BOM". Left in place it would truncate at the
+    //# to three stray bytes: non-empty, no =, one spurious warning per run.
+    const SettingsFile file = SettingsFile::Parse("\xEF\xBB\xBF# a comment\nx = 1\n");
+
+    CHECK(file.GetInt("x") == 1);
+    CHECK(file.Problems().empty());
+}
+
+TEST_CASE("A byte-order mark before a setting leaves the key readable by its own name")
+{
+    //The worse shape of the same thing: the mark would become part of the key,
+    //so the setting is dropped and the warning names a key that looks right.
+    const SettingsFile file = SettingsFile::Parse("\xEF\xBB\xBF" "mouse_sensitivity = 0.5\n");
+
+    CHECK(file.GetString("mouse_sensitivity") == "0.5");
+    REQUIRE(file.Keys().size() == 1);
+    CHECK(file.Keys()[0] == "mouse_sensitivity");
+    CHECK(file.Problems().empty());
+}
+
+TEST_CASE("Keys are case-sensitive")
+{
+    const SettingsFile file = SettingsFile::Parse("X = 1\nx = 2\n");
+
+    CHECK(file.GetInt("X") == 1);
+    CHECK(file.GetInt("x") == 2);
+    CHECK(file.Keys().size() == 2);
+}
+
 TEST_CASE("A number with anything after it is not a number")
 {
     //12abc is not 12: reading the part that parses would hide the typo.

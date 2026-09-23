@@ -35,7 +35,10 @@ engine needs JSON). An in-game settings menu waits for B4.
 - `static SettingsFile Parse(std::string_view text)` and
   `static std::optional<SettingsFile> Load(const std::string& path)` — `Load` returns empty
   when the file does not exist, and throws only when it exists and cannot be read.
-- Grammar: one `key = value` per line. Whitespace around the key and value is trimmed.
+- Grammar: one `key = value` per line. The file is read as UTF-8, and a leading
+  byte-order mark is ignored rather than becoming part of line 1 — this is a file a
+  player edits in Notepad, and both Notepad and PowerShell's UTF-8 writers put one there.
+  Whitespace around the key and value is trimmed.
   `#` starts a comment anywhere on a line. Blank lines are ignored. Keys are
   case-sensitive. **A repeated key: the last one wins**, because a player appending a line
   to the end of the file expects that line to take effect.
@@ -75,8 +78,14 @@ rather than `GameApp/` because `GameTests` compiles `Game/src` and not `GameApp/
   a value that does not parse keeps the default and warns; an out-of-range value is
   **clamped** and warns; an unknown key is ignored and warns, naming the key. Clamping
   rather than rejecting, because `field_of_view = 500` plainly means "as wide as allowed".
-- Command-line flags go through the same clamping, so no path reaches the engine with a
-  value outside the table.
+- A value that is **not a number at all** — `nan`, which `from_chars` accepts — is
+  refused rather than clamped, and warns the same way `wide` does. Clamping is only total
+  over the *ordered* part of `float`: NaN compares false against both ends, so `clamp`
+  returns it untouched and a "using 120" warning would be announcing a rejection it did
+  not perform. `inf` is ordered and clamps correctly, so it is left alone — `inf` means
+  "as wide as allowed" exactly as `500` does. The test is `isnan`, not `isfinite`.
+- Command-line flags go through the same reading, so no path reaches the engine with a
+  value outside the table or with a value that is not a number.
 
 **`settings.cfg`** sits beside `GameApp.exe`, resolved against the working directory like
 the maps. If it is missing it is written from `DefaultFileText()`. The **effective**

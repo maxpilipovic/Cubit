@@ -14,6 +14,12 @@ namespace
     //Spaces, tabs, and the \r a Windows line ending leaves behind.
     constexpr std::string_view Blank = " \t\r";
 
+    //What Windows editors and PowerShell's UTF-8 writers put at the front of a
+    //file. It is not whitespace, so Trim leaves it attached to whatever is on
+    //line 1 - either a stray "expected key = value" for a comment, or a first
+    //setting silently filed under a key that looks identical to the right one.
+    constexpr std::string_view Bom = "\xEF\xBB\xBF";
+
     std::string_view Trim(std::string_view text)
     {
         const std::size_t first = text.find_first_not_of(Blank);
@@ -47,6 +53,11 @@ SettingsFile SettingsFile::Parse(std::string_view text)
     SettingsFile file;
     int lineNumber = 0;
     std::size_t start = 0;
+
+    //Dropped before the line loop rather than inside it, so line 1 is the line
+    //the player sees in their editor and every line number still matches.
+    if (text.substr(0, Bom.size()) == Bom)
+        text.remove_prefix(Bom.size());
 
     while (start <= text.size())
     {

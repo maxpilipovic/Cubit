@@ -3,6 +3,7 @@
 #include "Cubit/SettingsFile.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -66,6 +67,51 @@ namespace CubitGame
             "window_height = 720\n";
     }
 
+    //The flags that set a setting, gathered as settings-file text so they can
+    //be applied on top of the file through the very same Apply - a flag then
+    //passes exactly the checks the line it overrides would.
+    //
+    //Here rather than in GameApp's main, which GameTests does not compile: four
+    //near-identical lines are exactly the shape copy-paste gets wrong, and this
+    //is the only place they can be tested. Flags that are not settings
+    //(--connect, --port, --latency, --loss, --map) stay in main, which is the
+    //only thing that knows what to do with them.
+    inline std::string FlagOverrides(int argc, char** argv)
+    {
+        struct Flag
+        {
+            const char* Name;
+            const char* Key;
+        };
+
+        const Flag flags[] = {
+            { "--fov", FieldOfViewKey },
+            { "--sensitivity", MouseSensitivityKey },
+            { "--width", WindowWidthKey },
+            { "--height", WindowHeightKey },
+        };
+
+        std::string overrides;
+
+        for (int i = 1; i < argc; ++i)
+        {
+            const std::string arg = argv[i];
+
+            for (const Flag& flag : flags)
+            {
+                //A flag last on the line has no value to take, so it is
+                //ignored rather than reading past the end of argv.
+                if (arg != flag.Name || i + 1 >= argc)
+                    continue;
+
+                overrides += std::string(flag.Key) + " = " + argv[++i] + "\n";
+                break;
+            }
+        }
+
+        return overrides;
+    }
+
     namespace Detail
     {
         template <typename T>
@@ -91,6 +137,26 @@ namespace CubitGame
             return held;
         }
 
+        //Whether this value is one Clamp can hold to a range at all.
+        //
+        //NaN is not: it is unordered, so both of clamp's comparisons are false
+        //and it is returned unchanged - a NaN field of view is a NaN projection
+        //and a black screen, saved in settings.cfg and unrecoverable from
+        //inside the game. It is rejected here instead, which also keeps the
+        //warning honest: "is not a number" rather than announcing a range it
+        //then hands the value straight through.
+        //
+        //isnan rather than isfinite, deliberately: inf clamps correctly, and
+        //"field_of_view = inf" means "as wide as allowed" exactly as 500 does.
+        template <typename T>
+        bool Clampable(T value)
+        {
+            if constexpr (std::is_floating_point_v<T>)
+                return !std::isnan(value);
+            else
+                return true;
+        }
+
         //Reads one setting. Missing leaves it alone; present but not a number
         //warns and leaves it alone; a number is clamped into range.
         template <typename T>
@@ -107,7 +173,10 @@ namespace CubitGame
             else
                 value = file.GetFloat(key);
 
-            if (!value)
+            //from_chars accepts "nan" and "-nan", so the same warning covers
+            //both a word that is not a number and a number that cannot be used
+            //as one.
+            if (!value || !Clampable(*value))
             {
                 warnings.push_back(std::string("settings: ") + key + " = " + *text +
                     " is not a number; keeping " + Text(setting));

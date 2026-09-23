@@ -171,7 +171,7 @@ Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, the
 either application: `Sandbox` for the engine harness, `GameApp` for the game.
 `Cubit.dll` is copied next to each executable as a post-build step, and the game's
 `assets` directory next to the game's executables, so a running game resolves
-`assets/...` the way a shipped build would. The harness copies nothing: it writes its
+`assets/...` the way a shipped build would. The harness copies no assets: it writes its
 own map on first run.
 
 Each project describes itself in a `premake5.lua` beside its own sources, and the root
@@ -235,7 +235,7 @@ Connected, the server names the map.
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 594 cases, one skipped by default because it only writes a test fixture on
+engine's — 597 cases, one skipped by default because it only writes a test fixture on
 request — covering everything that can be checked without a GPU or a window: chunk and
 world storage, meshing and its face counts, ambient occlusion and light sampling,
 sky-light propagation, raycasting, collision, character movement, frustum culling,
@@ -243,7 +243,7 @@ sky-light propagation, raycasting, collision, character movement, frustum cullin
 the wire protocol, and the netcode end to end under simulated latency and loss —
 prediction, corrections, predicted edits, lag compensation and input delay. The crash
 handler is tested by running the test executable itself as a child process that
-crashes on purpose. `GameTests` is the game's — 24 cases — covering the numbers the
+crashes on purpose. `GameTests` is the game's — 29 cases — covering the numbers the
 game states for itself, the labels its HUD draws, when a death is announced, its
 settings policy, and that the maps it ships and their spawn point are what the engine
 generates. Both suites run automatically after building, so a failing test breaks the

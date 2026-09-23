@@ -79,6 +79,88 @@ TEST_CASE("A value outside its range is clamped to the nearer end and says so")
     CHECK(AnyMentions(warnings, "window_width"));
 }
 
+TEST_CASE("A field of view of nan keeps the default and says so")
+{
+    //from_chars accepts "nan", and clamp returns it unchanged because every
+    //comparison against a NaN is false. Left through, it would be a NaN
+    //projection - a black screen, saved in the file, with no way back from
+    //inside the game.
+    std::vector<std::string> warnings;
+    const GameSettings settings = Applied("field_of_view = nan\n", warnings);
+
+    CHECK(settings.FieldOfView == doctest::Approx(60.0f));
+    REQUIRE(warnings.size() == 1);
+    CHECK(AnyMentions(warnings, "field_of_view"));
+    CHECK(AnyMentions(warnings, "is not a number"));
+}
+
+TEST_CASE("A mouse sensitivity of nan keeps the default and says so")
+{
+    //The same hole on the other float: a NaN sensitivity is a NaN yaw on the
+    //first mouse move.
+    std::vector<std::string> warnings;
+    const GameSettings settings = Applied("mouse_sensitivity = -nan\n", warnings);
+
+    CHECK(settings.MouseSensitivity == doctest::Approx(0.12f));
+    REQUIRE(warnings.size() == 1);
+    CHECK(AnyMentions(warnings, "mouse_sensitivity"));
+    CHECK(AnyMentions(warnings, "is not a number"));
+}
+
+TEST_CASE("A field of view of inf still clamps, unlike nan")
+{
+    //Pinned so a later reader does not "simplify" the NaN check to isfinite:
+    //inf is ordered, so it clamps correctly, and "inf" means "as wide as
+    //allowed" exactly as 500 does. Only NaN is unclampable.
+    std::vector<std::string> warnings;
+    const GameSettings settings = Applied("field_of_view = inf\n", warnings);
+
+    CHECK(settings.FieldOfView == doctest::Approx(120.0f));
+    REQUIRE(warnings.size() == 1);
+    CHECK(AnyMentions(warnings, "field_of_view"));
+}
+
+TEST_CASE("Every setting flag lands on its own key, and passes the same checks")
+{
+    //The mapping lives in Game/ rather than GameApp's main so that this test
+    //can exist at all. Asserted through Apply rather than against the text, so
+    //what is pinned is the setting each flag produces, not a string.
+    char program[] = "GameApp.exe";
+    char fov[] = "--fov";
+    char fovValue[] = "90";
+    char sensitivity[] = "--sensitivity";
+    char sensitivityValue[] = "0.5";
+    char width[] = "--width";
+    char widthValue[] = "1600";
+    char height[] = "--height";
+    char heightValue[] = "900";
+
+    char* argv[] = { program, fov, fovValue, sensitivity, sensitivityValue,
+        width, widthValue, height, heightValue };
+    const int argc = static_cast<int>(sizeof(argv) / sizeof(argv[0]));
+
+    std::vector<std::string> warnings;
+    const GameSettings settings = Applied(FlagOverrides(argc, argv).c_str(), warnings);
+
+    CHECK(settings.FieldOfView == doctest::Approx(90.0f));
+    CHECK(settings.MouseSensitivity == doctest::Approx(0.5f));
+    CHECK(settings.WindowWidth == 1600);
+    CHECK(settings.WindowHeight == 900);
+    CHECK(warnings.empty());
+}
+
+TEST_CASE("A setting flag with no value after it is ignored")
+{
+    //Last on the command line with nothing following. Reading its value would
+    //be a read past the end of argv.
+    char program[] = "GameApp.exe";
+    char fov[] = "--fov";
+
+    char* argv[] = { program, fov };
+
+    CHECK(FlagOverrides(2, argv).empty());
+}
+
 TEST_CASE("An unknown key changes nothing and is named in a warning")
 {
     std::vector<std::string> warnings;

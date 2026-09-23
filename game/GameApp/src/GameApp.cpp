@@ -1138,8 +1138,8 @@ int main(int argc, char** argv)
 
     //Flags that set a setting are gathered as settings-file text and applied
     //after the file, so they win, and so a flag passes exactly the checks the
-    //line it overrides would.
-    std::string overrides;
+    //line it overrides would. Gathered in Game/, which GameTests compiles.
+    const std::string overrides = CubitGame::FlagOverrides(argc, argv);
     std::vector<std::string> warnings;
     bool mapGiven = false;
 
@@ -1163,14 +1163,6 @@ int main(int argc, char** argv)
             options.MapPath = argv[++i];
             mapGiven = true;
         }
-        else if (arg == "--fov" && i + 1 < argc)
-            overrides += std::string(CubitGame::FieldOfViewKey) + " = " + argv[++i] + "\n";
-        else if (arg == "--sensitivity" && i + 1 < argc)
-            overrides += std::string(CubitGame::MouseSensitivityKey) + " = " + argv[++i] + "\n";
-        else if (arg == "--width" && i + 1 < argc)
-            overrides += std::string(CubitGame::WindowWidthKey) + " = " + argv[++i] + "\n";
-        else if (arg == "--height" && i + 1 < argc)
-            overrides += std::string(CubitGame::WindowHeightKey) + " = " + argv[++i] + "\n";
     }
 
     //Connected, the server names the map; a --map as well would be silently
@@ -1180,8 +1172,20 @@ int main(int argc, char** argv)
 
     const CubitGame::GameSettings settings = LoadSettings(overrides, warnings);
 
-    GameApplication app(options, settings, warnings);
-    app.Run();
+    //The same shape the harness's main uses, and for the same reason: a map
+    //name with a typo in it throws out of VoxLoader and all the way out of
+    //here, and an uncaught throw is std::terminate - a minidump and exit 3. A
+    //player's typo should be told to them, not filed as a crash.
+    try
+    {
+        GameApplication app(options, settings, warnings);
+        app.Run();
+    }
+    catch (const std::exception& error)
+    {
+        CB_CRITICAL(std::string("Fatal: ") + error.what());
+        return EXIT_FAILURE;
+    }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
