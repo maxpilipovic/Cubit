@@ -235,7 +235,7 @@ Connected, the server names the map.
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 593 cases, one skipped by default because it only writes a test fixture on
+engine's — 594 cases, one skipped by default because it only writes a test fixture on
 request — covering everything that can be checked without a GPU or a window: chunk and
 world storage, meshing and its face counts, ambient occlusion and light sampling,
 sky-light propagation, raycasting, collision, character movement, frustum culling,
