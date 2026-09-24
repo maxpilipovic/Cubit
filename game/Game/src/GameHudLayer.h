@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Cubit/Cubit.h"
+#include "Cubit/Renderer/Font.h"
+#include "Cubit/Renderer/FontAtlas.h"
 #include "Cubit/Renderer/ScreenOverlay.h"
 
 #include <cstddef>
@@ -109,67 +111,72 @@ public:
             });
     }
 
-    //Every word this readout draws, including the two the shot puts in
-    //ShotLabel. GameHudTests checks the list against the font: an unsupported
-    //character draws as a blank rather than failing, so a label that drifts out
-    //of the font silently hides the value beside it.
-    static constexpr std::string_view Labels[] = {
-        "POS", "GND", "OCEAN", "FACES", "DRAWN", "PENDING", "STEPS", "FPS",
-        "NOT CONNECTED", "DISCONNECTED", "CONNECTED", "NET", "HEALTH",
-        "HIT", "KILLED"
-    };
-
 private:
     //Covers the whole screen while submerged. The fog cannot reach the sky, so
     //without this, looking up from underwater shows an untouched clear colour.
     static inline const glm::vec4 UnderwaterTint{ 0.15f, 0.40f, 0.70f, 0.45f };
 
+    //Baked once at this height and scaled when drawn. 32 is comfortably above
+    //the size the HUD draws at, so scaling shrinks rather than enlarges and the
+    //glyphs stay sharp.
+    static constexpr float FontPixelHeight = 32.0f;
+
+    //Half the baked height, which lands close to the debug font's old size.
+    static constexpr float HudTextScale = 0.5f;
+
     //Draws the debug lines down from the top-left corner.
     void DrawReadout() const
     {
-        const float lineHeight = ScreenOverlay::LineHeight();
+        const float lineHeight = m_Font.LineHeight() * HudTextScale;
         const float margin = ScreenOverlay::Margin;
-        float y = m_Overlay.TopLine();
+        //The first baseline: down from the top by the margin and one line.
+        float y = static_cast<float>(m_Overlay.Height()) - ScreenOverlay::Margin
+            - m_Font.LineHeight() * HudTextScale;
 
         const glm::vec3& position = m_State->PlayerPosition;
         m_Overlay.DrawText(
+            m_Font,
             "POS " + ScreenOverlay::FormatOneDecimal(position.x) +
             " " + ScreenOverlay::FormatOneDecimal(position.y) +
             " " + ScreenOverlay::FormatOneDecimal(position.z),
             margin,
-            y);
+            y,
+            HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText(std::string("GND ") + (m_State->Grounded ? "1" : "0"), margin, y);
+        m_Overlay.DrawText(m_Font, std::string("GND ") + (m_State->Grounded ? "1" : "0"),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        // The flags are digits. Every label on this readout has to be spelled
-        // from DebugFont::Order: an unsupported character still renders as a
-        // blank rather than failing, which would silently hide a set flag.
-        // GameHudTests checks the HUD's own words against the font.
+        // The flags are digits.
         m_Overlay.DrawText(
+            m_Font,
             std::string("OCEAN ") +
             (m_State->EyeInFluid ? "1" : "0") +
             (m_State->BodyInFluid ? "1" : "0"),
             margin,
-            y);
+            y,
+            HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("FACES " + std::to_string(m_State->MeshFaceCount), margin, y);
+        m_Overlay.DrawText(m_Font, "FACES " + std::to_string(m_State->MeshFaceCount),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("DRAWN " + std::to_string(m_State->DrawnChunks) +
-            "/" + std::to_string(m_State->TotalChunks), margin, y);
+        m_Overlay.DrawText(m_Font, "DRAWN " + std::to_string(m_State->DrawnChunks) +
+            "/" + std::to_string(m_State->TotalChunks), margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("PENDING " + std::to_string(m_State->PendingChunks), margin, y);
+        m_Overlay.DrawText(m_Font, "PENDING " + std::to_string(m_State->PendingChunks),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("STEPS " + std::to_string(m_State->StepsPerFrame), margin, y);
+        m_Overlay.DrawText(m_Font, "STEPS " + std::to_string(m_State->StepsPerFrame),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)),
-            margin, y);
+        m_Overlay.DrawText(m_Font, "FPS " + std::to_string(static_cast<int>(m_SmoothedFps + 0.5f)),
+            margin, y, HudTextScale);
 
         //Single-player draws nothing below this point, which is what keeps the
         //readout identical to the pre-networking one.
@@ -179,17 +186,11 @@ private:
         //A refused handshake has to be visible on screen, not only in the log:
         //the log scrolls past behind a fullscreen window, and "nothing is
         //happening" is exactly what a silent rejection looks like.
-        //
-        //Every label here must be spelled from DebugFont::Order. An unsupported
-        //character renders as a blank rather than failing, so a wrong label
-        //would silently show as a gap - which is what kept these to CONNECTED
-        //and NET while the font lacked most of the alphabet. GameHudTests now
-        //checks the words this readout draws.
         y -= lineHeight;
 
         if (m_State->Rejected)
         {
-            m_Overlay.DrawText("NOT CONNECTED", margin, y);
+            m_Overlay.DrawText(m_Font, "NOT CONNECTED", margin, y, HudTextScale);
             return;
         }
 
@@ -198,27 +199,34 @@ private:
         //like a quiet one.
         if (m_State->Disconnected)
         {
-            m_Overlay.DrawText("DISCONNECTED", margin, y);
+            m_Overlay.DrawText(m_Font, "DISCONNECTED", margin, y, HudTextScale);
             return;
         }
 
-        m_Overlay.DrawText("CONNECTED " + std::to_string(m_State->PlayersInMatch), margin, y);
+        m_Overlay.DrawText(m_Font, "CONNECTED " + std::to_string(m_State->PlayersInMatch),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("NET " + std::to_string(static_cast<int>(m_State->RoundTripMs + 0.5)),
-            margin, y);
+        m_Overlay.DrawText(m_Font, "NET " + std::to_string(static_cast<int>(m_State->RoundTripMs + 0.5)),
+            margin, y, HudTextScale);
 
         y -= lineHeight;
-        m_Overlay.DrawText("HEALTH " + std::to_string(m_State->Health), margin, y);
+        m_Overlay.DrawText(m_Font, "HEALTH " + std::to_string(m_State->Health), margin, y, HudTextScale);
 
         if (!m_State->ShotLabel.empty())
         {
             y -= lineHeight;
-            m_Overlay.DrawText(m_State->ShotLabel, margin, y);
+            m_Overlay.DrawText(m_Font, m_State->ShotLabel, margin, y, HudTextScale);
         }
     }
 
     std::shared_ptr<const GameHudState> m_State;
     ScreenOverlay m_Overlay;
+
+    //The game's own font, loaded once. A missing file throws, the same as the
+    //map and the player model: it is an asset the game ships, so its absence is
+    //a broken build rather than a reason to fall back to the debug font.
+    Font m_Font{ FontAtlas::FromFile("assets/fonts/CascadiaMono.ttf", FontPixelHeight) };
+
     float m_SmoothedFps = 0.0f;
 };
