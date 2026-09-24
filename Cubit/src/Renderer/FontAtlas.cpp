@@ -15,6 +15,61 @@ namespace
     //that does not fit is refused rather than truncated, so this being too
     //small shows up as an error at load and not as missing letters on screen.
     constexpr int AtlasSize = 512;
+
+    //A font's table directory: the 12-byte offset table, then one 16-byte record
+    //per table.
+    constexpr std::size_t OffsetTableSize = 12;
+    constexpr std::size_t TableRecordSize = 16;
+
+    //Everything in a font file is big-endian whatever the host is, so these read
+    //byte by byte rather than copying into an integer.
+    std::uint16_t ReadBigEndian16(std::span<const std::uint8_t> bytes, std::size_t at)
+    {
+        return static_cast<std::uint16_t>(
+            (static_cast<std::uint32_t>(bytes[at]) << 8) |
+            static_cast<std::uint32_t>(bytes[at + 1]));
+    }
+
+    std::uint64_t ReadBigEndian32(std::span<const std::uint8_t> bytes, std::size_t at)
+    {
+        return (static_cast<std::uint64_t>(bytes[at]) << 24) |
+            (static_cast<std::uint64_t>(bytes[at + 1]) << 16) |
+            (static_cast<std::uint64_t>(bytes[at + 2]) << 8) |
+            static_cast<std::uint64_t>(bytes[at + 3]);
+    }
+
+    //stb_truetype does no bounds checking of any kind - its own header says so -
+    //so a file cut short by an interrupted copy reads past the end of the buffer
+    //instead of failing, and the tag at the front is still perfectly valid. The
+    //font's own table directory is the only thing that says how far the bytes are
+    //supposed to reach, so walk it here, while there is still a buffer size to
+    //compare it against.
+    void RequireWholeFont(std::span<const std::uint8_t> ttf, std::size_t offset)
+    {
+        const std::uint64_t size = ttf.size();
+
+        if (offset + OffsetTableSize > size)
+            throw std::runtime_error("font: truncated before the table directory");
+
+        const std::size_t tableCount = ReadBigEndian16(ttf, offset + 4);
+        const std::uint64_t directoryEnd = static_cast<std::uint64_t>(offset) +
+            OffsetTableSize + static_cast<std::uint64_t>(tableCount) * TableRecordSize;
+
+        if (directoryEnd > size)
+            throw std::runtime_error("font: truncated inside the table directory");
+
+        for (std::size_t i = 0; i < tableCount; ++i)
+        {
+            const std::size_t record =
+                offset + OffsetTableSize + i * TableRecordSize;
+
+            const std::uint64_t tableOffset = ReadBigEndian32(ttf, record + 8);
+            const std::uint64_t tableLength = ReadBigEndian32(ttf, record + 12);
+
+            if (tableOffset + tableLength > size)
+                throw std::runtime_error("font: truncated - a table runs past the end of the file");
+        }
+    }
 }
 
 FontAtlas FontAtlas::FromTrueType(std::span<const std::uint8_t> ttf, float pixelHeight)
@@ -22,9 +77,19 @@ FontAtlas FontAtlas::FromTrueType(std::span<const std::uint8_t> ttf, float pixel
     if (ttf.empty())
         throw std::runtime_error("font: no bytes to bake");
 
+    //The tag check below reads four bytes and the directory walk reads twelve,
+    //neither of which stb will bounds check for us.
+    if (ttf.size() < OffsetTableSize)
+        throw std::runtime_error("font: truncated before the table directory");
+
     stbtt_fontinfo info;
     const int offset = stbtt_GetFontOffsetForIndex(ttf.data(), 0);
-    if (offset < 0 || !stbtt_InitFont(&info, ttf.data(), offset))
+    if (offset < 0)
+        throw std::runtime_error("font: not a TrueType font");
+
+    RequireWholeFont(ttf, static_cast<std::size_t>(offset));
+
+    if (!stbtt_InitFont(&info, ttf.data(), offset))
         throw std::runtime_error("font: not a TrueType font");
 
     FontAtlas atlas;
@@ -35,9 +100,12 @@ FontAtlas FontAtlas::FromTrueType(std::span<const std::uint8_t> ttf, float pixel
         static_cast<std::size_t>(AtlasSize) * AtlasSize, 0);
     std::vector<stbtt_bakedchar> characters(CharacterCount);
 
-    //Negative means the glyphs did not fit; positive is how many rows were used.
+    //Positive is how many rows were used. Anything else means the glyphs did not
+    //fit: stb returns the negated index of the one that overflowed, which is
+    //plain zero when that is the very first glyph - so this is `<= 0` and not
+    //`< 0`, and tidying it to the latter would let a failed bake through.
     const int result = stbtt_BakeFontBitmap(
-        ttf.data(), 0, pixelHeight, baked.data(), AtlasSize, AtlasSize,
+        ttf.data(), offset, pixelHeight, baked.data(), AtlasSize, AtlasSize,
         FirstCharacter, CharacterCount, characters.data());
 
     if (result <= 0)

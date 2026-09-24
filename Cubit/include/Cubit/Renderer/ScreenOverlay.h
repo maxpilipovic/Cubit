@@ -21,14 +21,16 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Screen-space drawing for a debug overlay: text in the 5x7 debug font, a
-//crosshair, a full-screen wash, and any textured quad.
+//Screen-space drawing for an on-screen readout: text in the 5x7 debug font or in
+//a real font the caller supplies, a crosshair, a full-screen wash, and any
+//textured quad.
 //
 //The plumbing an on-screen readout needs - a pixel-space camera, a unit quad, a
-//shader that samples one glyph out of an atlas, and the atlas itself - rather
-//than the readout. What to say belongs to whoever is drawing: an app's own layer
-//owns one of these and draws its own lines through it. Two apps wanting a
-//readout is exactly why this is here and not in either of them.
+//shader that samples one glyph out of an atlas, and the debug font's own atlas -
+//rather than the readout. What to say belongs to whoever is drawing: an app's
+//own layer owns one of these and draws its own lines through it, bringing its
+//own Font if it wants one. Two apps wanting a readout is exactly why this is
+//here and not in either of them.
 //
 //Needs a live GL context, so one of these is built from a layer, never before
 //the window exists.
@@ -64,7 +66,10 @@ public:
     //Draws a line of text in a real font. `x, y` is the pen on the BASELINE, in
     //the overlay's y-up pixel space - deliberately not the same as the debug
     //font's DrawText above, whose y is the bottom of a fixed glyph cell. A real
-    //font has descenders, so a baseline is the only origin that makes sense.
+    //font has descenders, so a baseline is the only origin that makes sense. The
+    //default scale differs too - a real font is baked at the size it wants,
+    //where the 5x7 one needs doubling - so adding a font argument to an existing
+    //call changes both where the text sits and how big it is.
     void DrawText(const Font& font, std::string_view text, float x, float y,
         float scale = 1.0f, const glm::vec4& colour = glm::vec4(1.0f)) const;
 
@@ -95,7 +100,8 @@ public:
     //Baseline-to-baseline distance for stacked lines of text.
     static float LineHeight(float scale = DefaultTextScale);
 
-    //Where the top line of a readout sits, so two apps stack their lines alike.
+    //Where the top line of a debug-font readout sits. Only the harness uses it
+    //now that the game stacks its lines from its own font's line height.
     float TopLine(float scale = DefaultTextScale) const;
 
     //One decimal place, without pulling in iostreams. Here because every

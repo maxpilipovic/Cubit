@@ -411,8 +411,10 @@ them. Every item was checked in the code unless it says otherwise. References ar
   - Two conventions are converted once, at bake time, so no caller has to know them: the
     overlay's y axis points up while stb's points down, and the engine's textures start
     at the bottom row while stb's bitmap starts at the top.
-  - **A character the font does not cover draws a question mark.** The debug font drew a
-    blank, which is how a readout could silently lose the value it existed to show.
+  - **A character outside printable ASCII draws a question mark.** The debug font drew a
+    blank, which is how a readout could silently lose the value it existed to show. The
+    fallback is the `Font` overload of `ScreenOverlay::DrawText`; the debug-font overload
+    is unchanged and still blanks what it cannot draw.
   - The engine renders and the game supplies the font: `game/assets/fonts/CascadiaMono.ttf`,
     SIL Open Font License 1.1, with `OFL.txt` beside it because the license only permits
     bundling while it travels with the font. The harness keeps the code-defined debug

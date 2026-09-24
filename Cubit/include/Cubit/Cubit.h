@@ -22,6 +22,8 @@
 #include "Cubit/Renderer/DebugDraw.h"
 #include "Cubit/Renderer/DebugFont.h"
 #include "Cubit/Renderer/DebugLineBatch.h"
+#include "Cubit/Renderer/Font.h"
+#include "Cubit/Renderer/FontAtlas.h"
 #include "Cubit/Renderer/IndexBuffer.h"
 #include "Cubit/Renderer/OrthographicCamera.h"
 #include "Cubit/Renderer/OrthographicCameraController.h"

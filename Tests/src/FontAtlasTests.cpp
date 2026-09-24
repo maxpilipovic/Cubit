@@ -4,6 +4,9 @@
 
 #include "Cubit/Renderer/FontAtlas.h"
 
+#include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -100,6 +103,23 @@ TEST_CASE("A line of text is taller than the glyphs on it")
     CHECK(atlas.LineHeight() > atlas.GlyphFor('M').Size.y);
 }
 
+TEST_CASE("A 32 pixel bake produces glyphs of about 32 pixels")
+{
+    //The cases above all hold for a bake at any size, so a pixel height silently
+    //changing - or being ignored - would not fail one of them. These ranges
+    //exist so that cannot happen: they are wide enough not to care about a
+    //hinting change, and narrow enough that a bake at 16 or 64 fails here.
+    //Measured at 32: LineHeight 32.0, 'M' 20 pixels tall, advance 16.13.
+    const FontAtlas& atlas = Baked();
+
+    CHECK(atlas.LineHeight() > 28.0f);
+    CHECK(atlas.LineHeight() < 36.0f);
+
+    const float heightOfM = atlas.GlyphFor('M').Size.y;
+    CHECK(heightOfM > 16.0f);
+    CHECK(heightOfM < 24.0f);
+}
+
 TEST_CASE("RgbaPixels expands coverage into a white texture with coverage as alpha")
 {
     const FontAtlas& atlas = Baked();
@@ -137,6 +157,40 @@ TEST_CASE("Bytes that are not a font are refused rather than baked")
     const std::vector<std::uint8_t> nonsense(256, 0x7F);
 
     CHECK_THROWS_AS(FontAtlas::FromTrueType(nonsense, 32.0f), std::runtime_error);
+}
+
+TEST_CASE("A font cut short is refused, not walked off the end of")
+{
+    //stb_truetype bounds checks nothing, so a half-written or interrupted copy
+    //reads past the buffer instead of failing - and its tag is still valid, so
+    //the not-a-font check above cannot catch it. The font's own table directory
+    //is what says how far the bytes should reach.
+    std::ifstream file(FixturePath("CascadiaMono.ttf").string(), std::ios::binary);
+    REQUIRE(file);
+
+    std::vector<std::uint8_t> whole(
+        (std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    REQUIRE(whole.size() > 2048);
+
+    //A prefix long enough to hold the whole table directory, so what fires is
+    //the check on the tables' own extents and not a short-buffer guard.
+    const std::vector<std::uint8_t> truncated(whole.begin(), whole.begin() + 2048);
+
+    //Checking the reason, not just that something threw: this prefix begins with
+    //a valid font tag, so a pass here that came from the not-a-font check would
+    //mean the truncation guard was never reached.
+    std::string reason;
+    try
+    {
+        FontAtlas::FromTrueType(truncated, 32.0f);
+    }
+    catch (const std::runtime_error& error)
+    {
+        reason = error.what();
+    }
+
+    MESSAGE("truncation reason: " << reason);
+    CHECK(reason.find("truncated") != std::string::npos);
 }
 
 TEST_CASE("A font file that is not there is an error, not an empty atlas")

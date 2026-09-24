@@ -57,9 +57,11 @@ struct GameHudState
 
 //Draws the game's readout on top of the rendered scene.
 //
-//What to say, not how to say it: the pixel-space camera, the quad, the shader
-//and the font atlas all live in the engine's ScreenOverlay, because two apps
-//want a readout and neither owns the drawing of one.
+//What to say, not how to say it: the pixel-space camera, the quad and the shader
+//all live in the engine's ScreenOverlay, because two apps want a readout and
+//neither owns the drawing of one. The font is the other way round - this layer
+//bakes its own, because the typeface the game reads in is the game's choice and
+//the engine ships no assets.
 class GameHudLayer final : public Layer
 {
 public:
@@ -116,9 +118,13 @@ private:
     //without this, looking up from underwater shows an untouched clear colour.
     static inline const glm::vec4 UnderwaterTint{ 0.15f, 0.40f, 0.70f, 0.45f };
 
-    //Baked once at this height and scaled when drawn. 32 is comfortably above
-    //the size the HUD draws at, so scaling shrinks rather than enlarges and the
-    //glyphs stay sharp.
+    //Baked once at this height and scaled when drawn. 32 is deliberately above
+    //the size the HUD draws at, so one bake can serve several sizes without the
+    //enlargement that makes a glyph blocky. It is not free: the atlas is sampled
+    //with GL_NEAREST and carries no mipmaps, so shrinking it drops texel rows
+    //rather than averaging them, and the letters are a little softer than a bake
+    //at the drawn height would be. Re-baking per size is the fix if the HUD ever
+    //needs to be sharper than this.
     static constexpr float FontPixelHeight = 32.0f;
 
     //Half the baked height, which lands close to the debug font's old size.
@@ -130,8 +136,7 @@ private:
         const float lineHeight = m_Font.LineHeight() * HudTextScale;
         const float margin = ScreenOverlay::Margin;
         //The first baseline: down from the top by the margin and one line.
-        float y = static_cast<float>(m_Overlay.Height()) - ScreenOverlay::Margin
-            - m_Font.LineHeight() * HudTextScale;
+        float y = static_cast<float>(m_Overlay.Height()) - margin - lineHeight;
 
         const glm::vec3& position = m_State->PlayerPosition;
         m_Overlay.DrawText(

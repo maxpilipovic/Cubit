@@ -75,8 +75,9 @@ is a 512x64x512 battlefield.
 - `FontAtlas` and `Font`: a TrueType file baked into one atlas with per-glyph metrics,
   and that atlas on the GPU. The engine renders text and the game supplies the font, so
   the engine ships no assets of its own. `ScreenOverlay` draws a line of it at a
-  baseline and measures a string for centring, and a character the font does not cover
-  draws a question mark rather than a blank
+  baseline and measures a string for centring, and a character outside printable ASCII
+  draws a question mark rather than a blank — that fallback belongs to the `Font`
+  overload of `DrawText`; the debug-font one still draws a blank
 - `DebugDraw`: world-space lines and wireframe boxes callable from anywhere, used to
   outline the block under the crosshair and to trace a shot from muzzle to impact
 
@@ -254,7 +255,8 @@ compensation and input delay. The crash handler is tested by running the test
 executable itself as a child process that crashes on purpose. `GameTests` is the
 game's — 30 cases — covering the numbers the game states for itself, when a death is
 announced, its settings policy, that the shipped font bakes and covers printable
-ASCII, and that the maps it ships and their spawn point are what the engine generates.
+ASCII and that its license ships beside it, and that the maps it ships and their spawn
+point are what the engine generates.
 Both suites run automatically after building, so a failing test breaks the build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running an
@@ -274,7 +276,9 @@ game/            The game, laid out to become its own repository
   Server/src/    Headless match server
   MapGen/src/    Offline map generator
   GameTests/src/ The game's doctest suite
+  assets/fonts/  The .ttf the HUD draws in, with its license
   assets/maps/   The .vox maps
+  assets/models/ The .vox player model
 docs/            Roadmap, performance notes, designs and plans
 Documentation/   Scope spec and per-commit design notes
 vendor/          GLFW, GLAD, GLM, ENet, doctest, stb

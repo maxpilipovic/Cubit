@@ -185,10 +185,17 @@ void ScreenOverlay::DrawText(const Font& font, std::string_view text, float x, f
         //and, more importantly, saves sampling a zero-area region of the atlas.
         if (glyph.Size.x > 0.0f && glyph.Size.y > 0.0f)
         {
+            //Snap the quad's corner to a whole pixel, exactly as
+            //stbtt_GetBakedQuad does. The atlas is sampled with GL_NEAREST, so a
+            //glyph landing on a fractional pixel drops a different set of texel
+            //columns from its neighbour - an advance rarely divides evenly, so
+            //every glyph on a line would otherwise sit at its own sub-pixel
+            //phase. Rounding costs nothing and makes a line of text render the
+            //same way twice.
             DrawQuad(
                 font.Texture(),
-                pen + glyph.Bearing.x * scale,
-                y + glyph.Bearing.y * scale,
+                std::floor(pen + glyph.Bearing.x * scale + 0.5f),
+                std::floor(y + glyph.Bearing.y * scale + 0.5f),
                 glyph.Size.x * scale,
                 glyph.Size.y * scale,
                 glyph.Uv0,
