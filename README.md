@@ -168,7 +168,10 @@ GenerateProjects.bat
 ```
 
 Open the generated solution (`Cubit.slnx`), select `Debug` and `x64`, build, then run
-either application: `Sandbox` for the engine harness, `GameApp` for the game.
+either application: `Sandbox` for the engine harness, `GameApp` for the game. Their
+windows are titled "Cubit Sandbox" and "Cubit", which is worth knowing because they open
+on the same map over the same ground: the harness flies a free camera with no character
+and no gravity, and mistaking it for the game looks like the player flying.
 `Cubit.dll` is copied next to each executable as a post-build step, and the game's
 `assets` directory next to the game's executables, so a running game resolves
 `assets/...` the way a shipped build would. The harness copies no assets: it writes its

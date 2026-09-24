@@ -572,7 +572,14 @@ private:
 class SandboxApplication final : public Application
 {
 public:
+    //Titled apart from the game on purpose. Both windows open at the same size,
+    //on the same map, with the camera over the same column - deliberately, so a
+    //screenshot of the harness frames the ground the game spawns on. That makes
+    //the title bar the only thing on screen saying which one you are looking at,
+    //and mistaking the harness's free camera for the game reads as the player
+    //flying.
     explicit SandboxApplication(const std::string& mapPath)
+        : Application(WindowProperties{ "Cubit Sandbox" })
     {
         auto hudState = std::make_shared<HudState>();
 
