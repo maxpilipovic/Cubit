@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include "Cubit/Voxel/CharacterController.h"
+#include "Cubit/Voxel/VoxelCollision.h"
 #include "Cubit/Voxel/World.h"
 
 #include <glm/glm.hpp>
@@ -524,4 +525,133 @@ TEST_CASE("SetState preserves the gap Teleport destroys")
     const glm::vec3 halfway = character.InterpolatedPosition(0.5f);
 
     CHECK(halfway.y == doctest::Approx(4.5f));
+}
+
+namespace
+{
+    //A ledge filling the whole x >= 20 plane, `height` blocks tall, standing on
+    //the flat world's floor. Walking forward from x=16 arrives at its face.
+    void BuildLedge(World& world, int height)
+    {
+        for (int z = 0; z < world.GetDepth(); ++z)
+            for (int y = 1; y <= height; ++y)
+                for (int x = 20; x < world.GetWidth(); ++x)
+                    world.SetBlock(x, y, z, BlockId{ 1 });
+    }
+
+    //Walks forward - +x at yaw 0 - for two seconds, long enough to reach the
+    //ledge at x=20 from x=16 and to climb it if climbing is going to happen.
+    void WalkForward(CharacterController& character, const World& world, int steps = 120)
+    {
+        for (int i = 0; i < steps; ++i)
+            character.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
+    }
+}
+
+TEST_CASE("A walking character steps up a single block")
+{
+    //The floor's surface is y=1, so a standing box centres on 1.9. One block
+    //on top of it puts the surface at y=2 and the box at 2.9.
+    World world = FlatWorld();
+    BuildLedge(world, 1);
+
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    WalkForward(character, world);
+
+    CHECK(character.Position().x > 20.0f);
+    CHECK(character.Position().y
+        == doctest::Approx(2.0f + character.Config().HalfExtents.y).epsilon(0.02));
+    CHECK(character.Grounded());
+}
+
+TEST_CASE("A walking character does not step up two blocks")
+{
+    //Twice the step height. This is what jumping is still for.
+    World world = FlatWorld();
+    BuildLedge(world, 2);
+
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    WalkForward(character, world);
+
+    CHECK(character.Position().x < 20.0f);
+    CHECK(character.Position().y
+        == doctest::Approx(1.0f + character.Config().HalfExtents.y).epsilon(0.02));
+}
+
+TEST_CASE("A character does not step up into a gap it would not fit in")
+{
+    //A one-block ledge with a ceiling a block above it: the step is low enough
+    //but the space on top is 1 block tall and the character is 1.8.
+    World world = FlatWorld();
+    BuildLedge(world, 1);
+
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int x = 20; x < world.GetWidth(); ++x)
+            world.SetBlock(x, 3, z, BlockId{ 1 });
+
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    WalkForward(character, world);
+
+    CHECK(character.Position().x < 20.0f);
+    CHECK(character.Position().y
+        == doctest::Approx(1.0f + character.Config().HalfExtents.y).epsilon(0.02));
+
+    //The property underneath the two checks above: whatever the climb decided,
+    //it may never leave the box inside a block. A step that rose into the
+    //ceiling would satisfy neither of them by accident.
+    CHECK_FALSE(VoxelCollision::Overlaps(
+        world, character.Position(), character.Config().HalfExtents));
+}
+
+TEST_CASE("A step height of zero walks into the ledge instead of up it")
+{
+    //What the character did before there was a step-up assist, and what a test
+    //that wants a character stopped by a single block can ask for.
+    World world = FlatWorld();
+    BuildLedge(world, 1);
+
+    CharacterConfig config;
+    config.StepHeight = 0.0f;
+
+    CharacterController character(config);
+    character.Teleport(glm::vec3(16.0f, 20.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    WalkForward(character, world);
+
+    CHECK(character.Position().x < 20.0f);
+    CHECK(character.Position().y
+        == doctest::Approx(1.0f + character.Config().HalfExtents.y).epsilon(0.02));
+}
+
+TEST_CASE("A character in the air does not step up the ledge it is falling against")
+{
+    //Stepping up is for walking, not for climbing in mid-air: a box pressed
+    //against a ledge while falling would otherwise ride up it.
+    World world = FlatWorld();
+    BuildLedge(world, 1);
+
+    CharacterController character;
+
+    //Flush against the ledge's face and overlapping its height, so the first
+    //forward step really is blocked by it: the box spans x 19.4 to 20.0 and
+    //y 1.6 to 3.4, against a ledge that starts at x=20 and fills y 1.0 to 2.0.
+    //Started any further back and the step would stop short of the ledge, and
+    //the test would pass without the rule it is meant to be testing.
+    character.Teleport(glm::vec3(19.7f, 2.5f, 16.0f));
+
+    character.Step(world, Walking(glm::vec2(0.0f, 1.0f)), Step);
+
+    CHECK_FALSE(character.Grounded());
+    CHECK(character.Position().y < 2.5f);
+    CHECK(character.Position().x < 20.0f);
 }

@@ -25,9 +25,9 @@ sky light and ambient occlusion — alone, or in a match with other players over
 network, where you can shoot each other. Each other player is drawn as a model — a
 `.vox` like the map itself, meshed the same way, and lit by one sample of the world's
 light where it stands. Water is see-through and you swim through it rather than walking
-on it, with the screen washing blue and hazing out while you are under. Swimming alone
-will not get you up the banks, though — there is no step-up assist, so climbing out
-means digging or building a way up, same as anywhere else on the map. The current map
+on it, with the screen washing blue and hazing out while you are under. A wall one block
+high is walked up rather than into, so terrain, stairs you dig, and the river's banks
+are all climbable on foot; jumping is for gaps and for anything taller. The current map
 is a 512x64x512 battlefield.
 
 **Platform and core loop**
@@ -238,7 +238,7 @@ Connected, the server names the map.
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 597 cases, one skipped by default because it only writes a test fixture on
+engine's — 602 cases, one skipped by default because it only writes a test fixture on
 request — covering everything that can be checked without a GPU or a window: chunk and
 world storage, meshing and its face counts, ambient occlusion and light sampling,
 sky-light propagation, raycasting, collision, character movement, frustum culling,

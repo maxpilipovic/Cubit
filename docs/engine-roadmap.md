@@ -556,8 +556,36 @@ them. Every item was checked in the code unless it says otherwise. References ar
   **Verified by running:** the pre-fix log
   (`Game-20260921-083901`) has the death line one second after "Application created"; the
   post-fix run goes straight from "Application created" to "Engine running".
-- [ ] **B9. Crouch and step-up.** `CharacterController` has neither; the README already
-  notes there is no step-up assist. Scope doc PLY-01.
+- [x] **B9. Step-up.** **Done 2026-09-24.** Split from crouch, which is now B9a: step-up
+  needed no input, no wire change and no hitbox change, where crouch needs all three.
+  - `CharacterConfig::StepHeight` (1 block; zero switches it off) and, in `Step`, a walk
+    that was blocked horizontally is retried from where it began as three collision-
+    resolved legs — up by the step height, across by the same horizontal motion, down
+    again — and taken only if it ends grounded and gained more ground than the blocked
+    walk did. Headroom needs no check of its own: with a ceiling in the way the rise is
+    stopped short and the walk across is blocked exactly as it already was.
+  - Only from standing and only on land. A character pressed against a ledge while
+    falling would otherwise ride up it, and a swimmer already moves freely.
+  - **Tests (5 engine cases):** climbs one block; does not climb two; does not climb into
+    a gap it would not fit in, and is never left inside a block; a zero step height walks
+    into the ledge as before; and a falling character does not climb the ledge it is
+    pressed against. The prediction and lag-compensation suites replay movement through
+    this same code, so their staying green is the check that client and server agree.
+  - **Mutation-tested**, and it found a vacuous test: the airborne case originally started
+    far enough back that the character never reached the ledge, so removing the grounded
+    guard broke nothing. Started flush against the face it now kills that mutation. Two
+    further mutations (doubling the rise, and stepping across without collision) kill the
+    two-block and headroom cases.
+  - The banks of the river are one block, so swimming now gets you out of the water. That
+    is the feature working, but it does change how the map plays.
+- [ ] **B9a. Crouch.** Split out of B9 on 2026-09-24 because it is a different size of
+  job. It needs a bit in `CharacterInput`, which crosses the wire verbatim, so a protocol
+  bump; stand-up-blocked handling; and — the part that is easy to miss — a box height per
+  sample in `HitboxHistory`. The server rewinds a player's position for lag compensation
+  and reconstructs the box with the character's *current* half extents
+  (`MatchServer.cpp:648`), so a crouch that shrinks the box would rewind the wrong shape:
+  a player who crouched after being shot at would be judged at standing height.
+  Scope doc PLY-01.
 
 ### C. Known and parked — do each, or drop it on purpose
 

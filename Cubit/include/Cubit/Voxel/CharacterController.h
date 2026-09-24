@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include <optional>
+
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4251)
@@ -61,6 +63,12 @@ struct CharacterConfig
     float WalkSpeed = 5.0f;
     float JumpSpeed = 9.0f;
     float Gravity = 24.0f;
+
+    //How high a wall the character walks up without jumping. One block, so
+    //terrain and anything dug out of it are walkable and jumping is left for
+    //gaps and for walls worth calling walls. Zero switches it off, which is
+    //what a test that wants a character stopped by a single block asks for.
+    float StepHeight = 1.0f;
 
     //Water physics. Gravity is weakened rather than cancelled, so doing nothing
     //settles the character onto the riverbed instead of leaving them hanging.
@@ -143,6 +151,15 @@ public:
 private:
     //Reports whether the eye sits in a fluid block for a given box position.
     bool IsEyeInFluid(const World& world, const glm::vec3& position) const;
+
+    //Retries a blocked walk as a climb: up by the step height, across by the
+    //same horizontal motion, then back down. Returns where that ended, or
+    //nothing when it is no better than the walk that was blocked.
+    std::optional<glm::vec3> StepUp(
+        const World& world,
+        const glm::vec3& from,
+        const glm::vec3& horizontal,
+        const glm::vec3& blocked) const;
 
     CharacterConfig m_Config;
 
