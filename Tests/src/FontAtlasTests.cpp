@@ -6,7 +6,16 @@
 
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+//GlyphFor's fallback looks up '?' by index without re-checking that index
+//against m_Glyphs, on the assumption that an atlas which exists at all was
+//built by FromTrueType and is therefore fully baked. A default-constructed
+//atlas would break that assumption, so the default constructor is private -
+//pin it here rather than leave it as something only the source comment says.
+static_assert(!std::is_default_constructible_v<FontAtlas>,
+    "an empty FontAtlas must be unreachable: GlyphFor's fallback assumes a baked atlas");
 
 namespace
 {
@@ -116,4 +125,13 @@ TEST_CASE("A font file that is not there is an error, not an empty atlas")
 {
     CHECK_THROWS_AS(
         FontAtlas::FromFile("no/such/font.ttf", 32.0f), std::runtime_error);
+}
+
+TEST_CASE("A size too large for the atlas is refused rather than truncated")
+{
+    //Truncation would surface as missing letters long after the bake, so a
+    //bake that cannot fit is an error at the point it happens.
+    CHECK_THROWS_AS(
+        FontAtlas::FromFile(FixturePath("CascadiaMono.ttf").string(), 512.0f),
+        std::runtime_error);
 }

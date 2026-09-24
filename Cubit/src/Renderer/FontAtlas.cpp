@@ -118,10 +118,14 @@ FontAtlas FontAtlas::FromFile(const std::string& path, float pixelHeight)
 
 const FontAtlas::Glyph& FontAtlas::GlyphFor(char character) const
 {
-    const int index = static_cast<int>(character) - FirstCharacter;
+    int index = static_cast<int>(character) - FirstCharacter;
 
+    //Substitute the index rather than calling back into GlyphFor('?'): a
+    //recursive call would assume '?' is in range, which only holds once
+    //m_Glyphs is fully baked. Looking the fallback up by index instead keeps
+    //that assumption out of this function altogether.
     if (index < 0 || index >= static_cast<int>(m_Glyphs.size()))
-        return GlyphFor('?');
+        index = '?' - FirstCharacter;
 
     return m_Glyphs[static_cast<std::size_t>(index)];
 }

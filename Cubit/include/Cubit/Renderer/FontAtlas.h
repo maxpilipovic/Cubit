@@ -70,6 +70,11 @@ public:
     std::uint32_t Height() const { return m_Height; }
 
 private:
+    //Only FromTrueType builds one of these, and only to fill it in before
+    //returning it - an empty atlas is never a value a caller can hold, since
+    //GlyphFor's fallback lookup assumes m_Glyphs is fully baked.
+    FontAtlas() = default;
+
     std::vector<std::uint8_t> m_Pixels;
     std::uint32_t m_Width = 0;
     std::uint32_t m_Height = 0;
