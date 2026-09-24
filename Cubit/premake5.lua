@@ -29,7 +29,8 @@ project "Cubit"
         "../vendor/GLFW/include",
         "../vendor/GLAD/include",
         "../vendor/GLM",
-        "../vendor/ENet/include"
+        "../vendor/ENet/include",
+        "../vendor/stb"
     }
 
     links
