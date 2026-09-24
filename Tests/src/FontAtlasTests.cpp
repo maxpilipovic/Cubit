@@ -100,6 +100,24 @@ TEST_CASE("A line of text is taller than the glyphs on it")
     CHECK(atlas.LineHeight() > atlas.GlyphFor('M').Size.y);
 }
 
+TEST_CASE("RgbaPixels expands coverage into a white texture with coverage as alpha")
+{
+    const FontAtlas& atlas = Baked();
+
+    const std::vector<std::uint8_t>& coverage = atlas.Pixels();
+    const std::vector<std::uint8_t> rgba = atlas.RgbaPixels();
+
+    REQUIRE(rgba.size() == coverage.size() * 4);
+
+    for (std::size_t i = 0; i < coverage.size(); ++i)
+    {
+        CHECK(rgba[i * 4 + 0] == 255);
+        CHECK(rgba[i * 4 + 1] == 255);
+        CHECK(rgba[i * 4 + 2] == 255);
+        CHECK(rgba[i * 4 + 3] == coverage[i]);
+    }
+}
+
 TEST_CASE("Baking the same font twice gives the same metrics")
 {
     //Text that shifted between runs would make every screenshot comparison

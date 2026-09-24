@@ -6,6 +6,11 @@
 #include <memory>
 #include <string_view>
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4251)
+#endif
+
 //A baked font on the GPU: a FontAtlas plus the texture it was uploaded into.
 //
 //Needs a live GL context, so one of these is built from a layer and never
@@ -16,6 +21,15 @@ class CB_API Font
 public:
     //Uploads the atlas's coverage as an RGBA texture, white where the glyph is.
     explicit Font(const FontAtlas& atlas);
+    ~Font();
+
+    //Owns a GPU texture, so it cannot be copied.
+    Font(const Font&) = delete;
+    Font& operator=(const Font&) = delete;
+
+    //Transfers ownership of the GPU texture.
+    Font(Font&& other) noexcept;
+    Font& operator=(Font&& other) noexcept;
 
     //Keeps the atlas rather than copying its measurements out, so a glyph is
     //described in exactly one place.
@@ -34,3 +48,7 @@ private:
     FontAtlas m_Atlas;
     std::unique_ptr<Texture2D> m_Texture;
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

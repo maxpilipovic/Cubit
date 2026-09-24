@@ -138,3 +138,18 @@ float FontAtlas::Measure(std::string_view text) const
 
     return width;
 }
+
+std::vector<std::uint8_t> FontAtlas::RgbaPixels() const
+{
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(m_Pixels.size()) * 4);
+
+    for (std::size_t i = 0; i < m_Pixels.size(); ++i)
+    {
+        rgba[i * 4 + 0] = 255;
+        rgba[i * 4 + 1] = 255;
+        rgba[i * 4 + 2] = 255;
+        rgba[i * 4 + 3] = m_Pixels[i];
+    }
+
+    return rgba;
+}

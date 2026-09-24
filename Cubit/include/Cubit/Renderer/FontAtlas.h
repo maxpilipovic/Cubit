@@ -69,6 +69,12 @@ public:
     std::uint32_t Width() const { return m_Width; }
     std::uint32_t Height() const { return m_Height; }
 
+    //What Texture2D wants instead of Pixels(): white everywhere, with the
+    //coverage as alpha, so a tint at draw time decides the colour and the same
+    //font serves a white readout and a red warning. Needs no GL context, so
+    //this expansion is testable here rather than folded into the uploader.
+    std::vector<std::uint8_t> RgbaPixels() const;
+
 private:
     //Only FromTrueType builds one of these, and only to fill it in before
     //returning it - an empty atlas is never a value a caller can hold, since
