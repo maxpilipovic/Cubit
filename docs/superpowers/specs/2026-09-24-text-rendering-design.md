@@ -44,8 +44,16 @@ Pure data. No GL, no `Texture2D`, so the suite can test it.
 
 - `struct Glyph { glm::vec2 Uv0, Uv1; glm::vec2 Size; glm::vec2 Bearing; float Advance; };`
   `Uv0`/`Uv1` are the glyph's corners in the atlas in 0..1; `Size` is its size in pixels
-  at the baked height; `Bearing` is the offset from the pen position to the glyph's top
-  left; `Advance` is how far the pen moves afterwards.
+  at the baked height; `Advance` is how far the pen moves afterwards.
+
+  **`Bearing` is stored in the overlay's own coordinate convention, not stb's.**
+  `ScreenOverlay`'s camera is `(0, width, 0, height)`, so **y increases upward** with the
+  origin at the bottom left of the screen, while `stb_truetype` reports glyph offsets
+  with y increasing downward from the top. `Bearing.x` is the offset from the pen to the
+  glyph's left edge and `Bearing.y` is the offset from the **baseline up to the glyph's
+  bottom edge** — negative for a descender like `g`. The conversion from stb's values
+  happens once, at bake time, inside `FontAtlas.cpp`: a caller should never have to know
+  which way stb counts.
 - `static FontAtlas FromTrueType(std::span<const std::uint8_t> ttf, float pixelHeight);`
   Bakes printable ASCII, `' '` (32) through `'~'` (126), into one 8-bit coverage bitmap.
   **Throws `std::runtime_error`** when the font cannot be parsed, or when the glyphs do
@@ -80,8 +88,15 @@ Pure data. No GL, no `Texture2D`, so the suite can test it.
 - `void DrawText(const Font& font, std::string_view text, float x, float y,
   float scale = 1.0f, const glm::vec4& colour = glm::vec4(1.0f)) const;`
 - `static float MeasureText(const Font& font, std::string_view text, float scale = 1.0f);`
-- `x, y` is the top left of the line, y increasing downward — the same convention as the
-  existing `DrawText`, so the two can be mixed without surprise.
+- `x, y` is the pen position **on the baseline**, in the overlay's y-up pixel space. That
+  is the only convention a real font can use, since glyphs sit at different heights
+  around a shared baseline and descenders hang below it.
+
+  It is deliberately **not** the same as the existing `DrawText(std::string_view, ...)`,
+  whose `x, y` is the bottom left of a fixed-size glyph cell — every debug-font glyph is
+  the same height, so that overload has no baseline to speak of. The header comment on
+  each says which it is, because two text calls with different origins is exactly the
+  sort of thing that reads fine and draws a line in the wrong place.
 - **The existing `DrawText(std::string_view, ...)` and everything about `DebugFont` stay
   exactly as they are.** The harness HUD keeps using them, which is what keeps the engine
   assetless.
