@@ -401,9 +401,45 @@ them. Every item was checked in the code unless it says otherwise. References ar
   land on `6 * 0.1 = 0.6` exactly. Whoever authors the real model should author it 6
   deep and 6 wide so both axes match. Content, not code — scaling the axes
   independently would stretch the figure instead.
-- [ ] **B4. Text and UI beyond the debug font.** `DebugFont` is a 5x7 bitmap with no
+- [x] **B4. Text beyond the debug font.** **Done 2026-09-24**, from
+  [the spec](superpowers/specs/2026-09-24-text-rendering-design.md). The UI half is now
+  B4a; this is the text half.
+  - `FontAtlas` bakes a `.ttf` with `stb_truetype` into one 512x512 coverage bitmap plus
+    per-glyph metrics, and holds no GL object, so the suite tests it without a window -
+    the `MeshGeometry`/`Mesh` split, for the same reason. `Font` is that atlas uploaded
+    as a texture.
+  - Two conventions are converted once, at bake time, so no caller has to know them: the
+    overlay's y axis points up while stb's points down, and the engine's textures start
+    at the bottom row while stb's bitmap starts at the top.
+  - **A character the font does not cover draws a question mark.** The debug font drew a
+    blank, which is how a readout could silently lose the value it existed to show.
+  - The engine renders and the game supplies the font: `game/assets/fonts/CascadiaMono.ttf`,
+    SIL Open Font License 1.1, with `OFL.txt` beside it because the license only permits
+    bundling while it travels with the font. The harness keeps the code-defined debug
+    font, so the engine still ships no assets.
+  - **Tests:** 11 engine cases on the bake - every printable character advances the pen,
+    an uncovered character falls back to `?`, measuring adds up the advances, the bitmap
+    is the size it claims, something was actually drawn into it, a line is taller than
+    its glyphs, the coverage expands into RGBA with the coverage as alpha, two bakes
+    agree, and non-font bytes, a missing file, and a bake too large for the atlas each
+    throw. 2 game cases: the shipped font bakes and covers printable ASCII, and its
+    license ships with it. `Font` itself has no unit test - it needs a GL context, like
+    `Mesh`.
+  - `GameHudTests`' debug-font label check is retired, and with it
+    `GameHudLayer::Labels` — a hand-maintained duplicate of the words the readout draws,
+    which existed only for that test and could drift from the real labels. The harness's
+    equivalent in `DebugFontTests` stays, because the harness still draws in the debug
+    font.
+
+  The original entry follows. `DebugFont` is a 5x7 bitmap with no
   lowercase and no J, Q, X or Z (`DebugFont.h:24`). A scoreboard and menus need more.
   Scope doc ENG-07, POL-03.
+- [ ] **B4a. Widgets: panels, buttons and a screen to put them on.** Split out of B4 on
+  2026-09-24. Text, measurement and quads are enough to lay out a scoreboard, so the
+  missing piece is interaction: hit-testing a click against a rectangle, hover, and
+  which screen has focus. Deliberately not designed in advance of the first screen that
+  needs it - a pause menu and a scoreboard are D-section work, and widgets invented
+  without one tend to fit neither. Scope doc ENG-07, POL-03.
 - [x] **B5. Lifetimes for subscriptions and layers.** **Done 2026-09-17.** One item because
   the two halves are one bug: a layer's callback captures `this`, so a layer that could be
   removed while its subscription lived on would have the next publish call into freed

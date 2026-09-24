@@ -72,6 +72,11 @@ is a 512x64x512 battlefield.
   transform by `WorldScene::DrawMesh`, which multiplies in a single brightness value
   before the fog mix — the same shader and vertex format as a chunk's mesh, for
   geometry that is not one
+- `FontAtlas` and `Font`: a TrueType file baked into one atlas with per-glyph metrics,
+  and that atlas on the GPU. The engine renders text and the game supplies the font, so
+  the engine ships no assets of its own. `ScreenOverlay` draws a line of it at a
+  baseline and measures a string for centring, and a character the font does not cover
+  draws a question mark rather than a blank
 - `DebugDraw`: world-space lines and wireframe boxes callable from anywhere, used to
   outline the block under the crosshair and to trace a shot from muzzle to impact
 
@@ -238,19 +243,19 @@ Connected, the server names the map.
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 602 cases, one skipped by default because it only writes a test fixture on
+engine's — 613 cases, one skipped by default because it only writes a test fixture on
 request — covering everything that can be checked without a GPU or a window: chunk and
 world storage, meshing and its face counts, ambient occlusion and light sampling,
 sky-light propagation, raycasting, collision, character movement, frustum culling,
-`.vox` loading and writing, parsing settings files, the generated terrain's invariants,
-the wire protocol, and the netcode end to end under simulated latency and loss —
-prediction, corrections, predicted edits, lag compensation and input delay. The crash
-handler is tested by running the test executable itself as a child process that
-crashes on purpose. `GameTests` is the game's — 29 cases — covering the numbers the
-game states for itself, the labels its HUD draws, when a death is announced, its
-settings policy, and that the maps it ships and their spawn point are what the engine
-generates. Both suites run automatically after building, so a failing test breaks the
-build.
+`.vox` loading and writing, baking a TrueType font into an atlas, parsing settings
+files, the generated terrain's invariants, the wire protocol, and the netcode end to
+end under simulated latency and loss — prediction, corrections, predicted edits, lag
+compensation and input delay. The crash handler is tested by running the test
+executable itself as a child process that crashes on purpose. `GameTests` is the
+game's — 30 cases — covering the numbers the game states for itself, when a death is
+announced, its settings policy, that the shipped font bakes and covers printable
+ASCII, and that the maps it ships and their spawn point are what the engine generates.
+Both suites run automatically after building, so a failing test breaks the build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running an
 application and looking at the result.
@@ -272,7 +277,7 @@ game/            The game, laid out to become its own repository
   assets/maps/   The .vox maps
 docs/            Roadmap, performance notes, designs and plans
 Documentation/   Scope spec and per-commit design notes
-vendor/          GLFW, GLAD, GLM, ENet, doctest
+vendor/          GLFW, GLAD, GLM, ENet, doctest, stb
 ```
 
 Public headers live under `Cubit/include/Cubit` and are exported with `CB_API`. Both
