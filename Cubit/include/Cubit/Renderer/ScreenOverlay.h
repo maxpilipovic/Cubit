@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/Renderer/Font.h"
 #include "Cubit/Renderer/IndexBuffer.h"
 #include "Cubit/Renderer/OrthographicCamera.h"
 #include "Cubit/Renderer/Shader.h"
@@ -59,6 +60,17 @@ public:
     //DebugFontTests checks every label an app draws.
     void DrawText(std::string_view text, float x, float y,
         float scale = DefaultTextScale) const;
+
+    //Draws a line of text in a real font. `x, y` is the pen on the BASELINE, in
+    //the overlay's y-up pixel space - deliberately not the same as the debug
+    //font's DrawText above, whose y is the bottom of a fixed glyph cell. A real
+    //font has descenders, so a baseline is the only origin that makes sense.
+    void DrawText(const Font& font, std::string_view text, float x, float y,
+        float scale = 1.0f, const glm::vec4& colour = glm::vec4(1.0f)) const;
+
+    //Width of that text if it were drawn, for centring and right-aligning.
+    static float MeasureText(const Font& font, std::string_view text,
+        float scale = 1.0f);
 
     //Submits one textured quad in pixel space.
     void DrawQuad(const Texture2D& texture, float x, float y, float width, float height,

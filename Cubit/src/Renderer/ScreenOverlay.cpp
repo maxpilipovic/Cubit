@@ -172,6 +172,39 @@ void ScreenOverlay::DrawText(std::string_view text, float x, float y, float scal
     }
 }
 
+void ScreenOverlay::DrawText(const Font& font, std::string_view text, float x, float y,
+    float scale, const glm::vec4& colour) const
+{
+    float pen = x;
+
+    for (const char character : text)
+    {
+        const FontAtlas::Glyph& glyph = font.GlyphFor(character);
+
+        //A space has an advance and no pixels. Skipping it saves a draw call
+        //and, more importantly, saves sampling a zero-area region of the atlas.
+        if (glyph.Size.x > 0.0f && glyph.Size.y > 0.0f)
+        {
+            DrawQuad(
+                font.Texture(),
+                pen + glyph.Bearing.x * scale,
+                y + glyph.Bearing.y * scale,
+                glyph.Size.x * scale,
+                glyph.Size.y * scale,
+                glyph.Uv0,
+                glyph.Uv1 - glyph.Uv0,
+                colour);
+        }
+
+        pen += glyph.Advance * scale;
+    }
+}
+
+float ScreenOverlay::MeasureText(const Font& font, std::string_view text, float scale)
+{
+    return font.Measure(text) * scale;
+}
+
 void ScreenOverlay::DrawQuad(const Texture2D& texture, float x, float y,
     float width, float height, const glm::vec2& uvOffset, const glm::vec2& uvScale,
     const glm::vec4& tint) const
