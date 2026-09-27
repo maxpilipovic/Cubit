@@ -657,7 +657,35 @@ them. Every item was checked in the code unless it says otherwise. References ar
     two-block and headroom cases.
   - The banks of the river are one block, so swimming now gets you out of the water. That
     is the feature working, but it does change how the map plays.
-- [ ] **B9a. Crouch.** Split out of B9 on 2026-09-24 because it is a different size of
+- [x] **B9a. Crouch.** **Done 2026-09-27.** Hold Left Ctrl. `CharacterInput::Crouch` asks
+  for it, and the controller shrinks the box from 1.8 to 1.2, from the top so the feet stay
+  put. It walks at 2.5 instead of 5 and puts the eye 0.2 below the top of the box. It stands
+  back up only when the taller box fits, which in practice only refuses mid-air: floors and
+  ceilings are whole blocks, so any gap that fits 1.2 fits 1.8, and crouch is a smaller
+  target, not a way under anything. `InterpolatedEye` mixes each end's own eye height, so
+  the view moves down smoothly.
+  - **The rewind judges the box the target had then.** `HitboxHistory` stores each tick's
+    box, not just its position, and `BoxAt` lerps the corners, so across a crouch the feet
+    stay put and only the top moves. Before, every rewound box was rebuilt from the
+    target's current size.
+  - Protocol 7. The input's Jump byte and the snapshot's Grounded byte became flag bytes,
+    each with a crouch bit, so no packet grew (a snapshot entry is still 37 bytes). The
+    client reconciles crouch with the rest of its state, and `PoseOf` lerps a 0..1 `Crouch`.
+  - A crouched remote player is the standing model squashed to 1.2. A real crouching pose
+    is content, alongside B3d.
+  - **Tests:** 9 new engine cases. 5 on the controller: crouch lowers head and eye with
+    the feet fixed, crouch speed, standing back up, staying crouched without headroom,
+    and `SetState` restoring it. 1 on the history, that the box has the size it had then.
+    2 on the wire, every flag combination in each byte. 1 end to end: two clients and a
+    server, where the server steps the crouched box, rewinds the earlier tick at 1.8 and
+    now at 1.2, the crouching client makes no correction, and the other client's pose
+    reads crouched and then standing again. Mutation-checked: dropping the headroom test,
+    recording the standing box, and not sending the bit each turn a test red.
+  - Checked by running, with a temporary probe that forced crouch: POS dropped 26.9 to
+    26.6 with the player still grounded, the view lowered, and a standing and a squashed
+    model stood side by side on the same ground.
+
+  The original entry follows. Split out of B9 on 2026-09-24 because it is a different size of
   job. It needs a bit in `CharacterInput`, which crosses the wire verbatim, so a protocol
   bump; stand-up-blocked handling; and — the part that is easy to miss — a box height per
   sample in `HitboxHistory`. The server rewinds a player's position for lag compensation

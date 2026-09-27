@@ -167,6 +167,14 @@ namespace
     //full strength with no distance to soften them, so they are turned down to
     //sit under everybody else's.
     constexpr float OwnFootstepVolume = 0.5f;
+
+    //A remote player's box half-height at a pose's crouch amount, which
+    //MatchClient lerps across the tick a crouch happened on. The pose's
+    //position is the box centre, so its feet are this far below it.
+    float PoseHalfHeight(const CharacterConfig& config, float crouch)
+    {
+        return glm::mix(config.HalfExtents.y, config.CrouchHalfHeight, crouch);
+    }
 }
 
 class PlayerLayer final : public Layer
@@ -381,7 +389,7 @@ public:
         m_Audio.SetListener(eye, camera.GetForwardDirection());
 
         const CharacterController& self = Player_();
-        const glm::vec3 feet = self.Position() - glm::vec3(0.0f, self.Config().HalfExtents.y, 0.0f);
+        const glm::vec3 feet = self.Position() - glm::vec3(0.0f, self.HalfExtents().y, 0.0f);
         m_Cues.Walk(m_LocalPlayer, feet, self.Grounded() && !self.BodyInFluid(),
             OwnFootstepVolume, m_PendingCues);
 
@@ -412,8 +420,9 @@ public:
                 if (player == m_LocalPlayer)
                     continue;
 
-                const glm::vec3 theirFeet = m_Client->PoseOf(player, alpha).Position
-                    - glm::vec3(0.0f, character.Config().HalfExtents.y, 0.0f);
+                const MatchClient::RemotePose pose = m_Client->PoseOf(player, alpha);
+                const glm::vec3 theirFeet = pose.Position
+                    - glm::vec3(0.0f, PoseHalfHeight(character.Config(), pose.Crouch), 0.0f);
                 m_Cues.WalkInferred(player, theirFeet, 1.0f, m_PendingCues);
             }
         }
@@ -714,7 +723,9 @@ private:
             //The character is still what supplies the size: how big a player is
             //is simulation, where they are drawn is not.
             const MatchClient::RemotePose pose = m_Client->PoseOf(player, alpha);
+            //The standing box, and the height it has at this crouch.
             const glm::vec3 half = character.Config().HalfExtents;
+            const float halfHeight = PoseHalfHeight(character.Config(), pose.Crouch);
 
             //The model is meshed in its own voxel units, so it is scaled to the
             //height the simulation says a player is. An artist can rebuild the
@@ -735,9 +746,11 @@ private:
             //yaw 90 the model turned a quarter-turn from its yaw-0 pose, the
             //way HeadingForward(90) turning toward +z says it should.
             glm::mat4 transform = glm::translate(glm::mat4(1.0f),
-                WorldOffset + pose.Position - glm::vec3(0.0f, half.y, 0.0f));
+                WorldOffset + pose.Position - glm::vec3(0.0f, halfHeight, 0.0f));
             transform = glm::rotate(transform, glm::radians(-pose.Yaw), glm::vec3(0.0f, 1.0f, 0.0f));
-            transform = glm::scale(transform, glm::vec3(scale));
+            //Squashed to the crouched height: a placeholder for a crouching
+            //pose, which is content the model does not have yet (B9a).
+            transform = glm::scale(transform, glm::vec3(scale, scale * halfHeight / half.y, scale));
             transform = glm::translate(transform,
                 glm::vec3(-0.5f * m_PlayerModelDepth, 0.0f, -0.5f * m_PlayerModelWidth));
 
@@ -772,6 +785,7 @@ private:
         input.Yaw = m_CameraController.GetYaw();
         input.Pitch = m_CameraController.GetPitch();
         input.Jump = Input::IsKeyPressed(KeyCode::Space);
+        input.Crouch = Input::IsKeyPressed(KeyCode::LeftControl);
         return input;
     }
 
@@ -1023,7 +1037,7 @@ private:
     void LiftPlayerClearOfTerrain()
     {
         const float top = static_cast<float>(World_().GetHeight());
-        const glm::vec3& halfExtents = Player_().Config().HalfExtents;
+        const glm::vec3 halfExtents = Player_().HalfExtents();
 
         glm::vec3 lifted = Player_().Position();
         while (lifted.y < top &&

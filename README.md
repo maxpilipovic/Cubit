@@ -69,9 +69,9 @@ is a 512x64x512 battlefield.
 - Two-pass drawing: opaque geometry first, then transparent geometry sorted back
   to front with depth writes off, so water blends over the riverbed beneath it
 - `Mesh`: a standalone GPU mesh, uploaded once from a `MeshGeometry` and drawn at any
-  transform by `WorldScene::DrawMesh`, which multiplies in a single brightness value
-  before the fog mix — the same shader and vertex format as a chunk's mesh, for
-  geometry that is not one
+  transform by `WorldScene::DrawMesh`, which lights it with one brightness value and
+  applies the light floor once, after that, as a chunk face gets it — the same shader
+  and vertex format as a chunk's mesh, for geometry that is not one
 - `FontAtlas` and `Font`: a TrueType file baked into one atlas with per-glyph metrics,
   and that atlas on the GPU. The engine renders text and the game supplies the font, so
   the engine ships no assets of its own. `ScreenOverlay` draws a line of it at a
@@ -109,7 +109,7 @@ is a 512x64x512 battlefield.
 - `BlockEdit`: one block change as a value. Applying it relights and returns its
   inverse, which is what undo and edit rollback are built on
 - `CharacterController`: the player's movement as a pure step over state, an input and
-  the world — gravity, jumping, swimming and collision — so prediction and replay are
+  the world — gravity, jumping, crouching, swimming and collision — so prediction and replay are
   just calling it again
 - `FindSpawn` resolves a map column into a standable, dry spawn position
 
@@ -169,7 +169,7 @@ is a 512x64x512 battlefield.
   rate; connected, it adds the player count, round-trip time, health and hit markers.
   It is drawn with a bitmap font defined in code
 
-**Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, mouse to look. Left click breaks
+**Controls:** `W`/`A`/`S`/`D` to move, `Space` to jump, hold `Left Ctrl` to crouch, mouse to look. Left click breaks
 a block, right click places one, `1`–`8` pick the colour, and middle click fires. `U`
 undoes the last block edit, along with anything that fell because of it. `B`
 (single-player) blows a radius-3 ball out of the terrain where you aim, as one batch that
