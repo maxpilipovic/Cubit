@@ -174,6 +174,34 @@ What this changes:
 - **P8 / C3's "meshing is the load cost" holds in Debug only.** In Release, meshing the
   whole map takes 0.4 s.
 
+**Spike, same day: the first-upload cost is a driver sync, not an upload.** Timing each
+GL call separately put 4.8–5.9 s of the Release first load in `VertexArray`'s
+constructor, a single `glGenVertexArrays`. Against 250 MB of vertex and index data, the
+data itself took under 100 ms. Swapping the order moved the cost to whichever call came
+first: the vertex buffer then took 0.6–3.1 s and the VAO 30 ms. So it is the first
+name-returning GL call of each upload that is slow, whatever the object.
+
+The reading that fits every number: under the driver's threaded optimisation, a call
+that returns names waits for the driver thread to drain its queue, which includes
+presenting the previous frame. That wait landed inside `WorldRenderer::Update`'s 4 ms
+meshing budget and used most of it, so only ~2.4 chunks fitted per frame and load took
+~1,000 frames. Debug does not show it; a debug-output context is typically run without
+the threaded driver.
+
+Probe: one throwaway `glGenBuffers` before the budget clock started, so the wait was
+taken outside it. Three runs:
+
+| Release first load | Before | Wait outside the budget |
+|---|---|---|
+| "Engine running" to fully meshed | 6.4 – 8.0 s | 0.96 – 1.04 s |
+| Frames | 911 – 1,124 | 125 – 131 |
+| Upload total | 2.8 – 5.9 s | ~150 ms |
+| Worst frame's upload | 99 – 151 ms | 2.3 ms |
+
+The probe's throwaway call was reverted; it only proved the model. The fix it points at
+is structural, not a dummy call: the budget should bound meshing, the CPU work, and the
+uploads should follow it, so the sync is no longer charged against the budget.
+
 ---
 
 ## P5 — One draw call per chunk (no batching)
