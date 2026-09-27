@@ -42,7 +42,7 @@ bool IsEditLegal(const MatchState& match, PlayerId editor, const BlockEdit& edit
         return false;
 
     const CharacterController& character = match.Player(editor);
-    const glm::vec3 eye = character.Position() + glm::vec3(0.0f, character.Config().EyeOffset, 0.0f);
+    const glm::vec3 eye = character.Eye();
 
     if (!IsCellWithinReach(eye, at, rules.ReachDistance))
         return false;
@@ -56,7 +56,7 @@ bool IsEditLegal(const MatchState& match, PlayerId editor, const BlockEdit& edit
         if (player != editor && others == OtherPlayers::Ignore)
             continue;
 
-        if (BoxOverlapsCell(body.Position(), body.Config().HalfExtents, at))
+        if (BoxOverlapsCell(body.Position(), body.HalfExtents(), at))
             return false;
     }
 

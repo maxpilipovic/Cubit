@@ -193,6 +193,11 @@ public:
         glm::vec3 Position{ 0.0f };
         float Yaw = 0.0f;
         float Pitch = 0.0f;
+
+        //0 standing, 1 crouched, and in between across the tick a crouch
+        //happened on - lerped like the position, so a drawn player shrinks
+        //over the same instant the server's rewound box does.
+        float Crouch = 0.0f;
     };
 
     //`alpha` is the renderer's position within the current step - the same
@@ -323,6 +328,7 @@ private:
         glm::vec3 Position{ 0.0f };
         float Yaw = 0.0f;
         float Pitch = 0.0f;
+        bool Crouched = false;
     };
 
     std::map<PlayerId, std::deque<RemoteSample>> m_RemoteSamples;

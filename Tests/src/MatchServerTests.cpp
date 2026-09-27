@@ -839,14 +839,13 @@ TEST_CASE("A joined player's recorded history matches where the match stepped th
             server.Match().Player(player).Position());
     }
 
-    const glm::vec3 halfExtents(0.3f, 0.9f, 0.3f);
 
     for (const auto& [tick, position] : stepped)
     {
         CAPTURE(tick);
 
         Aabb box;
-        REQUIRE(server.History().BoxAt(player, static_cast<double>(tick), halfExtents, box));
+        REQUIRE(server.History().BoxAt(player, static_cast<double>(tick), box));
 
         const glm::vec3 centre = (box.Min + box.Max) * 0.5f;
         CHECK(centre.x == doctest::Approx(position.x));
@@ -912,7 +911,6 @@ TEST_CASE("A history's positions land under the tick number the wire reports the
         moved = moved || wire[i].second != wire[i - 1].second;
     REQUIRE(moved);
 
-    const glm::vec3 halfExtents(0.3f, 0.9f, 0.3f);
 
     for (const auto& [wireTick, wirePosition] : wire)
     {
@@ -922,7 +920,7 @@ TEST_CASE("A history's positions land under the tick number the wire reports the
         //query with a neighbouring sample's position instead - the position
         //one tick either side of what the wire reported under this label.
         Aabb box;
-        REQUIRE(server.History().BoxAt(player, static_cast<double>(wireTick), halfExtents, box));
+        REQUIRE(server.History().BoxAt(player, static_cast<double>(wireTick), box));
 
         const glm::vec3 centre = (box.Min + box.Max) * 0.5f;
         CHECK(centre.x == doctest::Approx(wirePosition.x));

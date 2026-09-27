@@ -54,7 +54,10 @@ enum class MessageId : std::uint8_t
 //
 //6: EditApplied carries a list, so the server can change many blocks as one
 //operation - an explosion, terrain giving way - and send them together.
-constexpr std::uint32_t ProtocolVersion = 6;
+//
+//7: crouching. The input's Jump byte and the snapshot's Grounded byte became
+//flag bytes, each gaining a crouch bit, so no packet grew. On the per-tick path.
+constexpr std::uint32_t ProtocolVersion = 7;
 
 //The most edits one EditApplied carries. The server splits a bigger batch across
 //several messages, 14 bytes an edit, so about 57 KB each: no batch can come near
@@ -140,6 +143,10 @@ struct PlayerSnapshot
 
     float VerticalVelocity = 0.0f;
     bool Grounded = false;
+
+    //The box the server stepped them with. A client reconciles its own player
+    //against it and draws everybody else at the right height.
+    bool Crouched = false;
 
     //The newest input from this player that the server has applied, in the
     //CLIENT's own tick numbering, echoed back untouched. The client replays

@@ -56,7 +56,7 @@ TEST_CASE("Rewinding to the instant the shooter saw is what turns a miss into a 
     //answers MUST differ. If they do not, this stage has nothing to build.
     HitboxHistory history;
     for (std::uint64_t tick = 0; tick <= 100; ++tick)
-        history.Record(2, tick, TargetAt(tick));
+        history.Record(2, tick, TargetAt(tick), PlayerHalfExtents);
 
     const std::uint64_t serverTick = 100;
     const double renderedInstant = 91.0;
@@ -66,7 +66,7 @@ TEST_CASE("Rewinding to the instant the shooter saw is what turns a miss into a 
     //computation MatchClient::PoseOf performs to draw them, which is the point
     //- the test aims at the rendered position, not at a guess about it.
     Aabb seen;
-    REQUIRE(history.BoxAt(2, renderedInstant, PlayerHalfExtents, seen));
+    REQUIRE(history.BoxAt(2, renderedInstant, seen));
     const glm::vec3 aimPoint = (seen.Min + seen.Max) * 0.5f;
 
     const glm::vec3 eye(0.0f, 1.0f, aimPoint.z);
@@ -83,7 +83,7 @@ TEST_CASE("Rewinding to the instant the shooter saw is what turns a miss into a 
     //mutation the gate exists to catch, run as a branch rather than left to a
     //reviewer to perform by hand.
     Aabb present;
-    REQUIRE(history.BoxAt(2, static_cast<double>(serverTick), PlayerHalfExtents, present));
+    REQUIRE(history.BoxAt(2, static_cast<double>(serverTick), present));
     std::vector<ShotCandidate> live{ ShotCandidate{ 2, present } };
     const ShotResult uncompensated =
         ResolveShot(world, live, eye, direction, 128.0f);
@@ -105,13 +105,13 @@ TEST_CASE("Half a tick of rewind error is enough to miss")
     //aim at the middle.
     HitboxHistory history;
     for (std::uint64_t tick = 0; tick <= 100; ++tick)
-        history.Record(2, tick, TargetAt(tick));
+        history.Record(2, tick, TargetAt(tick), PlayerHalfExtents);
 
     Aabb exact;
-    REQUIRE(history.BoxAt(2, 91.5, PlayerHalfExtents, exact));
+    REQUIRE(history.BoxAt(2, 91.5, exact));
 
     Aabb rounded;
-    REQUIRE(history.BoxAt(2, 91.0, PlayerHalfExtents, rounded));
+    REQUIRE(history.BoxAt(2, 91.0, rounded));
 
     //Aim just inside the LEADING edge of where the target actually was.
     //
@@ -375,7 +375,7 @@ namespace
                     claimed >= now - static_cast<double>(MaxRewindTicks) && claimed <= now;
 
                 Aabb box;
-                served.HasBox = m_Server->History().BoxAt(m_Target, claimed, PlayerHalfExtents, box);
+                served.HasBox = m_Server->History().BoxAt(m_Target, claimed, box);
                 served.Centre = (box.Min + box.Max) * 0.5f;
 
                 m_Served.push_back(served);

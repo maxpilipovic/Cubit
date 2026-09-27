@@ -142,7 +142,7 @@ void MatchServer::Step(double seconds)
     //names this position on the wire would land one tick short of it here.
     const std::uint64_t recordedTick = m_Match.Tick();
     for (const auto& [player, character] : m_Match.Players())
-        m_History.Record(player, recordedTick, character.Position());
+        m_History.Record(player, recordedTick, character.Position(), character.HalfExtents());
 
     SendSnapshots();
 }
@@ -645,7 +645,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
         Aabb box;
         //False means there is no record of them at that instant - they joined
         //after it, or they have respawned since. Not a hit of zero size.
-        if (!m_History.BoxAt(player, instant, character.Config().HalfExtents, box))
+        if (!m_History.BoxAt(player, instant, box))
             continue;
 
         candidates.push_back(ShotCandidate{ player, box });
@@ -657,7 +657,7 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     //believe they are, and every shot fired while moving would leave from the
     //wrong place.
     const CharacterController& character = m_Match.Player(shooter.Player);
-    const glm::vec3 eye = character.Position() + glm::vec3(0.0f, character.Config().EyeOffset, 0.0f);
+    const glm::vec3 eye = character.Eye();
     const glm::vec3 direction = AimDirection(fire.Yaw, fire.Pitch);
 
     const ShotResult shot = ResolveShot(
@@ -720,6 +720,7 @@ void MatchServer::SendSnapshots()
         entry.Position = character.Position();
         entry.VerticalVelocity = character.VerticalVelocity();
         entry.Grounded = character.Grounded();
+        entry.Crouched = character.Crouched();
 
         //Angles live on the client record rather than on the character, because
         //CharacterController does not store them - they arrive in the input and

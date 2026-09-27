@@ -14,6 +14,11 @@ void CharacterController::Step(
     // The step is about to overwrite the position rendering interpolates from,
     // so keep it first.
     m_PreviousPosition = m_Position;
+    m_PreviousEyeOffset = EyeOffset();
+
+    // Resized first, so everything below - fluid, collision, the climb -
+    // works with the box the character actually has this step.
+    ApplyCrouch(world, input.Crouch);
 
     // Whether the character was standing when the step began, which is what
     // decides if a blocked walk may be retried as a climb. Read before the
@@ -21,7 +26,7 @@ void CharacterController::Step(
     const bool wasGrounded = m_Grounded;
 
     m_BodyInFluid =
-        VoxelCollision::OverlapsFluid(world, m_Position, m_Config.HalfExtents);
+        VoxelCollision::OverlapsFluid(world, m_Position, HalfExtents());
 
     // Resolve the character's own axes into the world here rather than taking
     // a world-space vector from the caller: this is the step a server has to
@@ -38,7 +43,7 @@ void CharacterController::Step(
         headingLength > 1.0f ? heading / headingLength : heading;
 
     glm::vec2 walk =
-        glm::vec2(direction.x, direction.z) * m_Config.WalkSpeed;
+        glm::vec2(direction.x, direction.z) * (m_Crouched ? m_Config.CrouchSpeed : m_Config.WalkSpeed);
 
     // Jump has to be tested inside this branch rather than after it: standing
     // on the riverbed is grounded and submerged at once, so a dry jump would
@@ -72,7 +77,7 @@ void CharacterController::Step(
     const VoxelMoveResult move = VoxelCollision::MoveBox(
         world,
         m_Position,
-        m_Config.HalfExtents,
+        HalfExtents(),
         motion);
 
     // A wall a step high is walked up rather than into. Only from standing,
@@ -119,11 +124,11 @@ std::optional<glm::vec3> CharacterController::StepUp(
     // what makes headroom free: with a ceiling in the way the rise is stopped
     // short, and the walk across is then blocked exactly as it already was.
     const VoxelMoveResult up =
-        VoxelCollision::MoveBox(world, from, m_Config.HalfExtents, rise);
+        VoxelCollision::MoveBox(world, from, HalfExtents(), rise);
     const VoxelMoveResult across =
-        VoxelCollision::MoveBox(world, up.Position, m_Config.HalfExtents, horizontal);
+        VoxelCollision::MoveBox(world, up.Position, HalfExtents(), horizontal);
     const VoxelMoveResult down =
-        VoxelCollision::MoveBox(world, across.Position, m_Config.HalfExtents, -rise);
+        VoxelCollision::MoveBox(world, across.Position, HalfExtents(), -rise);
 
     // Landing matters: a climb that ended in the air would leave the character
     // hanging over the gap it just walked into.
@@ -142,19 +147,48 @@ std::optional<glm::vec3> CharacterController::StepUp(
     return down.Position;
 }
 
+void CharacterController::ApplyCrouch(const World& world, bool wanted)
+{
+    if (wanted == m_Crouched)
+        return;
+
+    //How much taller standing is than crouching, all of it taken off the top.
+    const float change = 2.0f * (m_Config.HalfExtents.y - m_Config.CrouchHalfHeight);
+    const glm::vec3 shift(0.0f, 0.5f * change, 0.0f);
+
+    if (wanted)
+    {
+        m_Position -= shift;
+        m_Crouched = true;
+        return;
+    }
+
+    //Standing grows the box upward from the feet. Refused while that would put
+    //the head in a block - which is how a crouch outlasts its request.
+    const glm::vec3 standing = m_Position + shift;
+    if (VoxelCollision::Overlaps(world, standing, m_Config.HalfExtents))
+        return;
+
+    m_Position = standing;
+    m_Crouched = false;
+}
+
 void CharacterController::Teleport(const glm::vec3& position)
 {
     m_Position = position;
     m_PreviousPosition = position;
+    m_PreviousEyeOffset = EyeOffset();
 }
 
 void CharacterController::SetState(const glm::vec3& position,
-    const glm::vec3& previousPosition, float verticalVelocity, bool grounded)
+    const glm::vec3& previousPosition, float verticalVelocity, bool grounded, bool crouched)
 {
     m_Position = position;
     m_PreviousPosition = previousPosition;
     m_VerticalVelocity = verticalVelocity;
     m_Grounded = grounded;
+    m_Crouched = crouched;
+    m_PreviousEyeOffset = EyeOffset();
 }
 
 glm::vec3 CharacterController::InterpolatedPosition(float alpha) const
@@ -164,15 +198,18 @@ glm::vec3 CharacterController::InterpolatedPosition(float alpha) const
 
 glm::vec3 CharacterController::InterpolatedEye(float alpha) const
 {
-    return InterpolatedPosition(alpha) +
-        glm::vec3(0.0f, m_Config.EyeOffset, 0.0f);
+    //Each end with its own eye height: a crouch moves the box's centre and the
+    //eye's offset from it in the same step, and mixing the eyes rather than
+    //the centres is what keeps the view from jumping.
+    const glm::vec3 previousEye = m_PreviousPosition + glm::vec3(0.0f, m_PreviousEyeOffset, 0.0f);
+    return glm::mix(previousEye, Eye(), alpha);
 }
 
 bool CharacterController::IsEyeInFluid(
     const World& world, const glm::vec3& position) const
 {
     const glm::vec3 eye =
-        position + glm::vec3(0.0f, m_Config.EyeOffset, 0.0f);
+        position + glm::vec3(0.0f, EyeOffset(), 0.0f);
 
     return world.IsBlockFluid(
         static_cast<int>(std::floor(eye.x)),

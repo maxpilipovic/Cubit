@@ -115,7 +115,8 @@ void MatchClient::Step(double seconds)
         if (m_Match.HasPlayer(m_LocalPlayer))
         {
             CharacterController& self = m_Match.PlayerForWrite(m_LocalPlayer);
-            self.SetState(self.Position(), self.Position(), self.VerticalVelocity(), self.Grounded());
+            self.SetState(self.Position(), self.Position(), self.VerticalVelocity(), self.Grounded(),
+                self.Crouched());
         }
 
         //The server's clock did not stop, so the one remote players are drawn
@@ -346,10 +347,11 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         const glm::vec3 previous = m_Match.Player(entry.Player).Position();
 
         m_Match.PlayerForWrite(entry.Player).SetState(
-            entry.Position, previous, entry.VerticalVelocity, entry.Grounded);
+            entry.Position, previous, entry.VerticalVelocity, entry.Grounded, entry.Crouched);
 
         std::deque<RemoteSample>& samples = m_RemoteSamples[entry.Player];
-        samples.push_back(RemoteSample{ snapshot.Tick, entry.Position, entry.Yaw, entry.Pitch });
+        samples.push_back(RemoteSample{ snapshot.Tick, entry.Position, entry.Yaw, entry.Pitch,
+            entry.Crouched });
 
         if (samples.size() > MaxRemoteSamples)
             samples.pop_front();
@@ -381,8 +383,9 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
     const glm::vec3 beforePrevious = character.PreviousPosition();
     const float beforeVelocity = character.VerticalVelocity();
     const bool beforeGrounded = character.Grounded();
+    const bool beforeCrouched = character.Crouched();
 
-    //All four, through SetState rather than Teleport. Teleport writes both
+    //All five, through SetState rather than Teleport. Teleport writes both
     //positions together, which would flatten the previous position and destroy
     //exactly the interpolation a correction exists to hide.
     //
@@ -415,7 +418,8 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
         world.SetBlockUnmarked(at.x, at.y, at.z, it->Beneath);
     }
 
-    character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded);
+    character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded,
+        entry.Crouched);
 
     //Everything the server has confirmed is history now.
     while (!m_Unacked.empty() && m_Unacked.front().Tick <= entry.LastInputTick)
@@ -450,11 +454,11 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
 
     if (error <= CorrectionThreshold)
     {
-        //Thrown away WHOLE - position, previous position, velocity and grounded
+        //Thrown away WHOLE - position, previous position, velocity, grounded and crouched
         //together. Keeping the predicted position while accepting the
         //authoritative velocity would leave the character in a state neither
         //machine ever simulated, and the next step would compound it.
-        character.SetState(before, beforePrevious, beforeVelocity, beforeGrounded);
+        character.SetState(before, beforePrevious, beforeVelocity, beforeGrounded, beforeCrouched);
         return;
     }
 
@@ -674,13 +678,13 @@ MatchClient::RemotePose MatchClient::PoseOf(PlayerId player, float alpha) const
     //and being wrong means taking it back.
     const RemoteSample& newest = samples.back();
     if (target >= static_cast<double>(newest.ServerTick))
-        return RemotePose{ newest.Position, newest.Yaw, newest.Pitch };
+        return RemotePose{ newest.Position, newest.Yaw, newest.Pitch, newest.Crouched ? 1.0f : 0.0f };
 
     //Older than anything kept: the connection has been quiet for longer than
     //the ring is deep. Hold the oldest for the same reason.
     const RemoteSample& oldest = samples.front();
     if (target <= static_cast<double>(oldest.ServerTick))
-        return RemotePose{ oldest.Position, oldest.Yaw, oldest.Pitch };
+        return RemotePose{ oldest.Position, oldest.Yaw, oldest.Pitch, oldest.Crouched ? 1.0f : 0.0f };
 
     for (std::size_t i = 1; i < samples.size(); ++i)
     {
@@ -704,10 +708,11 @@ MatchClient::RemotePose MatchClient::PoseOf(PlayerId player, float alpha) const
         //to see it working. Fix this when something first draws a facing.
         pose.Yaw = glm::mix(previous.Yaw, next.Yaw, t);
         pose.Pitch = glm::mix(previous.Pitch, next.Pitch, t);
+        pose.Crouch = glm::mix(previous.Crouched ? 1.0f : 0.0f, next.Crouched ? 1.0f : 0.0f, t);
         return pose;
     }
 
-    return RemotePose{ newest.Position, newest.Yaw, newest.Pitch };
+    return RemotePose{ newest.Position, newest.Yaw, newest.Pitch, newest.Crouched ? 1.0f : 0.0f };
 }
 
 void MatchClient::RecordShownEdit(bool local, std::vector<BlockEdit> edits)

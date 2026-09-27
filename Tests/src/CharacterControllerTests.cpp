@@ -509,7 +509,7 @@ TEST_CASE("SetState restores every field a step depends on")
     CharacterController character;
 
     character.SetState(
-        glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 1.0f, 3.0f), -4.5f, true);
+        glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 1.0f, 3.0f), -4.5f, true, true);
 
     CHECK(character.Position() == glm::vec3(1.0f, 2.0f, 3.0f));
     CHECK(character.PreviousPosition() == glm::vec3(1.0f, 1.0f, 3.0f));
@@ -521,7 +521,7 @@ TEST_CASE("SetState preserves the gap Teleport destroys")
 {
     CharacterController character;
 
-    character.SetState(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 4.0f, 0.0f), 0.0f, false);
+    character.SetState(glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 4.0f, 0.0f), 0.0f, false, false);
     const glm::vec3 halfway = character.InterpolatedPosition(0.5f);
 
     CHECK(halfway.y == doctest::Approx(4.5f));
@@ -654,4 +654,128 @@ TEST_CASE("A character in the air does not step up the ledge it is falling again
     CHECK_FALSE(character.Grounded());
     CHECK(character.Position().y < 2.5f);
     CHECK(character.Position().x < 20.0f);
+}
+
+namespace
+{
+    CharacterInput Crouching(const glm::vec2& move = glm::vec2(0.0f), bool jump = false)
+    {
+        CharacterInput input;
+        input.Move = move;
+        input.Crouch = true;
+        input.Jump = jump;
+        return input;
+    }
+
+    float Feet(const CharacterController& character)
+    {
+        return character.Position().y - character.HalfExtents().y;
+    }
+
+    float Head(const CharacterController& character)
+    {
+        return character.Position().y + character.HalfExtents().y;
+    }
+}
+
+TEST_CASE("SetState restores crouching, which the next step reads")
+{
+    CharacterController character;
+    character.SetState(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 1.0f, 3.0f), -4.5f, true, true);
+    CHECK(character.Crouched());
+}
+
+TEST_CASE("Crouching lowers the head and the eye and keeps the feet where they were")
+{
+    const World world = FlatWorld();
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 3.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    const float feet = Feet(character);
+    const float eye = character.Eye().y;
+    const CharacterConfig& config = character.Config();
+
+    CHECK_FALSE(character.Crouched());
+    CHECK(character.HalfExtents() == config.HalfExtents);
+
+    character.Step(world, Crouching(), Step);
+
+    CHECK(character.Crouched());
+    CHECK(character.HalfExtents().y == config.CrouchHalfHeight);
+    CHECK(character.HalfExtents().x == config.HalfExtents.x);
+    CHECK(Feet(character) == doctest::Approx(feet));
+    CHECK(character.Eye().y < eye);
+    CHECK(character.Eye().y == doctest::Approx(feet + config.CrouchHalfHeight + config.CrouchEyeOffset));
+    CHECK(character.Grounded());
+}
+
+TEST_CASE("A crouched character walks at crouch speed")
+{
+    const World world = FlatWorld();
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 3.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    const float startX = character.Position().x;
+    for (int i = 0; i < 60; ++i)
+        character.Step(world, Crouching(glm::vec2(0.0f, 1.0f)), Step);
+
+    CHECK(character.Position().x - startX ==
+        doctest::Approx(character.Config().CrouchSpeed).epsilon(0.02));
+}
+
+TEST_CASE("Letting go of crouch stands back up when there is room")
+{
+    const World world = FlatWorld();
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 3.0f, 16.0f));
+    SettleOnGround(character, world);
+    const float feet = Feet(character);
+
+    character.Step(world, Crouching(), Step);
+    REQUIRE(character.Crouched());
+
+    character.Step(world, CharacterInput{}, Step);
+    CHECK_FALSE(character.Crouched());
+    CHECK(character.HalfExtents() == character.Config().HalfExtents);
+    CHECK(Feet(character) == doctest::Approx(feet));
+}
+
+TEST_CASE("A crouched character with no headroom stays crouched until there is some")
+{
+    //Floor top at y = 1 and a ceiling whose underside is at y = 3: a gap of
+    //two blocks, which a standing character fits. A crouch-jump lifts the
+    //feet to where the crouched box still fits but a standing one would put
+    //its head into the ceiling - so letting go of crouch there must not.
+    World world = FlatWorld();
+    for (int z = 14; z <= 18; ++z)
+        for (int x = 14; x <= 18; ++x)
+            world.SetBlock(x, 3, z, BlockId{ 1 });
+
+    CharacterController character;
+    character.Teleport(glm::vec3(16.0f, 2.0f, 16.0f));
+    SettleOnGround(character, world);
+
+    character.Step(world, Crouching(), Step);
+    character.Step(world, Crouching(glm::vec2(0.0f), true), Step);
+
+    //Up until the crouched head is within a standing box's extra height of
+    //the ceiling.
+    const float extra = 2.0f * (character.Config().HalfExtents.y - character.Config().CrouchHalfHeight);
+    int steps = 0;
+    while (Head(character) + extra <= 3.0f && steps++ < 60)
+        character.Step(world, Crouching(), Step);
+    REQUIRE(Head(character) + extra > 3.0f);
+
+    //Released under the ceiling: still crouched, and nothing inside it.
+    character.Step(world, CharacterInput{}, Step);
+    CHECK(character.Crouched());
+    CHECK(Head(character) <= 3.0f + 1e-4f);
+
+    //Once landed there is room, and the same released input stands.
+    for (int i = 0; i < 120; ++i)
+        character.Step(world, CharacterInput{}, Step);
+    CHECK_FALSE(character.Crouched());
+    CHECK(Head(character) <= 3.0f + 1e-4f);
 }

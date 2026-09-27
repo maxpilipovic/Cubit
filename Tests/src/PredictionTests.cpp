@@ -104,7 +104,7 @@ TEST_CASE("Replaying inputs onto a stale state is simulating them in the first p
 
     //The client's picture: the authoritative state, plus everything above it.
     replayed.PlayerForWrite(player).SetState(authoritativePosition, authoritativePrevious,
-        authoritativeVelocity, authoritativeGrounded);
+        authoritativeVelocity, authoritativeGrounded, false);
 
     for (int tick = Authoritative + 1; tick <= Total; ++tick)
         replayed.StepPlayer(player, InputForTick(tick), FrameClock::FixedStepSeconds);
@@ -139,9 +139,9 @@ TEST_CASE("Grounded is part of the state a replay needs, not decoration")
     REQUIRE(settled.Grounded());
 
     withFlag.PlayerForWrite(player).SetState(settled.Position(), settled.PreviousPosition(),
-        settled.VerticalVelocity(), true);
+        settled.VerticalVelocity(), true, false);
     withoutFlag.PlayerForWrite(player).SetState(settled.Position(), settled.PreviousPosition(),
-        settled.VerticalVelocity(), false);
+        settled.VerticalVelocity(), false, false);
 
     CharacterInput jump;
     jump.Jump = true;

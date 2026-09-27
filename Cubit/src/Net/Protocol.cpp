@@ -4,6 +4,15 @@
 
 namespace
 {
+    //The input's flag byte, which was the Jump bool before version 7 - bit 0
+    //is still jump, so the byte means the same for everything it meant then.
+    constexpr std::uint8_t InputJumpBit = 1u << 0;
+    constexpr std::uint8_t InputCrouchBit = 1u << 1;
+
+    //The snapshot entry's flag byte, likewise the Grounded bool before 7.
+    constexpr std::uint8_t SnapshotGroundedBit = 1u << 0;
+    constexpr std::uint8_t SnapshotCrouchedBit = 1u << 1;
+
     //Bytes each entry costs on the wire. Used to reject an absurd count before
     //reserving for it, which is what stops a tiny hostile packet claiming a
     //huge collection from becoming a denial of service.
@@ -92,7 +101,8 @@ std::vector<std::uint8_t> Encode(const InputMessage& message)
         writer.F32(input.Move.y);
         writer.F32(input.Yaw);
         writer.F32(input.Pitch);
-        writer.Bool(input.Jump);
+        writer.U8(static_cast<std::uint8_t>(
+            (input.Jump ? InputJumpBit : 0u) | (input.Crouch ? InputCrouchBit : 0u)));
 
         const bool hasEdit = i < message.Edits.size() && message.Edits[i].has_value();
         writer.Bool(hasEdit);
@@ -117,7 +127,8 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
         writer.F32(player.Yaw);
         writer.F32(player.Pitch);
         writer.F32(player.VerticalVelocity);
-        writer.Bool(player.Grounded);
+        writer.U8(static_cast<std::uint8_t>(
+            (player.Grounded ? SnapshotGroundedBit : 0u) | (player.Crouched ? SnapshotCrouchedBit : 0u)));
         writer.U64(player.LastInputTick);
         writer.U8(player.Health);
         writer.U8(player.SpareInputs);
@@ -268,7 +279,9 @@ bool Decode(std::span<const std::uint8_t> bytes, InputMessage& out)
         input.Move.y = reader.F32();
         input.Yaw = reader.F32();
         input.Pitch = reader.F32();
-        input.Jump = reader.Bool();
+        const std::uint8_t flags = reader.U8();
+        input.Jump = (flags & InputJumpBit) != 0;
+        input.Crouch = (flags & InputCrouchBit) != 0;
         message.Inputs.push_back(input);
 
         std::optional<BlockEdit> edit;
@@ -326,7 +339,9 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
         player.Yaw = reader.F32();
         player.Pitch = reader.F32();
         player.VerticalVelocity = reader.F32();
-        player.Grounded = reader.Bool();
+        const std::uint8_t flags = reader.U8();
+        player.Grounded = (flags & SnapshotGroundedBit) != 0;
+        player.Crouched = (flags & SnapshotCrouchedBit) != 0;
         player.LastInputTick = reader.U64();
         player.Health = reader.U8();
         player.SpareInputs = reader.U8();

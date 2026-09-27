@@ -4,16 +4,17 @@
 
 namespace
 {
-    Aabb BoxAround(const glm::vec3& position, const glm::vec3& halfExtents)
+    Aabb BoxOf(const glm::vec3& position, const glm::vec3& halfExtents)
     {
         return Aabb{ position - halfExtents, position + halfExtents };
     }
 }
 
-void HitboxHistory::Record(PlayerId player, std::uint64_t tick, const glm::vec3& position)
+void HitboxHistory::Record(PlayerId player, std::uint64_t tick, const glm::vec3& position,
+    const glm::vec3& halfExtents)
 {
     std::deque<Sample>& samples = m_Samples[player];
-    samples.push_back(Sample{ tick, position });
+    samples.push_back(Sample{ tick, position, halfExtents });
 
     if (samples.size() > MaxHistorySamples)
         samples.pop_front();
@@ -24,8 +25,7 @@ void HitboxHistory::Forget(PlayerId player)
     m_Samples.erase(player);
 }
 
-bool HitboxHistory::BoxAt(PlayerId player, double instant, const glm::vec3& halfExtents,
-    Aabb& out) const
+bool HitboxHistory::BoxAt(PlayerId player, double instant, Aabb& out) const
 {
     const auto found = m_Samples.find(player);
     if (found == m_Samples.end() || found->second.empty())
@@ -41,7 +41,7 @@ bool HitboxHistory::BoxAt(PlayerId player, double instant, const glm::vec3& half
     const Sample& newest = samples.back();
     if (instant >= static_cast<double>(newest.Tick))
     {
-        out = BoxAround(newest.Position, halfExtents);
+        out = BoxOf(newest.Position, newest.HalfExtents);
         return true;
     }
 
@@ -58,11 +58,15 @@ bool HitboxHistory::BoxAt(PlayerId player, double instant, const glm::vec3& half
             ? 0.0f
             : static_cast<float>((instant - static_cast<double>(previous.Tick)) / span);
 
-        out = BoxAround(glm::mix(previous.Position, next.Position, t), halfExtents);
+        //Corners, not a centre and a size: across a crouch the box shrinks
+        //from the top while the feet stay put, which lerping the corners keeps.
+        const Aabb from = BoxOf(previous.Position, previous.HalfExtents);
+        const Aabb to = BoxOf(next.Position, next.HalfExtents);
+        out = Aabb{ glm::mix(from.Min, to.Min, t), glm::mix(from.Max, to.Max, t) };
         return true;
     }
 
-    out = BoxAround(newest.Position, halfExtents);
+    out = BoxOf(newest.Position, newest.HalfExtents);
     return true;
 }
 

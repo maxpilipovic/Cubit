@@ -44,6 +44,10 @@ struct CharacterInput
     //Held, not tapped. Jumping and swimming up are the same request; which one
     //happens depends on whether the character is in water.
     bool Jump = false;
+
+    //Held, not tapped. A request, not a state: letting go stands the character
+    //up only once there is room over its head.
+    bool Crouch = false;
 };
 
 //How a character moves. One instance today, on the player.
@@ -61,6 +65,16 @@ struct CharacterConfig
     float EyeOffset = 0.7f;
 
     float WalkSpeed = 5.0f;
+
+    //Crouched, the box is 1.2 tall rather than 1.8, shrunk from the top so the
+    //feet stay where they were, and the eye sits the same 0.2 below the top
+    //of the box it does standing. Not a way under anything: floors and
+    //ceilings are whole blocks, so any gap that fits 1.2 fits 1.8. It is a
+    //smaller target and a slower walk.
+    float CrouchHalfHeight = 0.6f;
+    float CrouchEyeOffset = 0.4f;
+    float CrouchSpeed = 2.5f;
+
     float JumpSpeed = 9.0f;
     float Gravity = 24.0f;
 
@@ -112,8 +126,10 @@ public:
     //is meant to hide. Grounded is included because Step consults the previous
     //step's value when deciding whether a jump fires, so a replayed jump on
     //the first tick after a correction diverges without it.
+    //Crouched is included for the same reason: it is the size of the box the
+    //next step collides with.
     void SetState(const glm::vec3& position, const glm::vec3& previousPosition,
-        float verticalVelocity, bool grounded);
+        float verticalVelocity, bool grounded, bool crouched);
 
     //Centre of the collision box at the end of the last step.
     const glm::vec3& Position() const { return m_Position; }
@@ -133,6 +149,29 @@ public:
 
     //Set when the last step ended with downward motion stopped.
     bool Grounded() const { return m_Grounded; }
+
+    //Set while the box is the crouched one - which can outlast the request,
+    //when there is no room to stand.
+    bool Crouched() const { return m_Crouched; }
+
+    //The box as it is now, crouched or standing. Everything that asks how big
+    //this character is - collision, a shot, a placed block - asks this, not
+    //Config().HalfExtents, which is only the standing box.
+    glm::vec3 HalfExtents() const
+    {
+        return m_Crouched
+            ? glm::vec3(m_Config.HalfExtents.x, m_Config.CrouchHalfHeight, m_Config.HalfExtents.z)
+            : m_Config.HalfExtents;
+    }
+
+    //How far above the centre of the box the eye is, crouched or standing.
+    float EyeOffset() const
+    {
+        return m_Crouched ? m_Config.CrouchEyeOffset : m_Config.EyeOffset;
+    }
+
+    //Where the eye is at the end of the last step.
+    glm::vec3 Eye() const { return m_Position + glm::vec3(0.0f, EyeOffset(), 0.0f); }
 
     //Set when any part of the box overlapped a fluid block during the last
     //step. Feet in the river counts.
@@ -166,8 +205,17 @@ private:
     glm::vec3 m_Position{ 0.0f };
     glm::vec3 m_PreviousPosition{ 0.0f };
 
+    //Resizes the box for this step's request, keeping the feet where they are.
+    //Standing up is refused while the taller box would overlap a solid block.
+    void ApplyCrouch(const World& world, bool wanted);
+
     float m_VerticalVelocity = 0.0f;
     bool m_Grounded = false;
+    bool m_Crouched = false;
+
+    //The eye height the previous position was taken at, so the eye
+    //interpolates smoothly through a crouch rather than jumping at the step.
+    float m_PreviousEyeOffset = m_Config.EyeOffset;
     bool m_BodyInFluid = false;
     bool m_EyeInFluid = false;
 };

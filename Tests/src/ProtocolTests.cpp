@@ -179,7 +179,7 @@ TEST_CASE("A two-player snapshot is 85 bytes")
     //stage's per-client bandwidth is quoted from. 1 id + 8 tick + 2 count +
     //2 x 37 = 85. The per-entry width grew from 35 to 36 in protocol version 3,
     //when PlayerSnapshot gained Health, and to 37 in version 5, when it gained
-    //SpareInputs.
+    //SpareInputs. Version 7's crouch bit left it alone: it shares Grounded's byte.
     CHECK(Encode(TwoPlayerSnapshot()).size() == 85);
 }
 
@@ -562,5 +562,59 @@ TEST_CASE("An edit result round-trips, accepted and refused")
         CHECK(received.Accepted == accepted);
         CHECK(received.Edit.Position == sent.Edit.Position);
         CHECK(received.Edit.Block == sent.Edit.Block);
+    }
+}
+
+TEST_CASE("Jump and crouch ride one input byte, every combination apart")
+{
+    //Four inputs, one per combination, so a decoder that read the wrong bit
+    //for either flag - or read the whole byte as a bool - disagrees somewhere.
+    InputMessage sent;
+    sent.FirstTick = 10;
+    for (int i = 0; i < 4; ++i)
+    {
+        CharacterInput input;
+        input.Jump = (i & 1) != 0;
+        input.Crouch = (i & 2) != 0;
+        sent.Inputs.push_back(input);
+    }
+
+    InputMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+    REQUIRE(received.Inputs.size() == 4);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        CAPTURE(i);
+        CHECK(received.Inputs[i].Jump == sent.Inputs[i].Jump);
+        CHECK(received.Inputs[i].Crouch == sent.Inputs[i].Crouch);
+    }
+}
+
+TEST_CASE("Grounded and crouched ride one snapshot byte, every combination apart")
+{
+    SnapshotMessage sent;
+    sent.Tick = 5;
+    for (int i = 0; i < 4; ++i)
+    {
+        PlayerSnapshot player;
+        player.Player = static_cast<PlayerId>(i + 1);
+        player.Grounded = (i & 1) != 0;
+        player.Crouched = (i & 2) != 0;
+        sent.Players.push_back(player);
+    }
+
+    //No bigger than before: the crouch bit shares Grounded's byte.
+    CHECK(Encode(sent).size() == Encode(SnapshotMessage{ 5, {} }).size() + 4 * 37);
+
+    SnapshotMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+    REQUIRE(received.Players.size() == 4);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        CAPTURE(i);
+        CHECK(received.Players[i].Grounded == sent.Players[i].Grounded);
+        CHECK(received.Players[i].Crouched == sent.Players[i].Crouched);
     }
 }
