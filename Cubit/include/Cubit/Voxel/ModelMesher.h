@@ -13,6 +13,11 @@ struct VoxModel;
 //rather than as terrain. What the two share is the face table and the shading,
 //which live in VoxelFaces.h so they cannot drift apart.
 //
+//A vertex's colour is NOT a finished shade, unlike a chunk vertex's: rgb is the
+//palette colour and alpha is the face shade times ambient occlusion, raw. The
+//light floor is applied by WorldScene::DrawMesh's shader after it multiplies by
+//how lit the model's spot is, so a model is floored once, as terrain is.
+//
 //Vertices come out in model voxel units with the model's minimum corner at the
 //origin. Scaling a model to the size its owner should be, and putting it where
 //that owner stands, are the caller's business.

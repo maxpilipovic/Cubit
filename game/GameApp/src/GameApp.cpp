@@ -745,35 +745,21 @@ private:
         }
     }
 
-    //How lit a model standing here should be: the world's sky light where its
-    //middle is, with a floor so someone in a sealed tunnel is dim rather than
-    //invisible. One sample for the whole model - it is a person, not terrain,
+    //How lit a model standing here is: the world's sky light where its middle
+    //is, 0..1. One sample for the whole model - it is a person, not terrain,
     //and re-shading its vertices every frame it moves would cost far more than
     //this is worth.
     //
-    //This floor is not the floor ChunkMesher::LightFloor documents, and a model
-    //in the dark is darker than the wall behind it. A chunk vertex is floored
-    //once, on the finished product of face shade, AO and light. A model is
-    //floored twice on two separate terms: ModelMesher bakes
-    //LightFloor + 0.85 * (shade * AO) at mesh time, and this floors the sky
-    //term again, so what reaches the screen is their product. In a sealed
-    //tunnel that is 0.881 * 0.15 = 0.132 on an open front face and
-    //0.4305 * 0.15 = 0.065 on a fully occluded bottom one, against the 0.15 a
-    //chunk face beside it is guaranteed. At full sky light the two agree
-    //exactly, which is why this is only visible in the dark.
-    //
-    //Not fixed here because no per-draw multiplier can floor a product whose
-    //other half varies per vertex. The fix is for the model to bake raw
-    //shade * AO and the shader to apply the floor after multiplying by light,
-    //which needs the shader to know a model vertex from a chunk one. Written up
-    //as B3c in docs/engine-roadmap.md.
+    //No floor here. WorldScene::DrawMesh floors the product of this and the
+    //model's own baked shading, once, so someone in a sealed tunnel comes out
+    //at exactly the 0.15 the wall beside them does. Flooring this as well is
+    //what B3c fixed: the two floors multiplied, to 0.132 on an open face and
+    //0.065 on an occluded one.
     float BrightnessAt(const glm::vec3& position) const
     {
         const glm::ivec3 cell = glm::ivec3(glm::floor(position));
-        const float light = static_cast<float>(World_().GetSkyLight(cell.x, cell.y, cell.z))
+        return static_cast<float>(World_().GetSkyLight(cell.x, cell.y, cell.z))
             / static_cast<float>(SkyLight::Max);
-
-        return ChunkMesher::LightFloor + (1.0f - ChunkMesher::LightFloor) * light;
     }
 
     //What the player is asking for this instant: the movement keys held, the

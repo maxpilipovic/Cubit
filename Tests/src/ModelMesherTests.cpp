@@ -2,9 +2,11 @@
 
 #include "Cubit/Voxel/ModelMesher.h"
 #include "Cubit/Voxel/VoxLoader.h"
+#include "Cubit/Voxel/ChunkMesher.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 
 namespace
 {
@@ -109,13 +111,79 @@ TEST_CASE("Ambient occlusion darkens a corner its neighbours enclose")
     Set(enclosed, 2, 2, 1, 1);
     Set(enclosed, 1, 2, 2, 1);
 
+    //Shading rides in alpha; rgb is the palette colour, the same on every corner.
     float darkestOpen = 2.0f;
     for (const VoxelVertex& vertex : ModelMesher::Build(open).Vertices)
-        darkestOpen = std::min(darkestOpen, vertex.Color.r);
+        darkestOpen = std::min(darkestOpen, vertex.Color.a);
 
     float darkestEnclosed = 2.0f;
     for (const VoxelVertex& vertex : ModelMesher::Build(enclosed).Vertices)
-        darkestEnclosed = std::min(darkestEnclosed, vertex.Color.r);
+        darkestEnclosed = std::min(darkestEnclosed, vertex.Color.a);
 
     CHECK(darkestEnclosed < darkestOpen);
+}
+
+TEST_CASE("A model vertex carries its palette colour in rgb and its raw shading in alpha")
+{
+    //The scene applies the light floor AFTER multiplying by how lit the model's
+    //spot is, which it can only do if the colour and the shading arrive apart.
+    //A floor baked in here as well would be the second floor B3c removed.
+    VoxModel model = EmptyModel(1, 1, 1);
+    model.Colors[1] = glm::vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    Set(model, 0, 0, 0, 1);
+
+    float brightest = 0.0f;
+    float darkest = 2.0f;
+
+    for (const VoxelVertex& vertex : ModelMesher::Build(model).Vertices)
+    {
+        CHECK(glm::vec3(vertex.Color) == glm::vec3(0.8f, 0.4f, 0.2f));
+        brightest = std::max(brightest, vertex.Color.a);
+        darkest = std::min(darkest, vertex.Color.a);
+    }
+
+    //A lone voxel's top face is open on every corner and faces the sky.
+    CHECK(brightest == 1.0f);
+
+    //Raw, not compressed into [LightFloor, 1]: the darkest face of a lone
+    //voxel is its bottom, whose face shade is 0.60 with every corner open.
+    //Floored, it would read 0.15 + 0.85 * 0.60 = 0.66.
+    CHECK(darkest == doctest::Approx(0.60f * ChunkMesher::AoShade[3]));
+}
+
+TEST_CASE("Lit by the scene, a model is floored once, exactly as a chunk face is")
+{
+    //What WorldScene's shader does with a model vertex: floor the product of
+    //the baked shading and the light where the model stands. Spelled out here
+    //as the contract, because GLSL cannot be called from a test.
+    auto lit = [](const VoxelVertex& vertex, float light)
+    {
+        return glm::vec3(vertex.Color) *
+            (ChunkMesher::LightFloor + (1.0f - ChunkMesher::LightFloor) * vertex.Color.a * light);
+    };
+
+    VoxModel model = EmptyModel(3, 3, 3);
+    Set(model, 1, 1, 1, 1);
+    Set(model, 2, 2, 1, 1);
+    Set(model, 1, 2, 2, 1);
+
+    const MeshGeometry mesh = ModelMesher::Build(model);
+
+    //In a sealed tunnel every face - open front, occluded bottom - comes out at
+    //exactly the floor a chunk face beside it is guaranteed. Before B3c the two
+    //floors multiplied, and these came out at 0.132 and 0.065.
+    for (const VoxelVertex& vertex : mesh.Vertices)
+        CHECK(lit(vertex, 0.0f).r == doctest::Approx(ChunkMesher::LightFloor));
+
+    //In full light nothing is lost: a model vertex comes out at the same
+    //value the old bake did, which is what a chunk vertex with this shading
+    //and full light would be.
+    for (const VoxelVertex& vertex : mesh.Vertices)
+        CHECK(lit(vertex, 1.0f).r == doctest::Approx(
+            ChunkMesher::LightFloor + (1.0f - ChunkMesher::LightFloor) * vertex.Color.a));
+
+    //And light in between never drops a face below the floor.
+    for (float light : { 0.1f, 0.5f, 0.9f })
+        for (const VoxelVertex& vertex : mesh.Vertices)
+            CHECK(lit(vertex, light).r >= ChunkMesher::LightFloor - 1e-6f);
 }

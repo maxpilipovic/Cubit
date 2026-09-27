@@ -4,6 +4,7 @@
 
 #include "Cubit/Renderer/Mesh.h"
 #include "Cubit/Renderer/Renderer.h"
+#include "Cubit/Voxel/ChunkMesher.h"
 
 #include "Core/CoreLogger.h"
 
@@ -36,6 +37,14 @@ WorldScene::WorldScene()
         uniform float u_FogDensity;
         uniform vec3 u_CameraPos;
         uniform float u_Brightness;
+        uniform float u_LightFloor;
+
+        // 0 for chunks, whose vertex colour is already the finished shade
+        // with alpha as opacity. 1 for a ModelMesher model, whose rgb is the
+        // palette colour and whose alpha is raw face shade times AO: the
+        // floor goes on after the light is multiplied in, once, which is
+        // what ChunkMesher does for a chunk vertex at mesh time.
+        uniform float u_ModelLighting;
 
         void main()
         {
@@ -44,10 +53,16 @@ WorldScene::WorldScene()
             // this a mix against nothing rather than a branch.
             float d = length(v_WorldPos - u_CameraPos);
             float f = 1.0 - exp(-u_FogDensity * d);
-            // Brightness applies before the fog: fog is the colour of the
-            // air between camera and surface, so a dark model fades to the
-            // same fog colour a bright one does.
-            color = vec4(mix(v_Color.rgb * u_Brightness, u_FogColor, f), v_Color.a);
+
+            float modelShade = u_LightFloor
+                + (1.0 - u_LightFloor) * v_Color.a * u_Brightness;
+            vec3 lit = mix(v_Color.rgb * u_Brightness, v_Color.rgb * modelShade, u_ModelLighting);
+            float alpha = mix(v_Color.a, 1.0, u_ModelLighting);
+
+            // Lighting applies before the fog: fog is the colour of the air
+            // between camera and surface, so a dark model fades to the same
+            // fog colour a bright one does.
+            color = vec4(mix(lit, u_FogColor, f), alpha);
         }
     )";
 
@@ -74,6 +89,8 @@ void WorldScene::Render(const PerspectiveCamera& camera, const glm::vec3& worldO
     m_Shader->SetFloat3("u_CameraPos", camera.GetPosition());
     m_Shader->SetFloat("u_FogDensity", fogDensity);
     m_Shader->SetFloat("u_Brightness", 1.0f);
+    m_Shader->SetFloat("u_LightFloor", ChunkMesher::LightFloor);
+    m_Shader->SetFloat("u_ModelLighting", 0.0f);
 
     m_Renderer.Render(
         *m_Shader,
@@ -98,5 +115,11 @@ void WorldScene::DrawMesh(const Mesh& mesh, const glm::mat4& transform, float br
 
     m_Shader->Bind();
     m_Shader->SetFloat("u_Brightness", brightness);
+    m_Shader->SetFloat("u_ModelLighting", 1.0f);
     Renderer::Submit(mesh.Array(), mesh.Indices(), *m_Shader, transform);
+
+    //Put back, so nothing drawn with this shader after a model - a later
+    //chunk pass in the same frame - is lit as one.
+    m_Shader->SetFloat("u_Brightness", 1.0f);
+    m_Shader->SetFloat("u_ModelLighting", 0.0f);
 }

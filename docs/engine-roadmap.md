@@ -379,7 +379,18 @@ them. Every item was checked in the code unless it says otherwise. References ar
 - [ ] **B3b. A first-person held tool.** B3 named this and did not deliver it. Nothing
   draws anything in the local player's own view beyond the crosshair outline; a held
   tool needs its own model and its own placement in view space, not world space.
-- [ ] **B3c. One floor on model lighting, not two.** B3 left model shading floored on
+- [x] **B3c. One floor on model lighting, not two.** **Done 2026-09-27.** `ModelMesher`
+  now bakes the palette colour into rgb and the raw face shade times AO into alpha, with
+  no floor; models are opaque, so alpha was free. `WorldScene`'s shader takes a
+  `u_ModelLighting` switch that `DrawMesh` turns on (and back off) and a `u_LightFloor`
+  fed from `ChunkMesher::LightFloor`, so the number lives in one place. It floors the
+  product of the baked shading and the per-draw light once, as a chunk vertex is floored.
+  `BrightnessAt` returns raw sky light. Two engine cases pin the bake (rgb is the palette,
+  alpha is raw: a lone voxel's bottom reads 0.60, not the floored 0.66) and the contract
+  (at zero light every model face comes out at exactly 0.15; in full light nothing
+  changes from before). Checked by running, with a temporary probe drawing the player
+  model at light 1 and 0 side by side: the lit model is unchanged, and the dark one is
+  flat at the floor and opaque. The original entry follows. B3 left model shading floored on
   the wrong term. A chunk vertex is floored once, on the finished product of face shade,
   AO and light, which is what `ChunkMesher.h:69-73` documents. A model is floored twice
   on two terms that are then multiplied: `ModelMesher` bakes

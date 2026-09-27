@@ -53,9 +53,11 @@ public:
 
     //Draws one standalone mesh, such as a player model or a held tool.
     //`transform` carries the mesh's world offset the same way the chunk
-    //draw's does; `brightness` is how lit the thing is where it stands - the
-    //scene does not work that out, because the scene does not know what a
-    //model is. Uses whatever view-projection was last set on the renderer, so
+    //draw's does; `brightness` is how lit the thing is where it stands, in
+    //0..1 with NO floor - the scene does not work that out, because the scene
+    //does not know what a model is. The mesh is ModelMesher's: rgb its colour,
+    //alpha its raw shading. The light floor goes on here, once, after the two
+    //are multiplied, the same floor a chunk face gets. Uses whatever view-projection was last set on the renderer, so
     //call it inside or after a Render in the same frame.
     //
     //The debug assert catches only the one case it can see: that no Render has

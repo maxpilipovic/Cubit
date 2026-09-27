@@ -58,19 +58,18 @@ namespace
 
         for (int i = 0; i < 4; ++i)
         {
-            //Light is 1.0 because a model is meshed as if fully lit: how bright
-            //it actually is depends on where it is standing, which is a per-draw
-            //value the scene supplies.
+            //The palette colour in rgb and the raw shading - face shade times
+            //AO - in alpha, with NO light floor. How lit a model is depends on
+            //where it stands, a per-draw value, and the floor belongs on the
+            //product of that and this shading, which only the shader has: it
+            //applies LightFloor once, after multiplying, exactly as a chunk
+            //vertex is floored once. Baking the floor here as well is how a
+            //model in the dark came out darker than the wall behind it (B3c).
             //
-            //The shading floor still applies at 1.0 - it is a floor on the
-            //finished shading, not on light. What it bakes is face shade times
-            //AO compressed into [LightFloor, 1]: only a fully open top face,
-            //whose shade and AO are both 1.0, comes out unchanged, while a fully
-            //open front face's 0.86 comes out as 0.15 + 0.85 * 0.86 = 0.881. The
-            //per-draw brightness then scales that baked result.
+            //Alpha is free to carry this because models are opaque.
             mesh.Vertices.push_back(
                 { glm::vec3(cell) + face.Corner[i],
-                  VoxelFaces::ShadeVertex(color, face.Shade, ao[i], 1.0f) });
+                  glm::vec4(glm::vec3(color), face.Shade * ChunkMesher::AoShade[ao[i]]) });
         }
 
         VoxelFaces::AddFaceIndices(mesh, ao);
