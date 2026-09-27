@@ -25,6 +25,7 @@ namespace CubitGame
         float FieldOfView = 60.0f;
         int WindowWidth = 1280;
         int WindowHeight = 720;
+        float MasterVolume = 0.8f;
 
         bool operator==(const GameSettings&) const = default;
     };
@@ -41,11 +42,13 @@ namespace CubitGame
     constexpr const char* FieldOfViewKey = "field_of_view";
     constexpr const char* WindowWidthKey = "window_width";
     constexpr const char* WindowHeightKey = "window_height";
+    constexpr const char* MasterVolumeKey = "master_volume";
 
     constexpr SettingRange MouseSensitivityRange{ 0.01f, 2.0f };
     constexpr SettingRange FieldOfViewRange{ 30.0f, 120.0f };
     constexpr SettingRange WindowWidthRange{ 640.0f, 7680.0f };
     constexpr SettingRange WindowHeightRange{ 360.0f, 4320.0f };
+    constexpr SettingRange MasterVolumeRange{ 0.0f, 1.0f };
 
     //What a missing settings file is written as. GameSettingsTests reads this
     //back through Apply and requires exactly GameSettings{} with no warnings,
@@ -64,14 +67,17 @@ namespace CubitGame
             "\n"
             "# Window size in pixels, from 640x360 up to 7680x4320.\n"
             "window_width = 1280\n"
-            "window_height = 720\n";
+            "window_height = 720\n"
+            "\n"
+            "# Loudness of everything the game plays. 0 is silent, 1 is full.\n"
+            "master_volume = 0.8\n";
     }
 
     //The flags that set a setting, gathered as settings-file text so they can
     //be applied on top of the file through the very same Apply - a flag then
     //passes exactly the checks the line it overrides would.
     //
-    //Here rather than in GameApp's main, which GameTests does not compile: four
+    //Here rather than in GameApp's main, which GameTests does not compile: five
     //near-identical lines are exactly the shape copy-paste gets wrong, and this
     //is the only place they can be tested. Flags that are not settings
     //(--connect, --port, --latency, --loss, --map) stay in main, which is the
@@ -89,6 +95,7 @@ namespace CubitGame
             { "--sensitivity", MouseSensitivityKey },
             { "--width", WindowWidthKey },
             { "--height", WindowHeightKey },
+            { "--volume", MasterVolumeKey },
         };
 
         std::string overrides;
@@ -202,10 +209,12 @@ namespace CubitGame
         Detail::Read(file, FieldOfViewKey, settings.FieldOfView, FieldOfViewRange, warnings);
         Detail::Read(file, WindowWidthKey, settings.WindowWidth, WindowWidthRange, warnings);
         Detail::Read(file, WindowHeightKey, settings.WindowHeight, WindowHeightRange, warnings);
+        Detail::Read(file, MasterVolumeKey, settings.MasterVolume, MasterVolumeRange, warnings);
 
         for (const std::string& key : file.Keys())
             if (key != MouseSensitivityKey && key != FieldOfViewKey &&
-                key != WindowWidthKey && key != WindowHeightKey)
+                key != WindowWidthKey && key != WindowHeightKey &&
+                key != MasterVolumeKey)
                 warnings.push_back("settings: unknown key '" + key + "' ignored");
     }
 
@@ -216,6 +225,7 @@ namespace CubitGame
         return "Settings: mouse sensitivity " + Detail::Text(settings.MouseSensitivity) +
             ", field of view " + Detail::Text(settings.FieldOfView) +
             ", window " + Detail::Text(settings.WindowWidth) + "x" +
-            Detail::Text(settings.WindowHeight);
+            Detail::Text(settings.WindowHeight) +
+            ", volume " + Detail::Text(settings.MasterVolume);
     }
 }

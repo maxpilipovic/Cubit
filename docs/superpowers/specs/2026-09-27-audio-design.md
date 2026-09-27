@@ -49,10 +49,15 @@ is no protocol change and nothing on the server.
   (`MatchServer::Broadcast`'s `except`), and B2's collapses arrive through it as
   multi-edit batches.
 
-**The application owns the audio, not `Application`.** `GameApplication` and the Sandbox
-each create an `AudioEngine`. `Application` does not, because tests construct
-applications and layers, and none of them should open a sound device. The server is not
-an `Application` and has no audio at all.
+**The layer that plays sound owns the audio, not `Application`.** The game's player
+layer and the Sandbox's layer each create an `AudioEngine`. `Application` does not,
+because tests construct applications and layers, and none of them should open a sound
+device. The server is not an `Application` and has no audio at all.
+
+*Changed while building.* This first said `GameApplication` would own the engine and
+hand it to the layer. That would have been a dangling reference: layers are destroyed by
+`Application`'s destructor, which runs after the derived `GameApplication`'s members are
+already gone.
 
 ## Engine
 
@@ -194,9 +199,10 @@ footsteps through the same `SoundCues` entry points.
 
 ### Wiring — `GameApp.cpp`
 
-`GameApplication` owns the `AudioEngine`, loads the synthesised clips once, and hands
-both to the player layer. Each rendered frame the layer does three things. It sets the
-listener from the camera. It asks `SoundCues` for this frame's cues. It plays them.
+The player layer owns the `AudioEngine` and a `SoundBank` that loads the synthesised
+clips once. Each rendered frame the layer does three things. It sets the listener from
+the camera. It asks `SoundCues` for this frame's cues. It plays them. The remote
+footstep rule is `SoundCues::WalkInferred`, not code in the layer, so GameTests covers it.
 
 ### Settings
 

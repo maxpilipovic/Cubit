@@ -512,8 +512,38 @@ them. Every item was checked in the code unless it says otherwise. References ar
   (`Sandbox.cpp:110`), the spawn hint (`Sandbox.cpp:87`, with a second copy in
   `Server.cpp`) and the resolution are all compile-time constants. Scope doc ENG-06,
   PLY-02, POL-04.
-- [ ] **B7. Audio.** No audio library in `vendor/` and no audio code. Scope doc POL-01,
-  which the doc puts in the prototype band.
+- [x] **B7. Audio.** **Done 2026-09-27**, from
+  [the spec](superpowers/specs/2026-09-27-audio-design.md). Built and run; **how it
+  sounds is still to be checked by ear**, which no script can do.
+  - `AudioEngine` (`Cubit/Audio/`) is a facade over miniaudio 0.11.25. It takes mono
+    `SoundClip`s, plays them positioned in the world or centred for UI, and runs a
+    32-voice pool that steals the oldest. It falls back to silence when there is no
+    device. Only `AudioEngine.cpp` includes miniaudio, and only the engine project has
+    its include path, so a test file including every audio header is the check that
+    the facade holds. Both sides include `vendor/miniaudio/miniaudio_config.h`, because
+    the `MA_NO_*` options change struct layouts.
+  - `AudioEngine::Offline` renders the mix into a buffer. It is how 14 engine cases test
+    panning both ways, distance, 2D centring, master volume, voice stealing, voice
+    lifetime, sample-rate conversion and moves on real output.
+  - `MatchClient` now numbers every shot ruling and every edit it shows (`RecentShots`,
+    `RecentEdits`, 32 each, 5 cases). `LastShot` alone lost the second of two rulings
+    drained in one step. `DeathAnnouncer` had the same flaw, keyed on arrival tick, and
+    now reads by serial.
+  - The game synthesises every sound from a seed (`SoundSynth`), and decides what to
+    play in `SoundCues`, which is pure logic. Other players' footsteps are inferred from
+    a level pose, because snapshots carry no grounded bit. `master_volume` and
+    `--volume` go through the settings path. There are 14 new game cases.
+  - Scripted run: single-player and a server with two clients both opened the device
+    at 48 kHz and exited cleanly, with 0 corrections over 1,092 snapshots.
+
+  The original entry follows. No audio library in `vendor/` and no audio code. Scope doc
+  POL-01, which the doc puts in the prototype band.
+- [ ] **B7a. What B7 recorded rather than did.** A remote player swimming at a steady
+  depth makes footsteps; the fix is a movement-state bit in the snapshot, which is a
+  protocol bump. The local gunshot plays when the ruling arrives, one round trip after
+  the click, matching the rule that a shot shows nothing until ruled; playing it on the
+  click is a feel change for play-testing to ask for. There is no file loading until a
+  real sound exists, and there is one volume, with no separate effects and UI volumes.
 - [x] **B8. A separate game target.** Done 2026-09-18, in seven tasks recorded in
   `docs/superpowers/plans/2026-09-17-b8-engine-game-split.md`. The engine holds no game
   numbers: health, damage, shot range, fire rate and dig reach became a `MatchRules` value
@@ -748,7 +778,8 @@ Ranked by leverage. Performance items are detailed in
 - Per-block **textures** (blocks are palette colours by design).
 - **LOD / streaming** (maps are a fixed known size — this is why `World` is a fixed
   grid).
-- **Audio** (belongs with gameplay, not the core engine).
+- ~~**Audio** (belongs with gameplay, not the core engine).~~ Reversed by B7: the engine
+  plays sound and the game decides what to play, the same split as text.
 
 ## The "finish the engine" arc
 

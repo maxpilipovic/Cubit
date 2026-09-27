@@ -42,13 +42,15 @@ TEST_CASE("Each setting in the file replaces its default")
         "mouse_sensitivity = 0.5\n"
         "field_of_view = 90\n"
         "window_width = 1600\n"
-        "window_height = 900\n",
+        "window_height = 900\n"
+        "master_volume = 0.25\n",
         warnings);
 
     CHECK(settings.MouseSensitivity == doctest::Approx(0.5f));
     CHECK(settings.FieldOfView == doctest::Approx(90.0f));
     CHECK(settings.WindowWidth == 1600);
     CHECK(settings.WindowHeight == 900);
+    CHECK(settings.MasterVolume == doctest::Approx(0.25f));
     CHECK(warnings.empty());
 }
 
@@ -134,9 +136,11 @@ TEST_CASE("Every setting flag lands on its own key, and passes the same checks")
     char widthValue[] = "1600";
     char height[] = "--height";
     char heightValue[] = "900";
+    char volume[] = "--volume";
+    char volumeValue[] = "0.25";
 
     char* argv[] = { program, fov, fovValue, sensitivity, sensitivityValue,
-        width, widthValue, height, heightValue };
+        width, widthValue, height, heightValue, volume, volumeValue };
     const int argc = static_cast<int>(sizeof(argv) / sizeof(argv[0]));
 
     std::vector<std::string> warnings;
@@ -146,6 +150,7 @@ TEST_CASE("Every setting flag lands on its own key, and passes the same checks")
     CHECK(settings.MouseSensitivity == doctest::Approx(0.5f));
     CHECK(settings.WindowWidth == 1600);
     CHECK(settings.WindowHeight == 900);
+    CHECK(settings.MasterVolume == doctest::Approx(0.25f));
     CHECK(warnings.empty());
 }
 
@@ -210,5 +215,24 @@ TEST_CASE("The effective settings describe themselves in one line")
     CHECK(line.find("0.12") != std::string::npos);
     CHECK(line.find("60") != std::string::npos);
     CHECK(line.find("1280x720") != std::string::npos);
+    CHECK(line.find("volume 0.8") != std::string::npos);
     CHECK(line.find('\n') == std::string::npos);
+}
+
+TEST_CASE("Master volume is held to 0..1, and nan keeps the default")
+{
+    std::vector<std::string> warnings;
+    CHECK(Applied("master_volume = 3\n", warnings).MasterVolume == doctest::Approx(1.0f));
+    CHECK(Applied("master_volume = -1\n", warnings).MasterVolume == doctest::Approx(0.0f));
+    CHECK(warnings.size() == 2);
+
+    warnings.clear();
+    CHECK(Applied("master_volume = nan\n", warnings).MasterVolume == doctest::Approx(0.8f));
+    CHECK(AnyMentions(warnings, "master_volume"));
+
+    //Zero is a volume, not an absence of one: a player who muted the game
+    //keeps it muted.
+    warnings.clear();
+    CHECK(Applied("master_volume = 0\n", warnings).MasterVolume == 0.0f);
+    CHECK(warnings.empty());
 }

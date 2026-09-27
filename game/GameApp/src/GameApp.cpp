@@ -16,9 +16,13 @@
 #include "GameRules.h"
 #include "GameSettings.h"
 #include "Maps.h"
+#include "SoundCues.h"
+#include "SoundSynth.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -121,6 +125,48 @@ namespace
         CubitGame::Apply(SettingsFile::Parse(overrides), settings, warnings);
         return settings;
     }
+
+    //The game's sounds, made once and loaded into the engine: one clip per cue,
+    //and FootstepVariants of the footstep so a walk is not one sound repeated.
+    class SoundBank
+    {
+    public:
+        explicit SoundBank(AudioEngine& audio)
+        {
+            for (int i = 0; i < CubitGame::CueCount; ++i)
+            {
+                const auto cue = static_cast<CubitGame::Cue>(i);
+                const int variants = cue == CubitGame::Cue::Footstep
+                    ? CubitGame::FootstepVariants : 1;
+
+                for (int variant = 0; variant < variants; ++variant)
+                    m_Clips[i].push_back(audio.Load(
+                        CubitGame::Synthesise(cue, static_cast<std::uint32_t>(variant + 1))));
+            }
+        }
+
+        void Play(AudioEngine& audio, const CubitGame::CueToPlay& cue) const
+        {
+            const std::vector<ClipId>& clips = m_Clips[static_cast<int>(cue.Sound)];
+            if (clips.empty())
+                return;
+
+            const ClipId clip = clips[static_cast<std::size_t>(cue.Variant) % clips.size()];
+
+            if (cue.Positioned)
+                audio.Play(clip, cue.Position, cue.Volume);
+            else
+                audio.Play2D(clip, cue.Volume);
+        }
+
+    private:
+        std::array<std::vector<ClipId>, CubitGame::CueCount> m_Clips;
+    };
+
+    //The local player's own footsteps are heard from the listener's feet, at
+    //full strength with no distance to soften them, so they are turned down to
+    //sit under everybody else's.
+    constexpr float OwnFootstepVolume = 0.5f;
 }
 
 class PlayerLayer final : public Layer
@@ -137,6 +183,7 @@ public:
     {
         m_CameraController.SetFieldOfView(settings.FieldOfView);
         m_CameraController.SetMouseSensitivity(settings.MouseSensitivity);
+        m_Audio.SetMasterVolume(settings.MasterVolume);
 
         Input::SetCursorCaptured(m_Cursor.Captured());
 
@@ -313,14 +360,68 @@ public:
     //decoration and can be missed; a death is not.
     void AnnounceDeaths()
     {
-        if (!m_Client || !m_Client->LastShot().has_value())
+        if (!m_Client)
             return;
 
-        const std::optional<CubitGame::PlayerDiedEvent> died =
-            m_DeathAnnouncer.Observe(*m_Client->LastShot());
+        for (const CubitGame::PlayerDiedEvent& died :
+            m_DeathAnnouncer.Observe(m_Client->RecentShots()))
+            m_EventBus.Publish(died);
+    }
 
-        if (died.has_value())
-            m_EventBus.Publish(*died);
+    //Puts the ears at the camera and plays everything that happened since the
+    //last frame: shots, edits, and every player's footsteps.
+    //
+    //Per rendered frame rather than per step, so the listener turns with the
+    //view exactly as it is drawn. Everything is in world space; the camera sits
+    //WorldOffset away from it for drawing.
+    void PlaySounds(float alpha)
+    {
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        const glm::vec3 eye = camera.GetPosition() - WorldOffset;
+        m_Audio.SetListener(eye, camera.GetForwardDirection());
+
+        const CharacterController& self = Player_();
+        const glm::vec3 feet = self.Position() - glm::vec3(0.0f, self.Config().HalfExtents.y, 0.0f);
+        m_Cues.Walk(m_LocalPlayer, feet, self.Grounded() && !self.BodyInFluid(),
+            OwnFootstepVolume, m_PendingCues);
+
+        if (m_Client)
+        {
+            //Joining is not news: the rulings and edits this client was handed
+            //before it had a player are the match's past, not this frame's.
+            if (!m_HeardHistory)
+            {
+                m_Cues.SkipHistory(m_Client->RecentShots(), m_Client->RecentEdits());
+                m_HeardHistory = true;
+            }
+
+            const auto locate = [this, &eye, alpha](PlayerId player) -> std::optional<glm::vec3>
+            {
+                if (player == m_LocalPlayer)
+                    return eye;
+                if (!Match_().HasPlayer(player))
+                    return std::nullopt;
+                return m_Client->PoseOf(player, alpha).Position;
+            };
+
+            m_Cues.Shots(m_Client->RecentShots(), m_LocalPlayer, locate, m_PendingCues);
+            m_Cues.Edits(m_Client->RecentEdits(), m_PendingCues);
+
+            for (const auto& [player, character] : Match_().Players())
+            {
+                if (player == m_LocalPlayer)
+                    continue;
+
+                const glm::vec3 theirFeet = m_Client->PoseOf(player, alpha).Position
+                    - glm::vec3(0.0f, character.Config().HalfExtents.y, 0.0f);
+                m_Cues.WalkInferred(player, theirFeet, 1.0f, m_PendingCues);
+            }
+        }
+
+        for (const CubitGame::CueToPlay& cue : m_PendingCues)
+            m_Sounds.Play(m_Audio, cue);
+
+        m_PendingCues.clear();
     }
 
     //Draws the meshed voxel world through Cubit's scene renderer.
@@ -361,6 +462,7 @@ public:
         DrawTargetedBlockOutline();
         DrawRemotePlayers(alpha);
         DrawShots();
+        PlaySounds(alpha);
         DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
 
         m_HudState->MeshFaceCount = m_Scene.TotalFaceCount();
@@ -842,8 +944,18 @@ private:
 
         // What a dig left hanging comes down with it. Only a dig: placing a
         // block cannot take anything's support away.
+        m_Cues.Edited(std::span<const BlockEdit>(&edit, 1), m_PendingCues);
+
         if (button == MouseCode::Left)
-            CollapseAfter({ target });
+        {
+            //The inverses of what fell, which name the cells; what they became
+            //is air, and that is what is heard.
+            std::vector<BlockEdit> fell = CollapseAfter({ target });
+            for (BlockEdit& cell : fell)
+                cell.Block = BlockId{ 0 };
+
+            m_Cues.Edited(fell, m_PendingCues);
+        }
 
         CB_INFO(
             std::string(button == MouseCode::Left ? "Broke" : "Placed") +
@@ -1078,6 +1190,20 @@ private:
     //recent one for as long as its marker is drawn, so without this the same
     //death would be published every frame of that window.
     CubitGame::DeathAnnouncer m_DeathAnnouncer;
+
+    //Sound. Owned here rather than by the application: layers are destroyed
+    //by Application's destructor, after the derived application's members are
+    //already gone, so an engine held there would die before this layer.
+    AudioEngine m_Audio;
+    SoundBank m_Sounds{ m_Audio };
+    CubitGame::SoundCues m_Cues;
+
+    //Cues gathered since the last frame played them: single-player edits land
+    //here from the click handler.
+    std::vector<CubitGame::CueToPlay> m_PendingCues;
+
+    //Whether the match's history from before this client arrived is skipped.
+    bool m_HeardHistory = false;
 };
 
 class GameApplication final : public Application

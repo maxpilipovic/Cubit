@@ -2,18 +2,21 @@
 
 #include "DeathAnnouncer.h"
 
+#include <deque>
+#include <vector>
+
 namespace
 {
     //A ruling the server might send. Defaults to a clean miss, so each case
     //below says only what it is actually about.
     MatchClient::ShotReport Ruling(bool killed, PlayerId victim, PlayerId shooter,
-        std::uint64_t receivedAtTick)
+        std::uint64_t serial)
     {
         MatchClient::ShotReport shot;
         shot.Shooter = shooter;
         shot.Victim = victim;
         shot.Killed = killed;
-        shot.ReceivedAtTick = receivedAtTick;
+        shot.Serial = serial;
 
         return shot;
     }
@@ -24,57 +27,65 @@ TEST_CASE("A shot that killed nobody announces nothing")
     CubitGame::DeathAnnouncer announcer;
 
     //A hit that left the victim standing, and a clean miss. Neither is a death.
-    CHECK_FALSE(announcer.Observe(Ruling(false, 2, 1, 40)).has_value());
-    CHECK_FALSE(announcer.Observe(Ruling(false, InvalidPlayer, 1, 41)).has_value());
+    const std::deque<MatchClient::ShotReport> recent{
+        Ruling(false, 2, 1, 1), Ruling(false, InvalidPlayer, 1, 2) };
+
+    CHECK(announcer.Observe(recent).empty());
 }
 
 TEST_CASE("A killing shot announces the victim and the killer")
 {
     CubitGame::DeathAnnouncer announcer;
 
-    const std::optional<CubitGame::PlayerDiedEvent> died =
-        announcer.Observe(Ruling(true, 2, 1, 40));
+    const std::vector<CubitGame::PlayerDiedEvent> died =
+        announcer.Observe({ Ruling(true, 2, 1, 1) });
 
-    REQUIRE(died.has_value());
+    REQUIRE(died.size() == 1);
     //The victim is who died, not who fired. Getting these the wrong way round
     //would read as the killer dying, which no test of a bool would catch.
-    CHECK(died->Player == 2);
-    CHECK(died->Killer == 1);
+    CHECK(died[0].Player == 2);
+    CHECK(died[0].Killer == 1);
 }
 
 TEST_CASE("The same ruling is announced once, however many frames it is held for")
 {
     CubitGame::DeathAnnouncer announcer;
 
-    //LastShot keeps returning this ruling while its marker is on screen. This
+    //RecentShots keeps returning this ruling until newer ones push it out. This
     //is the whole reason the announcer exists.
-    const MatchClient::ShotReport shot = Ruling(true, 2, 1, 40);
+    const std::deque<MatchClient::ShotReport> recent{ Ruling(true, 2, 1, 1) };
 
-    CHECK(announcer.Observe(shot).has_value());
-    CHECK_FALSE(announcer.Observe(shot).has_value());
-    CHECK_FALSE(announcer.Observe(shot).has_value());
+    CHECK(announcer.Observe(recent).size() == 1);
+    CHECK(announcer.Observe(recent).empty());
+    CHECK(announcer.Observe(recent).empty());
 }
 
 TEST_CASE("A later death is announced, even after an earlier one")
 {
     CubitGame::DeathAnnouncer announcer;
 
-    CHECK(announcer.Observe(Ruling(true, 2, 1, 40)).has_value());
+    std::deque<MatchClient::ShotReport> recent{ Ruling(true, 2, 1, 1) };
+    CHECK(announcer.Observe(recent).size() == 1);
 
-    const std::optional<CubitGame::PlayerDiedEvent> second =
-        announcer.Observe(Ruling(true, 1, 2, 55));
+    recent.push_back(Ruling(true, 1, 2, 2));
+    const std::vector<CubitGame::PlayerDiedEvent> second = announcer.Observe(recent);
 
-    REQUIRE(second.has_value());
-    CHECK(second->Player == 1);
-    CHECK(second->Killer == 2);
+    REQUIRE(second.size() == 1);
+    CHECK(second[0].Player == 1);
+    CHECK(second[0].Killer == 2);
 }
 
-TEST_CASE("A death on tick zero is announced")
+TEST_CASE("Two deaths arriving together are both announced")
 {
+    //Both rulings drained in one step. The old announcer, keyed on the tick a
+    //ruling arrived on and reading only the newest, announced one of them.
     CubitGame::DeathAnnouncer announcer;
 
-    //Tick zero is a real tick. An announcer that remembered "none yet" as zero
-    //would swallow this one, and it would only ever show up as a missing kill
-    //message in the first moments of a match.
-    CHECK(announcer.Observe(Ruling(true, 2, 1, 0)).has_value());
+    const std::vector<CubitGame::PlayerDiedEvent> died = announcer.Observe({
+        Ruling(true, 2, 1, 1), Ruling(false, 3, 1, 2), Ruling(true, 3, 4, 3) });
+
+    REQUIRE(died.size() == 2);
+    CHECK(died[0].Player == 2);
+    CHECK(died[1].Player == 3);
+    CHECK(died[1].Killer == 4);
 }

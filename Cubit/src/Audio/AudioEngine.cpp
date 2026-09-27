@@ -166,6 +166,10 @@ AudioEngine::AudioEngine()
 
     m_Impl->Ready = true;
     ma_engine_listener_set_world_up(&m_Impl->Engine, 0, 0.0f, 1.0f, 0.0f);
+
+    //Said out loud because silence is otherwise the only sign either way.
+    CB_INFO("audio: playing at " + std::to_string(ma_engine_get_sample_rate(&m_Impl->Engine)) +
+        " Hz through the default output device");
 }
 
 AudioEngine AudioEngine::Offline(std::uint32_t sampleRate)

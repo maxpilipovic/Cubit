@@ -131,6 +131,18 @@ is a 512x64x512 battlefield.
 - A client whose inputs have piled up on the server — a lag spike, a fast clock —
   catches up by skipping inputs, so input delay does not grow over a match
 
+**Audio**
+
+- `AudioEngine` plays sounds positioned in the world or centred for UI, through a
+  32-voice pool that steals the oldest. It is a facade: miniaudio is included by one
+  engine source file and appears in no public header
+- An offline mode renders the mix into a buffer, so the suite tests panning, distance
+  and volume on real output
+- The game makes its sounds in code at startup: gunshots at the shooter, impacts,
+  dig, place and collapse, footsteps for every player, and hit and kill confirms.
+  There are no sound files
+- The harness plays a test tone to the camera's right on `N`
+
 **Content pipeline**
 
 - `VoxLoader` parses MagicaVoxel `.vox` into Cubit's Y-up space and `BuildWorld` sizes
@@ -230,8 +242,9 @@ defaults if it is not there:
 | `field_of_view` | 60 | 30 – 120 |
 | `window_width` | 1280 | 640 – 7680 |
 | `window_height` | 720 | 360 – 4320 |
+| `master_volume` | 0.8 | 0 – 1 |
 
-`--sensitivity`, `--fov`, `--width` and `--height` override the file for one run. A
+`--sensitivity`, `--fov`, `--width`, `--height` and `--volume` override the file for one run. A
 value out of range is clamped, and a line that cannot be read is skipped; both are
 warned about in the log, and neither stops the game. The log's `Settings:` line says
 what a run actually used, which is worth checking when a scripted screenshot looks
