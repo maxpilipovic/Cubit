@@ -151,3 +151,36 @@ project "ENet"
     filter "configurations:Dist"
         runtime "Release"
         optimize "On"
+
+-- Audio. Only the engine is given this include path: nothing outside
+-- Cubit/src/Audio/AudioEngine.cpp may see a miniaudio type. See
+-- docs/superpowers/specs/2026-09-27-audio-design.md.
+project "miniaudio"
+    location "miniaudio"
+    kind "StaticLib"
+    language "C"
+
+    targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
+    objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
+
+    files
+    {
+        "miniaudio/miniaudio.h",
+        "miniaudio/miniaudio_config.h",
+        "miniaudio/miniaudio.c"
+    }
+
+    filter "system:windows"
+        systemversion "latest"
+
+    filter "configurations:Debug"
+        runtime "Debug"
+        symbols "On"
+
+    filter "configurations:Release"
+        runtime "Release"
+        optimize "On"
+
+    filter "configurations:Dist"
+        runtime "Release"
+        optimize "On"

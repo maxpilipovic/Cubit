@@ -2,6 +2,8 @@
 
 #include "Cubit/Application.h"
 #include "Cubit/Assert.h"
+#include "Cubit/Audio/AudioEngine.h"
+#include "Cubit/Audio/SoundClip.h"
 #include "Cubit/CrashHandler.h"
 #include "Cubit/Events/ApplicationEvent.h"
 #include "Cubit/Events/Event.h"

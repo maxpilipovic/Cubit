@@ -30,7 +30,10 @@ project "Cubit"
         "../vendor/GLAD/include",
         "../vendor/GLM",
         "../vendor/ENet/include",
-        "../vendor/stb"
+        "../vendor/stb",
+
+        -- AudioEngine.cpp only. No public header may include from here.
+        "../vendor/miniaudio"
     }
 
     links
@@ -41,6 +44,7 @@ project "Cubit"
         "ENet",
         "ws2_32",
         "winmm",
+        "miniaudio",
 
         -- MiniDumpWriteDump and the stack walk in CrashHandler.
         "dbghelp"

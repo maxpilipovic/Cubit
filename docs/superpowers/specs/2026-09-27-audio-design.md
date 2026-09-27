@@ -91,7 +91,7 @@ positioned, where the spatialiser makes the stereo, or 2D, where mono centred is
 **Voices.** A fixed pool of 32 voices. When it is full, the oldest voice is stolen, so
 the pool cannot grow without limit in a firefight. A finished voice returns to the pool.
 miniaudio mixes on its own thread. The facade's calls are made from the main thread
-only, and the lock is inside `Impl`.
+only; miniaudio does its own locking between them and the mixing thread.
 
 **Attenuation.** Inverse distance with a reference distance of 2 m. Sounds are audible
 across the 128-block map, but a gunshot at 60 m is plainly distant. These are constants
@@ -209,8 +209,8 @@ line.
 
 - **No device, or the device fails:** one warning, and the game runs silent.
 - **Too many sounds:** the oldest voice is stolen.
-- **`Play` with an unknown `ClipId`:** ignored, with an assert in Debug. This is a
-  programming error, not a runtime one.
+- **`Play` with an unknown `ClipId`:** ignored, with no assert: a sound that fails to play is
+  never worth stopping the game for, which is the rule the whole facade follows.
 - **Offline `Render` on a device engine:** returns silence.
 
 ## Tests

@@ -7,7 +7,9 @@
 #include "HudLayer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -99,6 +101,31 @@ namespace
 
     //Operations the undo stack keeps. Capped so a long session cannot creep.
     constexpr std::size_t MaxUndoDepth = 256;
+
+    //The audio check: N plays this tone this far to the camera's right, so
+    //panning can be heard pointing the right way round without the game.
+    constexpr float ToneDistance = 4.0f;
+
+    //A 440 Hz tone, 0.3 s long, faded at both ends so it does not click.
+    SoundClip TestTone()
+    {
+        constexpr std::uint32_t rate = 48000;
+        constexpr std::size_t length = rate * 3 / 10;
+        constexpr std::size_t fade = rate / 100;
+
+        SoundClip clip;
+        clip.SampleRate = rate;
+        clip.Samples.resize(length);
+
+        for (std::size_t i = 0; i < length; ++i)
+        {
+            const float edge = static_cast<float>(std::min({ i, length - 1 - i, fade })) / fade;
+            clip.Samples[i] = 0.5f * edge *
+                std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / rate);
+        }
+
+        return clip;
+    }
 }
 
 class SandboxLayer final : public Layer
@@ -165,6 +192,9 @@ public:
         m_HudState->StepsPerFrame = m_StepsThisFrame;
         m_HudState->UndoDepth = m_Undo.size();
         m_StepsThisFrame = 0;
+
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        m_Audio.SetListener(camera.GetPosition(), camera.GetForwardDirection());
     }
 
     //Draws the meshed voxel world through the engine's scene.
@@ -497,6 +527,15 @@ private:
             m_CameraController.ResetMouseTracking();
     }
 
+    //Plays the test tone to the camera's right. Heard in the right ear, the
+    //listener and the spatialiser agree about which way is which.
+    void PlayTestTone()
+    {
+        const PerspectiveCamera& camera = m_CameraController.GetCamera();
+        m_Audio.Play(m_TestTone, camera.GetPosition() + camera.GetRightDirection() * ToneDistance);
+        CB_INFO("Test tone played to the right");
+    }
+
     //Selects the colour used when placing blocks, or runs a tool.
     bool OnKeyPressed(KeyPressedEvent& event)
     {
@@ -526,6 +565,12 @@ private:
         if (event.GetKeyCode() == KeyCode::U)
         {
             UndoLastEdit();
+            return true;
+        }
+
+        if (event.GetKeyCode() == KeyCode::N)
+        {
+            PlayTestTone();
             return true;
         }
 
@@ -566,6 +611,11 @@ private:
     //Whether the harness has the mouse. Escape and losing focus give it back;
     //a click takes it, and that click does not also edit.
     CursorCapture m_Cursor;
+
+    //The harness's own, as the game has its own: Application opens no sound
+    //device, because tests construct applications.
+    AudioEngine m_Audio;
+    ClipId m_TestTone = m_Audio.Load(TestTone());
 };
 
 //Starts the harness and runs the engine loop.
