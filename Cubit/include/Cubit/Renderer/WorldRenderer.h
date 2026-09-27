@@ -88,6 +88,14 @@ private:
     //
     //Update always builds at least one chunk, so however small this is, the
     //pending set still drains.
+    //
+    //It bounds MESHING, the CPU work, and not the uploads, which follow once it is
+    //spent. The first name-returning GL call of a frame can wait for the driver to
+    //drain its queue - presenting the previous frame included - under a threaded
+    //driver. Counted against this budget, that wait used most of it, and a
+    //Release first load uploaded ~2.4 chunks a frame over ~1,000 frames (6.4-8 s)
+    //instead of the ~1 s it takes with the wait outside it. The frame pays that
+    //wait at the buffer swap anyway. See docs/performance.md, P4.
     static constexpr double MeshBudgetMilliseconds = 4.0;
 
     std::map<glm::ivec3, ChunkMesh, IVec3Less> m_Meshes;

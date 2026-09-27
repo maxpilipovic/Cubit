@@ -50,27 +50,23 @@ void WorldRenderer::Update(World& world)
     // Mesh until this frame's slice is spent, removing each chunk as it is
     // handled. The budget is checked after building rather than before, so one
     // chunk is always built however long it takes and the set always drains.
+    //
+    // Meshing only: no GL call happens inside the budget. The uploads come
+    // after it, because the first of them in a frame can wait on the driver
+    // (see MeshBudgetMilliseconds), and that wait is not meshing work.
     const auto start = std::chrono::steady_clock::now();
+
+    struct Built
+    {
+        glm::ivec3 Coord;
+        ChunkMeshData Mesh;
+    };
+    std::vector<Built> built;
 
     for (auto it = m_Pending.begin(); it != m_Pending.end(); )
     {
         const glm::ivec3 coord = *it;
-        const ChunkMeshData mesh =
-            ChunkMesher::Build(world, coord.x, coord.y, coord.z);
-
-        if (mesh.Opaque.Indices.empty() && mesh.Transparent.Indices.empty())
-        {
-            //A chunk that meshes to nothing keeps no buffers; drop any it had.
-            m_Meshes.erase(coord);
-        }
-        else
-        {
-            ChunkMesh gpu;
-            UploadGeometry(gpu.Opaque, mesh.Opaque);
-            UploadGeometry(gpu.Transparent, mesh.Transparent);
-
-            m_Meshes[coord] = std::move(gpu);
-        }
+        built.push_back({ coord, ChunkMesher::Build(world, coord.x, coord.y, coord.z) });
 
         it = m_Pending.erase(it);
 
@@ -79,6 +75,24 @@ void WorldRenderer::Update(World& world)
 
         if (spent.count() >= MeshBudgetMilliseconds)
             break;
+    }
+
+    for (const Built& chunk : built)
+    {
+        const ChunkMeshData& mesh = chunk.Mesh;
+
+        if (mesh.Opaque.Indices.empty() && mesh.Transparent.Indices.empty())
+        {
+            //A chunk that meshes to nothing keeps no buffers; drop any it had.
+            m_Meshes.erase(chunk.Coord);
+            continue;
+        }
+
+        ChunkMesh gpu;
+        UploadGeometry(gpu.Opaque, mesh.Opaque);
+        UploadGeometry(gpu.Transparent, mesh.Transparent);
+
+        m_Meshes[chunk.Coord] = std::move(gpu);
     }
 }
 

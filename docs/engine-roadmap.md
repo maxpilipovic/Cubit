@@ -696,7 +696,13 @@ them. Every item was checked in the code unless it says otherwise. References ar
 
 ### C. Known and parked — do each, or drop it on purpose
 
-- [ ] **C1. GPU buffers reallocated on every remesh** — **Rescoped 2026-09-27.** Measured
+- [x] **C1. GPU buffers reallocated on every remesh** — **Done 2026-09-27, as a different fix.** Release load
+  meshing went from 6.4-8.0 s to about 0.9 s: `WorldRenderer::Update` now meshes within its
+  4 ms budget and uploads afterwards, so the driver sync that the first GL name call of a
+  frame waits on is no longer charged to meshing. Verified by three timed Release loads,
+  one Debug load (unchanged, meshing-bound) and a screenshot with the same face and chunk
+  counts as before. No unit test: `WorldRenderer` needs a GL context. Full numbers and
+  the spike that found it are in [performance.md](performance.md) under P4. **Rescoped 2026-09-27.** Measured
   first: reuse is worth about 0.03 ms a chunk, so buffer reuse is dropped on purpose. What
   the measurement found instead, a chunk's FIRST upload costing 1-2 ms in Release (2.8-5.5
   s of pop-in at load), becomes a spike: find why, and try cheap fixes. Numbers in

@@ -64,7 +64,8 @@ is a 512x64x512 battlefield.
   axis-aligned boxes
 - `WorldRenderer`: one GPU mesh per chunk, rebuilt only for chunks the world reports
   dirty, meshed against a 4 ms per-frame time slice so a burst of remeshing spreads over
-  frames instead of stalling one, and drawn only when the chunk's box is inside the
+  frames instead of stalling one - uploaded after that slice, not inside it, which is
+  what keeps a Release load to about a second - and drawn only when the chunk's box is inside the
   frustum
 - Two-pass drawing: opaque geometry first, then transparent geometry sorted back
   to front with depth writes off, so water blends over the riverbed beneath it

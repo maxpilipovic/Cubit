@@ -1,6 +1,6 @@
 # Cubit Performance Issues
 
-_Last updated: 2026-08-27_
+_Last updated: 2026-09-27_
 
 A catalog of known performance problems in the engine, with where they live, when
 they bite, and the intended fix. Ordered by priority. This is a working checklist —
@@ -148,7 +148,7 @@ allocations. Matters more once meshing is threaded and frequent.
 orphaning or `glBufferSubData` when the new data fits. Low priority until edits or
 threaded remeshing are frequent.
 
-**Priority:** low. **Status:** open.
+**Priority:** low. **Status:** **done 2026-09-27, as a different fix** - see below. Buffer reuse itself was dropped.
 
 **Measured 2026-09-27, before doing anything** (roadmap C1). Temporary instrumentation
 timed `ChunkMesher::Build` and the upload separately, and the Sandbox marked all 4,096
@@ -201,6 +201,25 @@ taken outside it. Three runs:
 The probe's throwaway call was reverted; it only proved the model. The fix it points at
 is structural, not a dummy call: the budget should bound meshing, the CPU work, and the
 uploads should follow it, so the sync is no longer charged against the budget.
+
+**Fixed 2026-09-27 (roadmap C1).** `WorldRenderer::Update` now meshes into a list until
+the 4 ms slice is spent, with no GL call inside the budget, and then uploads everything it
+meshed. Measured the same way as above, with a temporary log of the frame the pending set
+drained:
+
+| | Before | After |
+|---|---|---|
+| Release, "Engine running" to fully meshed | 6.4 – 8.0 s (911 – 1,124 frames) | 0.86 – 0.94 s warm, 1.9 s cold (91 – 153 frames) |
+| Debug | ~5 s of meshing in 4 ms slices | 8.9 s, 1,059 frames: unchanged, meshing-bound (C3 was dropped) |
+
+The finished world is identical: PENDING 0, 1,927,774 faces, 931 of 2,408 chunks drawn,
+the same readout as every earlier run. Buffer reuse, this item's original fix, was
+dropped: it could save about 0.03 ms a chunk.
+
+What this does not do: the sync still happens once per frame that uploads anything. It
+is no longer charged to meshing, and the frame would wait at the buffer swap anyway, so
+there was nothing to gain from removing it. A pool of pre-generated GL names would avoid
+it altogether, and is the next thing to try if frames with an edit ever show a hitch.
 
 ---
 
@@ -706,7 +725,7 @@ worth making:
 | P1 | Whole world meshes in one frame | `WorldRenderer::Update` | Highest | **Done 2026-07-25**, budget revised to a time slice **2026-07-28** |
 | P2 | No frustum culling | `WorldRenderer::Render` | High | **Done 2026-07-25** |
 | P3 | Per-face meshing (no greedy) | `ChunkMesher` | Med-High | **Closed 2026-08-06** — greedy meshing built, measured, rejected |
-| P4 | GPU buffers reallocated per remesh | `WorldRenderer::Update` | Low | Open |
+| P4 | GPU buffers reallocated per remesh | `WorldRenderer::Update` | Was the Release load cost, not this | **Done 2026-09-27**: reuse measured worthless (0.03 ms a chunk) and dropped; the real cost was a driver sync charged to the meshing budget. Uploads now follow the budget, and Release load went from 6.4-8.0 s to ~0.9 s 
 | P5 | One draw call per chunk | `WorldRenderer::Render` | Low | Open |
 | P6 | Relight cost followed the box, not the edit | `SkyLight::Repropagate` | Was highest | **Done 2026-07-28** |
 | P7 | AO/light sampled through `World` | `ChunkMesher::Build` | Was high | **Done 2026-07-28** |
