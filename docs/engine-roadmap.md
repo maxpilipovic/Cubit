@@ -698,15 +698,25 @@ them. Every item was checked in the code unless it says otherwise. References ar
 
 - [ ] **C1. GPU buffers reallocated on every remesh** — P4 in
   [performance.md](performance.md), low priority, open.
-- [ ] **C2. One draw call per chunk** — P5, low priority, open.
+- [x] ~~**C2. One draw call per chunk**~~ — **Dropped 2026-09-27, on purpose.** About 930
+  draws a frame at 140+ fps on fixed-size maps, with no measured cost. Batching would
+  also fight the per-chunk frustum cull that decides what is drawn. Reopen it with a
+  profile that shows draw submission mattering. P5, low priority.
 - [ ] **C3. Threaded meshing** — about 5 s of debug meshing spread across frames; the last
   performance item with real leverage.
-- [ ] **C4. Render targets.** No framebuffer objects anywhere, so no post-processing or
+- [x] ~~**C4. Render targets.**~~ **Dropped 2026-09-27, on purpose:** nothing in the scope
+  doc's prototype band needs them, and flat colour is the look. Reopen it for the first
+  effect that needs one. No framebuffer objects anywhere, so no post-processing or
   shadows; underwater fog tints geometry but not the sky.
-- [ ] **C5. An asset layer.** Shaders are string literals in Sandbox sources
+- [ ] **C5. An asset layer.** **Split 2026-09-27.** To do: resolve assets and settings
+  against the executable rather than the working directory, because launching from
+  anywhere else aborts in a way that looks like a render bug. Dropped on purpose: shaders
+  in files and image decoding, until something needs them. Shaders are string literals in Sandbox sources
   (`Sandbox.cpp:189`), nothing decodes an image file, and paths are working-directory
   relative.
-- [ ] **C6. Debug draw's two left-outs** from 2026-08-22: a `Frustum` helper and thick
+- [x] ~~**C6. Debug draw's two left-outs**~~ **Dropped 2026-09-27, on purpose:** GL core has
+  no wide lines, so thick lines would mean drawing quads, and nobody has needed either
+  since August. From 2026-08-22: a `Frustum` helper and thick
   lines.
 
 ### D. Game-layer items raised in the same audit
