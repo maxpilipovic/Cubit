@@ -155,6 +155,7 @@ void MatchClient::Step(double seconds)
             ApplyBlockEdit(world, requested);
 
             m_Predicted.push_back(predicted);
+            RecordShownEdit(true, { requested });
 
             //The same bound as m_Unacked, for the same reason: only a silent
             //server grows this, and it forgets the bookkeeping, not the block.
@@ -516,8 +517,13 @@ void MatchClient::HandleShotResolved(std::span<const std::uint8_t> data)
     report.VictimHealth = message.VictimHealth;
     report.Killed = message.Killed;
     report.ReceivedAtTick = m_Match.Tick();
+    report.Serial = ++m_ShotSerial;
 
     m_LastShot = report;
+
+    m_RecentShots.push_back(report);
+    if (m_RecentShots.size() > MaxRecentEvents)
+        m_RecentShots.pop_front();
 }
 
 void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)
@@ -528,6 +534,9 @@ void MatchClient::HandleEditApplied(std::span<const std::uint8_t> data)
     EditMessage message;
     if (!Decode(data, message))
         return;
+
+    if (!message.Edits.empty())
+        RecordShownEdit(false, message.Edits);
 
     for (const BlockEdit& edit : message.Edits)
         ApplyConfirmedBlock(edit.Position, edit.Block);
@@ -699,4 +708,16 @@ MatchClient::RemotePose MatchClient::PoseOf(PlayerId player, float alpha) const
     }
 
     return RemotePose{ newest.Position, newest.Yaw, newest.Pitch };
+}
+
+void MatchClient::RecordShownEdit(bool local, std::vector<BlockEdit> edits)
+{
+    ShownEdit shown;
+    shown.Serial = ++m_EditSerial;
+    shown.Local = local;
+    shown.Edits = std::move(edits);
+
+    m_RecentEdits.push_back(std::move(shown));
+    if (m_RecentEdits.size() > MaxRecentEvents)
+        m_RecentEdits.pop_front();
 }

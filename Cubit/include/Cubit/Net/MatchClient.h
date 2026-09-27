@@ -36,6 +36,11 @@ constexpr std::size_t MaxUnackedInputs = 120;
 //so this is the backlog a burst of clicks can build before extras are dropped.
 constexpr std::size_t MaxQueuedEdits = 4;
 
+//How many shot rulings and shown edits a client remembers, newest last. Enough
+//for a reader polling once a frame to miss nothing: 32 events inside one frame
+//is a burst no match produces.
+constexpr std::size_t MaxRecentEvents = 32;
+
 //How far prediction may disagree with the server before the correction is
 //shown, in blocks, as a full 3D distance.
 //
@@ -221,9 +226,35 @@ public:
         //This client's own tick when the ruling arrived, so a caller can fade
         //the marker out without keeping its own clock.
         std::uint64_t ReceivedAtTick = 0;
+
+        //Counts up from 1 across every ruling this client receives, so a
+        //reader can take each one exactly once however many arrive together.
+        std::uint64_t Serial = 0;
     };
 
     const std::optional<ShotReport>& LastShot() const { return m_LastShot; }
+
+    //The last MaxRecentEvents rulings, oldest first. LastShot is the back.
+    const std::deque<ShotReport>& RecentShots() const { return m_RecentShots; }
+
+    //A change to the world this client has put on screen: its own edit, when
+    //the prediction is shown, or another player's or the server's, when the
+    //server says so. Not the server's answer to this client's own edit, which
+    //was already shown when it was predicted.
+    struct ShownEdit
+    {
+        //Counts up from 1, shared by local and remote edits.
+        std::uint64_t Serial = 0;
+
+        //This client's own predicted edit.
+        bool Local = false;
+
+        //One for a player's edit; many for a server batch such as a collapse.
+        std::vector<BlockEdit> Edits;
+    };
+
+    //The last MaxRecentEvents shown edits, oldest first.
+    const std::deque<ShownEdit>& RecentEdits() const { return m_RecentEdits; }
 
     //This client's own health, as last reported by a snapshot. Zero before the
     //first snapshot arrives.
@@ -240,6 +271,7 @@ private:
     //prediction on that cell when there is one, so what shows stays this
     //client's prediction until that prediction resolves; written to the world
     //directly otherwise.
+    void RecordShownEdit(bool local, std::vector<BlockEdit> edits);
     void ApplyConfirmedBlock(const glm::ivec3& cell, BlockId block);
 
     //Re-applies the prediction made on `tick` during replay, as a block write
@@ -365,6 +397,11 @@ private:
     float m_CorrectionMax = 0.0f;
 
     std::optional<ShotReport> m_LastShot;
+    std::deque<ShotReport> m_RecentShots;
+    std::uint64_t m_ShotSerial = 0;
+
+    std::deque<ShownEdit> m_RecentEdits;
+    std::uint64_t m_EditSerial = 0;
     std::uint8_t m_LocalHealth = 0;
 
     //The newest spare-input report from this client's own snapshot entry, and
