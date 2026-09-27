@@ -18,6 +18,7 @@
 #include "Cubit/CursorCapture.h"
 #include "Cubit/MatchRules.h"
 #include "Cubit/MouseCodes.h"
+#include "Cubit/Paths.h"
 #include "Cubit/Profiler.h"
 #include "Cubit/Renderer/GraphicsContext.h"
 #include "Cubit/Renderer/Camera.h"

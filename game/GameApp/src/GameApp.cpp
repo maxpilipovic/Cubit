@@ -1002,6 +1002,11 @@ private:
         // leaves the current world untouched, rather than half-replaced.
         m_Match.ReplaceWorld(BuildWorld(VoxLoader::LoadFile(path)));
 
+        // Absolute, as the harness logs it: with --map resolved against the
+        // launch directory and everything else against the executable, which
+        // file was actually read is worth a line.
+        CB_INFO(std::string("Loaded world from ") + std::filesystem::absolute(path).string());
+
         // Light has to exist before anything meshes, or the first frames bake
         // a fully dark world into their vertex colours.
         SkyLight::PropagateAll(World_());
@@ -1257,6 +1262,11 @@ public:
 //executable checking POS and FACES, and none of it may start needing a server.
 int main(int argc, char** argv)
 {
+    //First, before the logger or the crash handler opens anything: assets,
+    //settings.cfg, logs and dumps are all beside the executable, wherever the
+    //game was started from.
+    const std::filesystem::path launchDirectory = EnterExecutableDirectory();
+
     CrashHandler::Install("Game");
     Logger::OpenFile("Game");
 
@@ -1286,7 +1296,7 @@ int main(int argc, char** argv)
             options.Loss = static_cast<float>(std::atof(argv[++i])) / 100.0f;
         else if (arg == "--map" && i + 1 < argc)
         {
-            options.MapPath = argv[++i];
+            options.MapPath = FromLaunchDirectory(argv[++i], launchDirectory).string();
             mapGiven = true;
         }
     }

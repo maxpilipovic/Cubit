@@ -5,6 +5,7 @@
 #include "Cubit/Net/MapHash.h"
 #include "Cubit/Net/MatchServer.h"
 #include "Cubit/Net/SimulatedTransport.h"
+#include "Cubit/Paths.h"
 #include "Cubit/Voxel/CharacterController.h"
 #include "Cubit/Voxel/SkyLight.h"
 #include "Cubit/Voxel/SpawnFinder.h"
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -87,6 +89,10 @@ namespace
 //is what makes this eighty lines rather than an engine refactor.
 int main(int argc, char** argv)
 {
+    //First, before the logger or the crash handler opens anything: the map,
+    //logs and dumps are all beside the executable, wherever it was started from.
+    const std::filesystem::path launchDirectory = EnterExecutableDirectory();
+
     CrashHandler::Install("Server");
     Logger::OpenFile("Server");
 
@@ -117,7 +123,7 @@ int main(int argc, char** argv)
         else if (arg == "--loss" && i + 1 < argc)
             loss = static_cast<float>(std::atof(argv[++i])) / 100.0f;
         else
-            mapPath = arg;
+            mapPath = FromLaunchDirectory(arg, launchDirectory).string();
     }
 
 #ifdef _WIN32

@@ -721,7 +721,20 @@ them. Every item was checked in the code unless it says otherwise. References ar
   doc's prototype band needs them, and flat colour is the look. Reopen it for the first
   effect that needs one. No framebuffer objects anywhere, so no post-processing or
   shadows; underwater fog tints geometry but not the sky.
-- [ ] **C5. An asset layer.** **Split 2026-09-27.** To do: resolve assets and settings
+- [x] **C5. An asset layer.** **Paths done 2026-09-27; the rest dropped on purpose.** `Paths.h`
+  gives `ExecutableDirectory`, `EnterExecutableDirectory` and `FromLaunchDirectory`. Sandbox,
+  GameApp and Server call `EnterExecutableDirectory` first in `main`, before the crash
+  handler and logger, so assets, settings, logs, dumps and profiles are all beside the
+  executable. A `--map` path is taken from the launch directory when the file exists there,
+  and otherwise falls through to the executable's, so old scripts still work. MapGen is left
+  alone, because the file it writes should follow the shell. GameApp now logs the
+  absolute path of the map it loaded, as the harness already did. Tests: 3 engine cases
+  (the directory holds `Tests.exe`; entering it reports where it came from; `--map`
+  resolution both ways and for an absolute path). Checked by running: all three apps
+  started from a scratch directory exited 0 with their logs beside the executable and
+  nothing written to the launch directory, and `--map mine.vox` loaded the launch
+  directory's copy while `--map assets/maps/starter.vox` loaded the shipped one.
+  Original split note: **Split 2026-09-27.** To do: resolve assets and settings
   against the executable rather than the working directory, because launching from
   anywhere else aborts in a way that looks like a render bug. Dropped on purpose: shaders
   in files and image decoding, until something needs them. Shaders are string literals in Sandbox sources

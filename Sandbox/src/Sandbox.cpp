@@ -643,10 +643,14 @@ public:
 
 int main(int argc, char** argv)
 {
+    //First, before the logger or the crash handler opens anything: every path
+    //after this is beside the executable, wherever the harness was started from.
+    const std::filesystem::path launchDirectory = EnterExecutableDirectory();
+
     std::string mapPath = MapPath;
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--map" && i + 1 < argc)
-            mapPath = argv[++i];
+            mapPath = FromLaunchDirectory(argv[++i], launchDirectory).string();
 
     CrashHandler::Install("Sandbox");
     Logger::OpenFile("Sandbox");

@@ -255,6 +255,13 @@ run after it.
 `--map <path>` loads another map in single-player, and does the same for the harness.
 Connected, the server names the map.
 
+The programs can be started from any directory. `Sandbox`, `GameApp` and `Server` look
+for their assets and `settings.cfg`, and write `logs/`, `crashes/` and profiles,
+beside their own executable, whatever the working directory. A `--map` path is taken
+from the directory you launched from when the file is there, and otherwise from beside
+the executable, so both `--map mine.vox` and `--map assets/maps/starter.vox` work.
+`MapGen` is the exception: the file it writes is wherever you name it.
+
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
