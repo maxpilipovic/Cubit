@@ -16,6 +16,17 @@ before the match-rules arc starts.** Tick items as they land and say how; do not
 them. Every item was checked in the code unless it says otherwise. References are as of
 `91a08e6`.
 
+**Status 2026-09-27: the engine side of this list is finished.** Section A is done. Section
+C is done: C1 and C5 fixed, and C2, C3, C4 and C6 dropped on purpose with the reason
+recorded. Section B is done except five items, none of which is engine work that can go
+first:
+- B3a (team colours), B3b (held tool) and B4a (widgets) need D1's teams, D2's tool slots
+  and the first real screen, and are meant to be designed with them.
+- B3d is content: re-author `player.vox`.
+- B7a records what audio left alone.
+
+What comes next is section D, the match-rules arc.
+
 ### A. Wrong today — bugs and robustness
 
 - [x] **A1. A server stall may add input delay for the rest of the session.** **Confirmed
