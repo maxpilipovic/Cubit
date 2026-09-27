@@ -150,6 +150,30 @@ threaded remeshing are frequent.
 
 **Priority:** low. **Status:** open.
 
+**Measured 2026-09-27, before doing anything** (roadmap C1). Temporary instrumentation
+timed `ChunkMesher::Build` and the upload separately, and the Sandbox marked all 4,096
+chunks dirty 15 s in, so every chunk with geometry (2,408) was remeshed over buffers it
+already had. Two to three runs each, battlefield512:
+
+| | Meshing | Upload |
+|---|---|---|
+| Release, first load | ~400 ms | **2,800 – 5,500 ms** |
+| Release, full remesh | ~300 ms | 70 – 74 ms |
+| Debug, first load | ~5,000 ms | 160 – 190 ms |
+| Debug, full remesh | ~5,000 ms | ~111 ms |
+
+What this changes:
+
+- **This item is worth almost nothing as written.** Free-and-reallocate costs about
+  0.03 ms per chunk in Release. Reusing the buffers could save at most that.
+- **The real Release load cost is the first upload of each chunk, not meshing:** 1–2 ms
+  a chunk, and it varies run to run. The same work costs 74 ms on a remesh and under
+  200 ms on a first load in Debug, where meshing is slow enough to spread the uploads
+  thinly across frames. The cause is not known. Candidates: a driver stall when many
+  uploads land in one Release frame, and first-time VRAM growth.
+- **P8 / C3's "meshing is the load cost" holds in Debug only.** In Release, meshing the
+  whole map takes 0.4 s.
+
 ---
 
 ## P5 — One draw call per chunk (no batching)
