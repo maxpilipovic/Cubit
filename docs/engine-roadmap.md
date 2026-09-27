@@ -696,13 +696,20 @@ them. Every item was checked in the code unless it says otherwise. References ar
 
 ### C. Known and parked — do each, or drop it on purpose
 
-- [ ] **C1. GPU buffers reallocated on every remesh** — P4 in
+- [ ] **C1. GPU buffers reallocated on every remesh** — **Rescoped 2026-09-27.** Measured
+  first: reuse is worth about 0.03 ms a chunk, so buffer reuse is dropped on purpose. What
+  the measurement found instead, a chunk's FIRST upload costing 1-2 ms in Release (2.8-5.5
+  s of pop-in at load), becomes a spike: find why, and try cheap fixes. Numbers in
+  [performance.md](performance.md) under P4. P4 in
   [performance.md](performance.md), low priority, open.
 - [x] ~~**C2. One draw call per chunk**~~ — **Dropped 2026-09-27, on purpose.** About 930
   draws a frame at 140+ fps on fixed-size maps, with no measured cost. Batching would
   also fight the per-chunk frustum cull that decides what is drawn. Reopen it with a
   profile that shows draw submission mattering. P5, low priority.
-- [ ] **C3. Threaded meshing** — about 5 s of debug meshing spread across frames; the last
+- [x] ~~**C3. Threaded meshing**~~ — **Dropped 2026-09-27, on purpose.** Measured: meshing
+  the whole map is about 5 s in Debug but 0.4 s in Release, so only Debug iteration would
+  gain, and threading World reads against edits was the riskiest change left. Reopen it
+  if a bigger map makes Release meshing matter. About 5 s of debug meshing spread across frames; the last
   performance item with real leverage.
 - [x] ~~**C4. Render targets.**~~ **Dropped 2026-09-27, on purpose:** nothing in the scope
   doc's prototype band needs them, and flat colour is the look. Reopen it for the first
