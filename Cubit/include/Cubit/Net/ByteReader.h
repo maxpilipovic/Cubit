@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <vector>
 
 //Reads a little-endian byte buffer produced by ByteWriter.
 //
@@ -94,6 +95,22 @@ public:
         const char* begin = reinterpret_cast<const char*>(m_Bytes.data() + m_Offset);
         m_Offset += length;
         return std::string(begin, begin + length);
+    }
+
+    //The blob counterpart of String(): a u16 length and that many raw bytes,
+    //refused the same way a length the buffer cannot back is.
+    std::vector<std::uint8_t> Blob()
+    {
+        const std::uint16_t length = U16();
+        if (!m_Ok || Remaining() < length)
+        {
+            m_Ok = false;
+            return {};
+        }
+
+        std::vector<std::uint8_t> out(m_Bytes.begin() + m_Offset, m_Bytes.begin() + m_Offset + length);
+        m_Offset += length;
+        return out;
     }
 
     bool Ok() const { return m_Ok; }

@@ -91,6 +91,12 @@ void MatchClient::Step(double seconds)
             case MessageId::Input:
             case MessageId::Fire:
                 break;
+
+            //No game mode reads these yet - Tasks 3 and 5 give a mode the
+            //chance to.
+            case MessageId::GameState:
+            case MessageId::GameCommand:
+                break;
             }
             break;
         }

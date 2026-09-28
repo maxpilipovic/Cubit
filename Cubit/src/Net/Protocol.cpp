@@ -12,6 +12,7 @@ namespace
     //The snapshot entry's flag byte, likewise the Grounded bool before 7.
     constexpr std::uint8_t SnapshotGroundedBit = 1u << 0;
     constexpr std::uint8_t SnapshotCrouchedBit = 1u << 1;
+    constexpr std::uint8_t SnapshotAliveBit = 1u << 2;
 
     //Bytes each entry costs on the wire. Used to reject an absurd count before
     //reserving for it, which is what stops a tiny hostile packet claiming a
@@ -84,6 +85,8 @@ std::vector<std::uint8_t> Encode(const WelcomeMessage& message)
     for (const BlockEdit& edit : message.Edits)
         WriteEdit(writer, edit);
 
+    writer.Blob(message.GameState);
+
     return writer.Bytes();
 }
 
@@ -128,7 +131,8 @@ std::vector<std::uint8_t> Encode(const SnapshotMessage& message)
         writer.F32(player.Pitch);
         writer.F32(player.VerticalVelocity);
         writer.U8(static_cast<std::uint8_t>(
-            (player.Grounded ? SnapshotGroundedBit : 0u) | (player.Crouched ? SnapshotCrouchedBit : 0u)));
+            (player.Grounded ? SnapshotGroundedBit : 0u) | (player.Crouched ? SnapshotCrouchedBit : 0u) |
+            (player.Alive ? SnapshotAliveBit : 0u)));
         writer.U64(player.LastInputTick);
         writer.U8(player.Health);
         writer.U8(player.SpareInputs);
@@ -235,13 +239,16 @@ bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out)
     for (std::uint32_t i = 0; i < count; ++i)
         message.Edits.push_back(ReadEdit(reader));
 
+    message.GameState = reader.Blob();
+
     //Still earns its keep for You/MapName/MapHash/Tick/count, any of which
     //can fail on a short buffer before the guard above ever runs. It cannot
     //fail here in the edit loop itself: the guard above already proved
     //count * BlockEditBytes <= Remaining(), so the loop can never run short.
     //That does not make this check redundant to delete - it makes it correct
     //to leave, because nothing prevents a future change to Edits or the guard
-    //above from making the loop fallible again.
+    //above from making the loop fallible again. Blob() can still fail on its
+    //own account, on a packet whose game-state length outruns what remains.
     if (!reader.Ok())
         return false;
 
@@ -342,6 +349,7 @@ bool Decode(std::span<const std::uint8_t> bytes, SnapshotMessage& out)
         const std::uint8_t flags = reader.U8();
         player.Grounded = (flags & SnapshotGroundedBit) != 0;
         player.Crouched = (flags & SnapshotCrouchedBit) != 0;
+        player.Alive = (flags & SnapshotAliveBit) != 0;
         player.LastInputTick = reader.U64();
         player.Health = reader.U8();
         player.SpareInputs = reader.U8();
@@ -446,6 +454,52 @@ bool Decode(std::span<const std::uint8_t> bytes, EditResultMessage& out)
     return true;
 }
 
+std::vector<std::uint8_t> Encode(const GameStateMessage& message)
+{
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::GameState));
+    writer.Blob(message.Bytes);
+    return writer.Bytes();
+}
+
+bool Decode(std::span<const std::uint8_t> bytes, GameStateMessage& out)
+{
+    ByteReader reader(bytes);
+    if (!OpenAs(reader, MessageId::GameState))
+        return false;
+
+    GameStateMessage message;
+    message.Bytes = reader.Blob();
+    if (!reader.Ok() || message.Bytes.size() > MaxGameStateBytes)
+        return false;
+
+    out = std::move(message);
+    return true;
+}
+
+std::vector<std::uint8_t> Encode(const GameCommandMessage& message)
+{
+    ByteWriter writer;
+    writer.U8(static_cast<std::uint8_t>(MessageId::GameCommand));
+    writer.Blob(message.Bytes);
+    return writer.Bytes();
+}
+
+bool Decode(std::span<const std::uint8_t> bytes, GameCommandMessage& out)
+{
+    ByteReader reader(bytes);
+    if (!OpenAs(reader, MessageId::GameCommand))
+        return false;
+
+    GameCommandMessage message;
+    message.Bytes = reader.Blob();
+    if (!reader.Ok() || message.Bytes.size() > MaxGameCommandBytes)
+        return false;
+
+    out = std::move(message);
+    return true;
+}
+
 bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
 {
     if (bytes.empty())
@@ -463,6 +517,8 @@ bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out)
     case MessageId::Fire:
     case MessageId::ShotResolved:
     case MessageId::EditResult:
+    case MessageId::GameState:
+    case MessageId::GameCommand:
         out = static_cast<MessageId>(bytes[0]);
         return true;
     }

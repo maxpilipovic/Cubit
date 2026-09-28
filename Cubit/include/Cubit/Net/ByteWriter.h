@@ -75,6 +75,15 @@ public:
         m_Bytes.insert(m_Bytes.end(), value.begin(), value.begin() + length);
     }
 
+    //A length-prefixed run of bytes the protocol carries without reading - a
+    //game mode's state or command. u16 length: nothing that uses it may exceed
+    //65535, and every user has a far smaller cap of its own.
+    void Blob(std::span<const std::uint8_t> bytes)
+    {
+        U16(static_cast<std::uint16_t>(bytes.size()));
+        m_Bytes.insert(m_Bytes.end(), bytes.begin(), bytes.end());
+    }
+
     const std::vector<std::uint8_t>& Bytes() const { return m_Bytes; }
 
     std::span<const std::uint8_t> Span() const { return m_Bytes; }

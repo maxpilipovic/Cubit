@@ -447,6 +447,11 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
     case MessageId::EditApplied:
     case MessageId::ShotResolved:
         return;
+
+    //No game mode reads these yet - Tasks 3 and 5 give a mode the chance to.
+    case MessageId::GameState:
+    case MessageId::GameCommand:
+        return;
     }
 }
 

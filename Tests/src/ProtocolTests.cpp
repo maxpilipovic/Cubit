@@ -262,7 +262,7 @@ TEST_CASE("A retired message id is not recognised")
     CHECK_FALSE(Decode(retired, edit));
 
     CHECK_FALSE(PeekMessageId(std::vector<std::uint8_t>{ 0 }, id));
-    CHECK_FALSE(PeekMessageId(std::vector<std::uint8_t>{ 10 }, id));
+    CHECK_FALSE(PeekMessageId(std::vector<std::uint8_t>{ 12 }, id));
 }
 
 TEST_CASE("A message of the wrong type is refused")
@@ -315,6 +315,14 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
         result.Accepted = true;
         result.Edit = BlockEdit{ glm::ivec3(4, 4, 4), BlockId{ 2 } };
         messages.push_back(Encode(result));
+
+        GameStateMessage state;
+        state.Bytes = { 1, 2, 3 };
+        messages.push_back(Encode(state));
+
+        GameCommandMessage command;
+        command.Bytes = { 1 };
+        messages.push_back(Encode(command));
     }
 
     for (const std::vector<std::uint8_t>& whole : messages)
@@ -333,17 +341,21 @@ TEST_CASE("Every message truncated at every length is refused without crashing")
             SnapshotMessage snapshot;
             EditMessage edit;
             EditResultMessage editResult;
+            GameStateMessage state;
+            GameCommandMessage command;
 
             //Whichever decoder matches the id must refuse; the rest refuse on
             //the id alone. Either way nothing throws and nothing is trusted.
             switch (id)
             {
-            case MessageId::Hello:       CHECK_FALSE(Decode(truncated, hello)); break;
-            case MessageId::Welcome:     CHECK_FALSE(Decode(truncated, welcome)); break;
-            case MessageId::Input:       CHECK_FALSE(Decode(truncated, input)); break;
-            case MessageId::Snapshot:    CHECK_FALSE(Decode(truncated, snapshot)); break;
-            case MessageId::EditApplied: CHECK_FALSE(Decode(truncated, edit)); break;
-            case MessageId::EditResult:  CHECK_FALSE(Decode(truncated, editResult)); break;
+            case MessageId::Hello:        CHECK_FALSE(Decode(truncated, hello)); break;
+            case MessageId::Welcome:      CHECK_FALSE(Decode(truncated, welcome)); break;
+            case MessageId::Input:        CHECK_FALSE(Decode(truncated, input)); break;
+            case MessageId::Snapshot:     CHECK_FALSE(Decode(truncated, snapshot)); break;
+            case MessageId::EditApplied:  CHECK_FALSE(Decode(truncated, edit)); break;
+            case MessageId::EditResult:   CHECK_FALSE(Decode(truncated, editResult)); break;
+            case MessageId::GameState:    CHECK_FALSE(Decode(truncated, state)); break;
+            case MessageId::GameCommand:  CHECK_FALSE(Decode(truncated, command)); break;
             }
         }
     }
@@ -486,7 +498,9 @@ TEST_CASE("Every message id the wire carries is recognised")
         { EncodeEditApplied(EditMessage{}),         MessageId::EditApplied },
         { Encode(FireMessage{}),                    MessageId::Fire },
         { Encode(ShotResolvedMessage{}),            MessageId::ShotResolved },
-        { Encode(EditResultMessage{}),              MessageId::EditResult }
+        { Encode(EditResultMessage{}),              MessageId::EditResult },
+        { Encode(GameStateMessage{}),                MessageId::GameState },
+        { Encode(GameCommandMessage{}),              MessageId::GameCommand },
     };
 
     for (const auto& [bytes, expected] : cases)
@@ -617,4 +631,77 @@ TEST_CASE("Grounded and crouched ride one snapshot byte, every combination apart
         CHECK(received.Players[i].Grounded == sent.Players[i].Grounded);
         CHECK(received.Players[i].Crouched == sent.Players[i].Crouched);
     }
+}
+
+TEST_CASE("The alive bit rides the snapshot flag byte without growing it")
+{
+    SnapshotMessage sent;
+    sent.Tick = 9;
+    for (int i = 0; i < 8; ++i)
+    {
+        PlayerSnapshot player;
+        player.Player = static_cast<PlayerId>(i + 1);
+        player.Grounded = (i & 1) != 0;
+        player.Crouched = (i & 2) != 0;
+        player.Alive = (i & 4) != 0;
+        sent.Players.push_back(player);
+    }
+
+    CHECK(Encode(sent).size() == Encode(SnapshotMessage{ 9, {} }).size() + 8 * 37);
+
+    SnapshotMessage received;
+    REQUIRE(Decode(Encode(sent), received));
+    for (int i = 0; i < 8; ++i)
+    {
+        CAPTURE(i);
+        CHECK(received.Players[i].Grounded == sent.Players[i].Grounded);
+        CHECK(received.Players[i].Crouched == sent.Players[i].Crouched);
+        CHECK(received.Players[i].Alive == sent.Players[i].Alive);
+    }
+}
+
+TEST_CASE("Game state and game commands round-trip their bytes untouched")
+{
+    GameStateMessage state;
+    state.Bytes = { 0, 1, 2, 250, 255 };
+    GameStateMessage stateBack;
+    REQUIRE(Decode(Encode(state), stateBack));
+    CHECK(stateBack.Bytes == state.Bytes);
+
+    GameCommandMessage command;
+    command.Bytes = { 1 };
+    GameCommandMessage commandBack;
+    REQUIRE(Decode(Encode(command), commandBack));
+    CHECK(commandBack.Bytes == command.Bytes);
+
+    //Empty is legal: a mode with nothing to say.
+    GameStateMessage empty;
+    GameStateMessage emptyBack;
+    REQUIRE(Decode(Encode(empty), emptyBack));
+    CHECK(emptyBack.Bytes.empty());
+}
+
+TEST_CASE("An oversized game command is refused on decode")
+{
+    GameCommandMessage command;
+    command.Bytes.assign(MaxGameCommandBytes + 1, 7);
+    GameCommandMessage back;
+    CHECK_FALSE(Decode(Encode(command), back));
+}
+
+TEST_CASE("Welcome carries the game state for a late joiner")
+{
+    WelcomeMessage sent;
+    sent.You = 3;
+    sent.MapName = "m.vox";
+    sent.GameState = { 9, 8, 7 };
+
+    WelcomeMessage back;
+    REQUIRE(Decode(Encode(sent), back));
+    CHECK(back.GameState == sent.GameState);
+}
+
+TEST_CASE("The protocol is version 8")
+{
+    CHECK(ProtocolVersion == 8u);
 }

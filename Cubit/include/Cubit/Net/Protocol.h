@@ -18,7 +18,7 @@
 #pragma warning(disable: 4251)
 #endif
 
-//Every message the wire carries. Eight, and deliberately no join or leave
+//Every message the wire carries. Ten, and deliberately no join or leave
 //messages among them: a snapshot carries the whole roster every tick and ids
 //are never reused, so a client derives both by diffing what it held last.
 enum class MessageId : std::uint8_t
@@ -31,7 +31,9 @@ enum class MessageId : std::uint8_t
     EditApplied = 6,
     Fire = 7,
     ShotResolved = 8,
-    EditResult = 9
+    EditResult = 9,
+    GameState = 10,
+    GameCommand = 11
 };
 
 //Bumped whenever any message's layout changes. A mismatch is a disconnect with
@@ -57,7 +59,11 @@ enum class MessageId : std::uint8_t
 //
 //7: crouching. The input's Jump byte and the snapshot's Grounded byte became
 //flag bytes, each gaining a crouch bit, so no packet grew. On the per-tick path.
-constexpr std::uint32_t ProtocolVersion = 7;
+//
+//8: game modes. GameState and GameCommand carry a game's own bytes, Welcome
+//carries the current state, and the snapshot's flag byte gains an alive bit.
+//On the per-tick path.
+constexpr std::uint32_t ProtocolVersion = 8;
 
 //The most edits one EditApplied carries. The server splits a bigger batch across
 //several messages, 14 bytes an edit, so about 57 KB each: no batch can come near
@@ -103,6 +109,11 @@ struct WelcomeMessage
     //what makes joining late correct: without it a client arriving after
     //somebody dug a hole would get a pristine world.
     std::vector<BlockEdit> Edits;
+
+    //The game mode's own state, opaque to the wire, so a late joiner starts
+    //agreeing with everyone else about score, flags, whatever the mode keeps.
+    //Empty for a mode with nothing to say.
+    std::vector<std::uint8_t> GameState;
 };
 
 struct InputMessage
@@ -174,6 +185,12 @@ struct PlayerSnapshot
     //client catches up by not making that many inputs. Per-player for the same
     //reason LastInputTick is.
     std::uint8_t SpareInputs = 0;
+
+    //Whether a game rule has killed this player. A dead player stays in the
+    //roster rather than vanishing from it - ids are never reused and a
+    //snapshot carries everyone every tick - so a client hides them and stops
+    //predicting its own movement while dead.
+    bool Alive = true;
 };
 
 struct SnapshotMessage
@@ -260,6 +277,28 @@ struct EditResultMessage
     BlockEdit Edit;
 };
 
+//The most bytes a game mode's state or a single command may carry. Guards
+//against a hostile or desynced peer claiming a blob the sender never meant -
+//a resource limit, not a protocol one, so raising it later is not a version
+//bump. State is the bigger of the two because it may describe a whole match
+//(score, flags, whatever a mode keeps); a command is one player's action and
+//is sent far more often, so its cap stays small.
+constexpr std::size_t MaxGameStateBytes = 4096;
+constexpr std::size_t MaxGameCommandBytes = 64;
+
+//A game mode's own state, opaque to everything but the mode itself. The
+//engine carries the bytes and never reads them.
+struct GameStateMessage
+{
+    std::vector<std::uint8_t> Bytes;
+};
+
+//A game mode's own command from a client, opaque the same way.
+struct GameCommandMessage
+{
+    std::vector<std::uint8_t> Bytes;
+};
+
 CB_API std::vector<std::uint8_t> Encode(const HelloMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const WelcomeMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const InputMessage& message);
@@ -268,6 +307,8 @@ CB_API std::vector<std::uint8_t> EncodeEditApplied(const EditMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const FireMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const ShotResolvedMessage& message);
 CB_API std::vector<std::uint8_t> Encode(const EditResultMessage& message);
+CB_API std::vector<std::uint8_t> Encode(const GameStateMessage& message);
+CB_API std::vector<std::uint8_t> Encode(const GameCommandMessage& message);
 
 //Each returns false and leaves `out` untouched when the bytes are truncated,
 //malformed, or of the wrong type. Malformed input is a routine wire condition
@@ -280,9 +321,11 @@ CB_API bool Decode(std::span<const std::uint8_t> bytes, EditMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, FireMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, ShotResolvedMessage& out);
 CB_API bool Decode(std::span<const std::uint8_t> bytes, EditResultMessage& out);
+CB_API bool Decode(std::span<const std::uint8_t> bytes, GameStateMessage& out);
+CB_API bool Decode(std::span<const std::uint8_t> bytes, GameCommandMessage& out);
 
 //Reads the leading id without consuming anything, so a receiver can pick a
-//decoder. False when the buffer is empty or the id is not one of the eight.
+//decoder. False when the buffer is empty or the id is not one of the ten.
 CB_API bool PeekMessageId(std::span<const std::uint8_t> bytes, MessageId& out);
 
 #ifdef _MSC_VER
