@@ -701,6 +701,29 @@ TEST_CASE("Welcome carries the game state for a late joiner")
     CHECK(back.GameState == sent.GameState);
 }
 
+TEST_CASE("A welcome's game state obeys the same cap as GameStateMessage")
+{
+    //Decode(GameStateMessage&) refuses anything over MaxGameStateBytes; a
+    //Welcome carries the identical blob and must refuse it the same way,
+    //rather than accepting up to Blob()'s own 65535-byte ceiling.
+    WelcomeMessage atCap;
+    atCap.You = 3;
+    atCap.MapName = "m.vox";
+    atCap.GameState.assign(MaxGameStateBytes, 7);
+
+    WelcomeMessage back;
+    REQUIRE(Decode(Encode(atCap), back));
+    CHECK(back.GameState == atCap.GameState);
+
+    WelcomeMessage overCap;
+    overCap.You = 3;
+    overCap.MapName = "m.vox";
+    overCap.GameState.assign(MaxGameStateBytes + 1, 7);
+
+    WelcomeMessage refused;
+    CHECK_FALSE(Decode(Encode(overCap), refused));
+}
+
 TEST_CASE("The protocol is version 8")
 {
     CHECK(ProtocolVersion == 8u);

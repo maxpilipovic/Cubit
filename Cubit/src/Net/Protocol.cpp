@@ -249,7 +249,12 @@ bool Decode(std::span<const std::uint8_t> bytes, WelcomeMessage& out)
     //to leave, because nothing prevents a future change to Edits or the guard
     //above from making the loop fallible again. Blob() can still fail on its
     //own account, on a packet whose game-state length outruns what remains.
-    if (!reader.Ok())
+    //
+    //Blob() alone would let this through up to its own 65535-byte ceiling -
+    //far past what Decode(GameStateMessage&) accepts for the identical bytes
+    //sent any other way. The cap belongs to the game state, not to Welcome,
+    //so it is enforced here too.
+    if (!reader.Ok() || message.GameState.size() > MaxGameStateBytes)
         return false;
 
     out = std::move(message);
