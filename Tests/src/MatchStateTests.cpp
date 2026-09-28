@@ -521,3 +521,38 @@ TEST_CASE("Stepping every player one at a time is stepping the whole match")
         CHECK(viaStepPlayer.Tick() == viaStep.Tick());
     }
 }
+
+TEST_CASE("A dead player is not stepped, and is again once alive")
+{
+    World world(2, 2, 2);
+    for (int z = 0; z < world.GetDepth(); ++z)
+        for (int x = 0; x < world.GetWidth(); ++x)
+            world.SetBlock(x, 0, z, BlockId{ 1 });
+
+    MatchState match(std::move(world));
+    const PlayerId player = match.AddPlayer(glm::vec3(8.0f, 10.0f, 8.0f));
+    CHECK(match.IsAlive(player));
+
+    match.SetAlive(player, false);
+    CHECK_FALSE(match.IsAlive(player));
+
+    //In the air: a stepped player would fall.
+    match.Step({}, 1.0f / 60.0f);
+    match.StepPlayer(player, CharacterInput{}, 1.0f / 60.0f);
+    CHECK(match.Player(player).Position().y == doctest::Approx(10.0f));
+
+    match.SetAlive(player, true);
+    match.Step({}, 1.0f / 60.0f);
+    CHECK(match.Player(player).Position().y < 10.0f);
+}
+
+TEST_CASE("An unknown player is not alive, and removing a dead one forgets it")
+{
+    MatchState match(World(1, 1, 1));
+    CHECK_FALSE(match.IsAlive(42));
+
+    const PlayerId player = match.AddPlayer(glm::vec3(4.0f));
+    match.SetAlive(player, false);
+    match.RemovePlayer(player);
+    CHECK_FALSE(match.IsAlive(player));
+}

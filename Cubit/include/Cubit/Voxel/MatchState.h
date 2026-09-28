@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <span>
 
 #ifdef _MSC_VER
@@ -62,6 +63,12 @@ public:
     void RemovePlayer(PlayerId player);
 
     bool HasPlayer(PlayerId player) const;
+
+    //A dead player keeps their place in the roster - their id, their last
+    //position - but is not stepped: no gravity, no input. Only a game rule
+    //(through the server's GameModeHost) kills or revives. Unknown ids are not alive.
+    bool IsAlive(PlayerId player) const;
+    void SetAlive(PlayerId player, bool alive);
 
     //Advances every present player by one fixed step, then increments the
     //tick. Commands naming absent players are ignored; see the note in
@@ -140,6 +147,8 @@ private:
 
     PlayerId m_NextPlayer = 1;
     std::uint64_t m_Tick = 0;
+
+    std::set<PlayerId> m_Dead;
 };
 
 #ifdef _MSC_VER

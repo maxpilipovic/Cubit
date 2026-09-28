@@ -49,11 +49,28 @@ PlayerId MatchState::AddPlayer(PlayerId id, const glm::vec3& spawn)
 void MatchState::RemovePlayer(PlayerId player)
 {
     m_Players.erase(player);
+    m_Dead.erase(player);
 }
 
 bool MatchState::HasPlayer(PlayerId player) const
 {
     return m_Players.find(player) != m_Players.end();
+}
+
+bool MatchState::IsAlive(PlayerId player) const
+{
+    return HasPlayer(player) && m_Dead.count(player) == 0;
+}
+
+void MatchState::SetAlive(PlayerId player, bool alive)
+{
+    if (!HasPlayer(player))
+        return;
+
+    if (alive)
+        m_Dead.erase(player);
+    else
+        m_Dead.insert(player);
 }
 
 const CharacterController& MatchState::Player(PlayerId player) const
@@ -101,6 +118,9 @@ void MatchState::Step(std::span<const PlayerCommand> commands, float seconds)
     {
         const PlayerId player = entry.first;
 
+        if (m_Dead.count(player) != 0)
+            continue;
+
         CharacterInput input;
 
         for (const PlayerCommand& command : commands)
@@ -127,6 +147,9 @@ void MatchState::StepPlayer(PlayerId player, const CharacterInput& input, float 
 {
     const auto found = m_Players.find(player);
     if (found == m_Players.end())
+        return;
+
+    if (m_Dead.count(player) != 0)
         return;
 
     found->second.Step(m_World, input, seconds);
