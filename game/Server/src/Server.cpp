@@ -11,6 +11,7 @@
 #include "Cubit/Voxel/SpawnFinder.h"
 #include "Cubit/Voxel/VoxLoader.h"
 
+#include "CtfMode.h"
 #include "GameRules.h"
 #include "Maps.h"
 
@@ -187,10 +188,19 @@ int main(int argc, char** argv)
         const std::string mapName =
             mapPath.substr(mapPath.find_last_of("/\\") + 1);
 
+        //The match's rules: capture the intel, in the game, behind the engine's
+        //rule-free hook. Seeded from the clock so team ties do not always
+        //break the same way between matches. Declared before the server, which
+        //holds a pointer to it, so it outlives it. The size is read here because
+        //the world is moved into the server below.
+        CubitGame::CtfMode mode(CubitGame::CtfRules{},
+            glm::ivec3(world.GetWidth(), world.GetHeight(), world.GetDepth()),
+            static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
+
         //The Server plays by the same rules its clients do. They come from one
         //build, which is what keeps reach agreeing between the two.
         MatchServer server(std::move(world), mapName, mapHash, *spawn, transport,
-            ServerRules);
+            ServerRules, &mode);
 
         CB_INFO("Listening on port " + std::to_string(port));
 
