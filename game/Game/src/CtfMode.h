@@ -33,6 +33,12 @@ namespace CubitGame
         Team SmallerTeam();
         void Spawn(GameModeHost& host, PlayerId player);
         void QueueRespawn(GameModeHost& host, PlayerId player);
+        void StartMatch(GameModeHost& host);
+        void EndMatch(GameModeHost& host, Team winner);
+        void ResetMatch(GameModeHost& host);
+        void Record(EventKind kind, Team side, PlayerId player);
+        void PlaceIntelsHome(const World& world);
+        void DropIntelOf(GameModeHost& host, PlayerId player);
         void Changed() { m_Changed = true; }
 
         CtfRules m_Rules;

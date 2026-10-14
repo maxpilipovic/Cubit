@@ -6,6 +6,7 @@
 #include "Cubit/Voxel/TerrainGen.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace CubitGame
 {
@@ -31,6 +32,9 @@ namespace CubitGame
 
     void CtfMode::OnJoin(GameModeHost& host, PlayerId player)
     {
+        if (m_State.Players.empty())
+            PlaceIntelsHome(host.Match().GetWorld());
+
         m_State.Players.push_back(PlayerStats{ player, SmallerTeam() });
         Spawn(host, player);
         Changed();
@@ -56,7 +60,12 @@ namespace CubitGame
 
     void CtfMode::OnKilled(GameModeHost& host, PlayerId victim, PlayerId killer)
     {
-        (void)killer;   //scored in Task 9, once phases exist
+        if (m_State.Stage == Phase::Active)
+        {
+            if (PlayerStats* k = m_State.Find(killer)) ++k->Kills;
+            if (PlayerStats* v = m_State.Find(victim)) ++v->Deaths;
+        }
+        DropIntelOf(host, victim);
         QueueRespawn(host, victim);
         Changed();
     }
@@ -116,8 +125,115 @@ namespace CubitGame
         m_ProtectedUntil[player] = host.Tick() + m_Rules.SpawnProtectionTicks;
     }
 
+    void CtfMode::DropIntelOf(GameModeHost&, PlayerId)
+    {
+        //Filled in with the intel itself.
+    }
+
+    void CtfMode::Record(EventKind kind, Team side, PlayerId player)
+    {
+        const std::uint64_t serial = m_State.Events.empty() ? 1 : m_State.Events.back().Serial + 1;
+        m_State.Events.push_back(MatchEvent{ serial, kind, side, player });
+        while (m_State.Events.size() > m_Rules.EventHistory)
+            m_State.Events.pop_front();
+        Changed();
+    }
+
+    void CtfMode::PlaceIntelsHome(const World& world)
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            const glm::ivec2 base = m_Bases[i];
+            int top = 0;
+            for (int y = world.GetHeight() - 1; y >= 0; --y)
+                if (world.IsBlockSolid(base.x, y, base.y)) { top = y + 1; break; }
+
+            Intel& intel = m_State.Intels[i];
+            intel.HomeSpot = glm::vec3(base.x + 0.5f, static_cast<float>(top), base.y + 0.5f);
+            intel.Position = intel.HomeSpot;
+            intel.Status = IntelStatus::Home;
+            intel.Carrier = InvalidPlayer;
+        }
+    }
+
+    void CtfMode::StartMatch(GameModeHost& host)
+    {
+        m_State.Stage = Phase::Active;
+        m_State.StageEndTick = host.Tick() + m_Rules.TimeLimitTicks;
+        m_State.Captures = { 0, 0 };
+        m_State.Winner = Team::None;
+        for (PlayerStats& stats : m_State.Players)
+            stats.Kills = stats.Deaths = stats.Captures = 0;
+        PlaceIntelsHome(host.Match().GetWorld());
+        Record(EventKind::MatchStarted, Team::None, InvalidPlayer);
+    }
+
+    void CtfMode::EndMatch(GameModeHost& host, Team winner)
+    {
+        m_State.Stage = Phase::Ended;
+        m_State.StageEndTick = host.Tick() + m_Rules.EndScreenTicks;
+        m_State.Winner = winner;
+        Record(winner == Team::None ? EventKind::Draw : EventKind::MatchWon, winner, InvalidPlayer);
+    }
+
+    void CtfMode::ResetMatch(GameModeHost& host)
+    {
+        host.ResetWorld();
+        m_State.Captures = { 0, 0 };
+        m_State.Winner = Team::None;
+        for (PlayerStats& stats : m_State.Players)
+        {
+            stats.Kills = stats.Deaths = stats.Captures = 0;
+            host.Kill(stats.Player);
+            Spawn(host, stats.Player);
+        }
+        PlaceIntelsHome(host.Match().GetWorld());
+        m_State.Stage = Phase::Warmup;
+        m_State.StageEndTick = 0;
+        Changed();
+    }
+
     void CtfMode::Step(GameModeHost& host)
     {
+        const std::uint64_t now = host.Tick();
+        const bool bothTeams = m_State.TeamSize(Team::Blue) > 0 && m_State.TeamSize(Team::Green) > 0;
+
+        switch (m_State.Stage)
+        {
+        case Phase::Warmup:
+            if (bothTeams)
+            {
+                m_State.Stage = Phase::Countdown;
+                m_State.StageEndTick = now + m_Rules.CountdownTicks;
+                Changed();
+            }
+            break;
+
+        case Phase::Countdown:
+            if (!bothTeams)
+            {
+                m_State.Stage = Phase::Warmup;
+                m_State.StageEndTick = 0;
+                Changed();
+            }
+            else if (now >= m_State.StageEndTick)
+                StartMatch(host);
+            break;
+
+        case Phase::Active:
+            if (now >= m_State.StageEndTick)
+            {
+                const auto [blue, green] = std::pair{ m_State.Captures[0], m_State.Captures[1] };
+                EndMatch(host, blue == green ? Team::None : (blue > green ? Team::Blue : Team::Green));
+            }
+            break;
+
+        case Phase::Ended:
+            if (now >= m_State.StageEndTick)
+                ResetMatch(host);
+            break;
+        }
+
         for (PlayerStats& stats : m_State.Players)
         {
             if (stats.RespawnTick != 0 && host.Tick() >= stats.RespawnTick)

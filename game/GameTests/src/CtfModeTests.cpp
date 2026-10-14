@@ -165,3 +165,116 @@ TEST_CASE("Every change is reported once")
     CHECK(mode.TakeStateChanged());
     CHECK_FALSE(mode.TakeStateChanged());
 }
+
+namespace
+{
+    CtfRules Quick()
+    {
+        CtfRules rules;
+        rules.CountdownTicks = 10;
+        rules.TimeLimitTicks = 1000;
+        rules.EndScreenTicks = 20;
+        return rules;
+    }
+
+    //Two players, one each side, run through the countdown into the match.
+    struct Match
+    {
+        CtfMode Mode;
+        FakeHost Host;
+        PlayerId Blue = InvalidPlayer, Green = InvalidPlayer;
+
+        explicit Match(const CtfRules& rules = Quick()) : Mode(rules, Size, 1), Host(Floor())
+        {
+            const PlayerId a = Host.Join(Mode);
+            const PlayerId b = Host.Join(Mode);
+            Blue = TeamOf(Mode, a) == Team::Blue ? a : b;
+            Green = Blue == a ? b : a;
+        }
+
+        void Begin() { Host.Run(Mode, Quick().CountdownTicks + 2); }
+    };
+}
+
+TEST_CASE("Warmup waits for both teams, then counts down into the match")
+{
+    CtfMode mode(Quick(), Size, 1);
+    FakeHost host(Floor());
+    host.Join(mode);
+    host.Run(mode, 100);
+    CHECK(mode.State().Stage == Phase::Warmup);
+
+    host.Join(mode);
+    host.Run(mode, 1);
+    CHECK(mode.State().Stage == Phase::Countdown);
+    host.Run(mode, Quick().CountdownTicks + 1);
+    CHECK(mode.State().Stage == Phase::Active);
+    CHECK(mode.State().Events.back().Kind == EventKind::MatchStarted);
+}
+
+TEST_CASE("The countdown starts over if a team empties")
+{
+    CtfMode mode(Quick(), Size, 1);
+    FakeHost host(Floor());
+    host.Join(mode);
+    const PlayerId b = host.Join(mode);
+    host.Run(mode, 3);
+    host.Leave(mode, b);
+    host.Run(mode, 1);
+    CHECK(mode.State().Stage == Phase::Warmup);
+}
+
+TEST_CASE("Kills count in the match and not in warmup")
+{
+    Match m;
+    m.Host.RuleKill(m.Mode, m.Green, m.Blue);
+    CHECK(m.Mode.State().Find(m.Blue)->Kills == 0);
+
+    m.Host.Run(m.Mode, 100);
+    m.Begin();
+    REQUIRE(m.Mode.State().Stage == Phase::Active);
+    m.Host.RuleKill(m.Mode, m.Green, m.Blue);
+    CHECK(m.Mode.State().Find(m.Blue)->Kills == 1);
+    CHECK(m.Mode.State().Find(m.Green)->Deaths == 1);
+}
+
+TEST_CASE("The time limit ends the match on captures, a draw when level")
+{
+    Match m;
+    m.Begin();
+    m.Host.Run(m.Mode, Quick().TimeLimitTicks + 1);
+    CHECK(m.Mode.State().Stage == Phase::Ended);
+    CHECK(m.Mode.State().Winner == Team::None);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::Draw);
+}
+
+TEST_CASE("After the end screen the world, scores and intels reset and warmup begins")
+{
+    Match m;
+    m.Begin();
+    m.Host.RuleKill(m.Mode, m.Green, m.Blue);
+    m.Host.Run(m.Mode, Quick().TimeLimitTicks + 1);
+    REQUIRE(m.Mode.State().Stage == Phase::Ended);
+
+    m.Host.Run(m.Mode, Quick().EndScreenTicks + 1);
+    CHECK(m.Host.Resets == 1);
+    CHECK(m.Mode.State().Find(m.Blue)->Kills == 0);
+    CHECK(m.Mode.State().Captures == std::array<std::uint8_t, 2>{ 0, 0 });
+    CHECK(m.Host.IsAlive(m.Blue));
+    CHECK(m.Host.IsAlive(m.Green));
+    //Both teams are still here, so warmup goes straight to its countdown.
+    CHECK((m.Mode.State().Stage == Phase::Warmup || m.Mode.State().Stage == Phase::Countdown));
+}
+
+TEST_CASE("The intel's home is on top of each fort")
+{
+    Match m;
+    m.Begin();
+    for (int i = 0; i < 2; ++i)
+    {
+        const Intel& intel = m.Mode.State().Intels[i];
+        CHECK(intel.Status == IntelStatus::Home);
+        CHECK(intel.HomeSpot.y == doctest::Approx(1.0f));   //on the floor at y 0
+        CHECK(intel.Position == intel.HomeSpot);
+    }
+}
