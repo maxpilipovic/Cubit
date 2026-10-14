@@ -6,6 +6,8 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
+
 //Tunable parameters for one generated map. Defaults describe the shipped
 //128x48x128 battlefield.
 struct TerrainConfig
@@ -45,4 +47,8 @@ public:
 
     //The natural + team-colour palette the generator installs.
     static Palette MapPalette();
+
+    //Where the two forts stand, as (x, z) columns, low x first. The game puts each
+    //team's base here, so the two cannot disagree.
+    static std::array<glm::ivec2, 2> FortCentres(const glm::ivec3& size);
 };

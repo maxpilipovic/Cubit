@@ -198,9 +198,8 @@ namespace
         const int margin = FortRadius + 2;
         if (std::abs(z - cz) > margin)
             return false;
-        const int left = FortEdgeOffset;
-        const int right = c.Size.x - 1 - FortEdgeOffset;
-        return std::abs(x - left) <= margin || std::abs(x - right) <= margin;
+        const auto centres = TerrainGen::FortCentres(c.Size);
+        return std::abs(x - centres[0].x) <= margin || std::abs(x - centres[1].x) <= margin;
     }
 
     void PlantForests(VoxModel& m, const TerrainConfig& c)
@@ -225,14 +224,15 @@ namespace
     void BuildForts(VoxModel& m, const TerrainConfig& c)
     {
         const int half = c.Size.x / 2;
-        const int cz = c.Size.z / 2;         // fort centre in z
+        const auto centres = TerrainGen::FortCentres(c.Size);
+        const int cz = centres[0].y;         // fort centre in z
         const int radius = FortRadius;       // half-footprint
         const int wallH = 5;
 
         // Two mirrored footprints: left (x≈FortEdgeOffset) and right (mirror).
-        const int centres[2] = { FortEdgeOffset, c.Size.x - 1 - FortEdgeOffset };
-        for (int cxi : centres)
+        for (const glm::ivec2& centre : centres)
         {
+            const int cxi = centre.x;
             for (int z = cz - radius; z <= cz + radius; ++z)
                 for (int x = cxi - radius; x <= cxi + radius; ++x)
                 {
@@ -295,4 +295,10 @@ VoxModel TerrainGen::Generate(const TerrainConfig& config)
     PlantForests(m, config);
     BuildForts(m, config);
     return m;
+}
+
+std::array<glm::ivec2, 2> TerrainGen::FortCentres(const glm::ivec3& size)
+{
+    return { glm::ivec2(FortEdgeOffset, size.z / 2),
+             glm::ivec2(size.x - 1 - FortEdgeOffset, size.z / 2) };
 }

@@ -211,3 +211,27 @@ TEST_CASE("Water is the only transparent entry in the map palette")
         if (i != MapBlocks::Water)
             REQUIRE(palette[i].a >= 1.0f);
 }
+
+TEST_CASE("The fort centres are where the forts are built, mirrored across the map")
+{
+    TerrainConfig config;
+    const auto centres = TerrainGen::FortCentres(config.Size);
+
+    CHECK(centres[0].x < config.Size.x / 2);
+    CHECK(centres[1].x == config.Size.x - 1 - centres[0].x);
+    CHECK(centres[0].y == config.Size.z / 2);
+    CHECK(centres[1].y == config.Size.z / 2);
+
+    //A fort is built there: its team block sits in the column somewhere.
+    const VoxModel model = TerrainGen::Generate(config);
+    for (const glm::ivec2& centre : centres)
+    {
+        bool fortBlock = false;
+        for (int y = 0; y < config.Size.y; ++y)
+        {
+            const std::uint8_t block = model.At(centre.x, y, centre.y);
+            fortBlock = fortBlock || block == MapBlocks::RedBase || block == MapBlocks::BlueBase;
+        }
+        CHECK(fortBlock);
+    }
+}
