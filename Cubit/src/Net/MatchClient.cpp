@@ -84,17 +84,13 @@ void MatchClient::Step(double seconds)
             case MessageId::EditApplied:  HandleEditApplied(event.Data); break;
             case MessageId::ShotResolved: HandleShotResolved(event.Data); break;
             case MessageId::EditResult:   HandleEditResult(event.Data); break;
+            case MessageId::GameState:    HandleGameState(event.Data); break;
 
             //Client-to-server messages arriving at a client are malformed
             //traffic, not something to act on.
             case MessageId::Hello:
             case MessageId::Input:
             case MessageId::Fire:
-                break;
-
-            //No game mode reads these yet - Tasks 3 and 5 give a mode the
-            //chance to.
-            case MessageId::GameState:
             case MessageId::GameCommand:
                 break;
             }
@@ -278,8 +274,35 @@ void MatchClient::HandleWelcome(std::span<const std::uint8_t> data)
     for (const BlockEdit& edit : welcome.Edits)
         ApplyBlockEdit(m_Match.GetWorld(), edit);
 
+    m_GameState = std::move(welcome.GameState);
+    ++m_GameStateSerial;
+
     m_LocalPlayer = welcome.You;
     m_Connected = true;
+}
+
+void MatchClient::HandleGameState(std::span<const std::uint8_t> data)
+{
+    if (!m_Connected)
+        return;
+
+    GameStateMessage message;
+    if (!Decode(data, message))
+        return;
+
+    m_GameState = std::move(message.Bytes);
+    ++m_GameStateSerial;
+}
+
+void MatchClient::SendCommand(std::span<const std::uint8_t> bytes)
+{
+    if (!m_Connected || bytes.size() > MaxGameCommandBytes)
+        return;
+
+    GameCommandMessage command;
+    command.Bytes.assign(bytes.begin(), bytes.end());
+
+    m_Transport.Send(m_ServerPeer, Encode(command), Channel::Reliable);
 }
 
 void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
@@ -330,6 +353,10 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             //message for either.
             m_Match.AddPlayer(entry.Player, entry.Position);
         }
+
+        //Mirrored for everybody, the local player included: a dead player is
+        //not stepped, and that has to be as true of prediction as of the server.
+        m_Match.SetAlive(entry.Player, entry.Alive);
 
         //The local player is predicted, not overwritten: reconcile against
         //this snapshot and move on before the generic SetState below can

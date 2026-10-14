@@ -265,12 +265,29 @@ public:
     //first snapshot arrives.
     std::uint8_t LocalHealth() const { return m_LocalHealth; }
 
+    //Whether a player is alive, as the newest snapshot said. The local player
+    //included: being dead is the server's to say, not something to predict.
+    bool IsAlive(PlayerId player) const { return m_Match.IsAlive(player); }
+
+    //The game mode's state, as bytes only the mode can read. Empty until a
+    //mode has sent some, and always on a server that runs none.
+    const std::vector<std::uint8_t>& GameState() const { return m_GameState; }
+
+    //Counts up each time GameState is replaced, so a reader decodes it once per
+    //change rather than once per frame.
+    std::uint64_t GameStateSerial() const { return m_GameStateSerial; }
+
+    //Sends the game mode a command, as bytes only the mode can read. Dropped
+    //when not connected, or when longer than MaxGameCommandBytes.
+    void SendCommand(std::span<const std::uint8_t> bytes);
+
 private:
     void HandleWelcome(std::span<const std::uint8_t> data);
     void HandleSnapshot(std::span<const std::uint8_t> data);
     void HandleEditApplied(std::span<const std::uint8_t> data);
     void HandleShotResolved(std::span<const std::uint8_t> data);
     void HandleEditResult(std::span<const std::uint8_t> data);
+    void HandleGameState(std::span<const std::uint8_t> data);
 
     //A block the server has confirmed. Written underneath the oldest pending
     //prediction on that cell when there is one, so what shows stays this
@@ -409,6 +426,9 @@ private:
     std::deque<ShownEdit> m_RecentEdits;
     std::uint64_t m_EditSerial = 0;
     std::uint8_t m_LocalHealth = 0;
+
+    std::vector<std::uint8_t> m_GameState;
+    std::uint64_t m_GameStateSerial = 0;
 
     //The newest spare-input report from this client's own snapshot entry, and
     //the ack that came with it - which says how far the server's window reaches.

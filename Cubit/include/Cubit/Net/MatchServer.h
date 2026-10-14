@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cubit/Core.h"
+#include "Cubit/Net/GameMode.h"
 #include "Cubit/Net/Protocol.h"
 #include "Cubit/Net/Transport.h"
 #include "Cubit/Voxel/BlockEdit.h"
@@ -29,7 +30,11 @@
 //
 //Holds no window, no renderer and no GL context, so it runs anywhere a World
 //does. Server.exe is a bare main() around this, on the MapGen precedent.
-class CB_API MatchServer
+//
+//Rule-free on its own. A game mode, when one is given, decides what a join, a
+//kill and a command mean; with none, every joiner appears at the spawn alive
+//and a kill respawns them there, exactly as before modes existed.
+class CB_API MatchServer final : public GameModeHost
 {
 public:
     //`mapName` and `mapHash` are what joining clients are told to load and
@@ -39,9 +44,12 @@ public:
     //by - damage, health, range, fire rate, reach - which the game states and
     //the engine only applies. It defaults so the engine's own tests can raise a
     //server without stating tuning they are not testing.
+    //
+    //`mode`, when given, must outlive this. Null runs the match with no rules
+    //beyond the engine's own.
     MatchServer(World world, std::string mapName, std::uint64_t mapHash,
         const glm::vec3& spawn, Transport& transport,
-        const MatchRules& rules = MatchRules{});
+        const MatchRules& rules = MatchRules{}, GameMode* mode = nullptr);
 
     //One authoritative tick: service the transport, admit joiners, collect this
     //tick's inputs and edits, apply the edits in player-id order, step the
@@ -77,7 +85,13 @@ public:
     //See FindUnsupported for the rule.
     std::size_t ApplyEdits(std::span<const BlockEdit> edits);
 
-    const MatchState& Match() const { return m_Match; }
+    //GameModeHost. What a mode may ask of the match; see GameMode.h.
+    std::uint64_t Tick() const override { return m_Match.Tick(); }
+    const MatchState& Match() const override { return m_Match; }
+    bool IsAlive(PlayerId player) const override;
+    void Respawn(PlayerId player, const glm::vec3& position) override;
+    void Kill(PlayerId player) override;
+    void ResetWorld() override;
 
     //Every cell whose block differs from the loaded map, each with the block it
     //holds now. Sent to joiners so a client arriving after somebody dug a hole
@@ -294,6 +308,9 @@ private:
 
     //The numbers this match is played by. See MatchRules.
     MatchRules m_Rules;
+
+    //Not owned, and may be null. See the constructor.
+    GameMode* m_Mode = nullptr;
 
     std::vector<Client> m_Clients;
     std::vector<BlockEdit> m_EditLog;

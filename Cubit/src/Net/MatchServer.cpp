@@ -27,13 +27,14 @@ namespace
 }
 
 MatchServer::MatchServer(World world, std::string mapName, std::uint64_t mapHash,
-    const glm::vec3& spawn, Transport& transport, const MatchRules& rules)
+    const glm::vec3& spawn, Transport& transport, const MatchRules& rules, GameMode* mode)
     : m_Match(std::move(world)),
       m_MapName(std::move(mapName)),
       m_MapHash(mapHash),
       m_Spawn(spawn),
       m_Transport(transport),
-      m_Rules(rules)
+      m_Rules(rules),
+      m_Mode(mode)
 {
 }
 
@@ -126,6 +127,12 @@ void MatchServer::Step(double seconds)
 
     m_Match.Step(commands, static_cast<float>(seconds));
 
+    //After every player has stepped, so the mode sees where this tick left
+    //them, and before the history and the snapshot, so whatever it moves or
+    //kills is what both record.
+    if (m_Mode != nullptr)
+        m_Mode->Step(*this);
+
     //AFTER the step and BEFORE the snapshot, so the recorded position is the
     //one this tick's snapshot reports. Recording before the step would store
     //last tick's position under this tick's number, putting every rewind one
@@ -141,8 +148,26 @@ void MatchServer::Step(double seconds)
     //using a tick number the client has no way to name, so an instant that
     //names this position on the wire would land one tick short of it here.
     const std::uint64_t recordedTick = m_Match.Tick();
+
+    //Only the living: a dead player cannot be shot, and a sample recorded while
+    //dead would let a shot rewind into a body that is not there.
     for (const auto& [player, character] : m_Match.Players())
-        m_History.Record(player, recordedTick, character.Position(), character.HalfExtents());
+        if (m_Match.IsAlive(player))
+            m_History.Record(player, recordedTick, character.Position(), character.HalfExtents());
+
+    if (m_Mode != nullptr && m_Mode->TakeStateChanged())
+    {
+        GameStateMessage state;
+        state.Bytes = m_Mode->EncodeState();
+
+        //Refused rather than sent: a state past the cap is a mode bug, and
+        //the previous state staying on the wire is better than a protocol error.
+        if (state.Bytes.size() > MaxGameStateBytes)
+            CB_ERROR("Game mode state is " + std::to_string(state.Bytes.size())
+                + " bytes, over the " + std::to_string(MaxGameStateBytes) + " allowed; not sent");
+        else
+            SendToJoined(Encode(state), Channel::Reliable);
+    }
 
     SendSnapshots();
 }
@@ -251,6 +276,10 @@ void MatchServer::HandleDisconnected(PeerId peer)
 
     if (found->Player != InvalidPlayer)
     {
+        //Before the removal, so the mode can still read who is leaving.
+        if (m_Mode != nullptr)
+            m_Mode->OnLeave(*this, found->Player);
+
         m_Match.RemovePlayer(found->Player);
         m_History.Forget(found->Player);
     }
@@ -303,12 +332,24 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
         client->Player = m_Match.AddPlayer(m_Spawn);
         client->Health = m_Rules.StartingHealth;
 
+        //Under a mode a joiner starts dead, and appears when and where the mode
+        //respawns them - which may be at once, inside OnJoin.
+        if (m_Mode != nullptr)
+        {
+            m_Match.SetAlive(client->Player, false);
+            m_Mode->OnJoin(*this, client->Player);
+        }
+
         WelcomeMessage welcome;
         welcome.You = client->Player;
         welcome.MapName = m_MapName;
         welcome.MapHash = m_MapHash;
         welcome.Tick = m_Match.Tick();
         welcome.Edits = m_EditLog;
+
+        //Carried so a joiner knows the mode's state before the next change
+        //sends it again. Unread by the engine.
+        welcome.GameState = m_Mode != nullptr ? m_Mode->EncodeState() : std::vector<std::uint8_t>{};
 
         const std::vector<std::uint8_t> payload = Encode(welcome);
 
@@ -446,12 +487,18 @@ void MatchServer::HandleMessage(PeerId peer, std::span<const std::uint8_t> data)
     case MessageId::Snapshot:
     case MessageId::EditApplied:
     case MessageId::ShotResolved:
+    case MessageId::GameState:
         return;
 
-    //No game mode reads these yet - Tasks 3 and 5 give a mode the chance to.
-    case MessageId::GameState:
     case MessageId::GameCommand:
+    {
+        GameCommandMessage command;
+        if (!Decode(data, command) || client->Player == InvalidPlayer || m_Mode == nullptr)
+            return;
+
+        m_Mode->OnCommand(*this, client->Player, command.Bytes);
         return;
+    }
     }
 }
 
@@ -463,7 +510,9 @@ void MatchServer::ApplyInputEdit(PlayerId player, PeerId peer, std::uint64_t cli
     result.Edit.Position = edit.Position;
 
     std::optional<BlockEdit> inverse;
-    if (IsEditLegal(m_Match, player, edit, OtherPlayers::Check))
+    //The dead do not build. Refused like any illegal edit, so the editor's
+    //prediction is taken back with the server's block.
+    if (m_Match.IsAlive(player) && IsEditLegal(m_Match, player, edit, OtherPlayers::Check))
         inverse = ApplyBlockEdit(m_Match.GetWorld(), edit);
 
     if (inverse.has_value())
@@ -609,6 +658,11 @@ void MatchServer::RecordInLog(const BlockEdit& edit, BlockId previous)
 
 void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
 {
+    //The dead do not shoot. Dropped before the fire rate, so a shot from the
+    //dead does not spend the first shot of the next life.
+    if (!m_Match.IsAlive(shooter.Player))
+        return;
+
     const std::uint64_t now = m_Match.Tick();
 
     //The fire rate, which is also the flood guard.
@@ -645,6 +699,11 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
     {
         //Never a candidate against their own shot.
         if (player == shooter.Player)
+            continue;
+
+        //Nor are the dead. Their history is forgotten on death, so this is
+        //belt and braces - but it does not rely on that.
+        if (!m_Match.IsAlive(player))
             continue;
 
         Aabb box;
@@ -684,27 +743,47 @@ void MatchServer::HandleFire(Client& shooter, const FireMessage& fire)
         {
             Client& victim = *found;
 
-            //Clamped rather than allowed to wrap. Health is unsigned, so
-            //34 subtracted from 32 is not -2, it is 254 - a dead player at
-            //more than full health.
-            victim.Health = victim.Health <= m_Rules.ShotDamage
-                ? std::uint8_t{ 0 }
-                : static_cast<std::uint8_t>(victim.Health - m_Rules.ShotDamage);
-
-            resolved.VictimHealth = victim.Health;
-            resolved.Killed = victim.Health == 0;
-
-            if (resolved.Killed)
+            //The mode's to refuse - a teammate, say, though the engine does not
+            //know what one is. Reported as hitting nobody: the ray still
+            //stopped at the impact, but no damage was done to anyone.
+            if (m_Mode != nullptr && !m_Mode->CanDamage(*this, shooter.Player, victim.Player))
             {
-                m_Match.TeleportPlayer(victim.Player, m_Spawn);
-                m_Match.PlayerForWrite(victim.Player).SetVerticalVelocity(0.0f);
-                victim.Health = m_Rules.StartingHealth;
+                resolved.Victim = InvalidPlayer;
+            }
+            else
+            {
+                //Clamped rather than allowed to wrap. Health is unsigned, so
+                //34 subtracted from 32 is not -2, it is 254 - a dead player at
+                //more than full health.
+                victim.Health = victim.Health <= m_Rules.ShotDamage
+                    ? std::uint8_t{ 0 }
+                    : static_cast<std::uint8_t>(victim.Health - m_Rules.ShotDamage);
 
-                //THE HISTORY GOES TOO. Without this, a shot already in flight
-                //could rewind to before the death, find the victim standing
-                //where they fell, and damage the player who has since
-                //respawned there.
-                m_History.Forget(victim.Player);
+                resolved.VictimHealth = victim.Health;
+                resolved.Killed = victim.Health == 0;
+
+                if (resolved.Killed)
+                {
+                    //THE HISTORY GOES TOO. Without this, a shot already in flight
+                    //could rewind to before the death, find the victim standing
+                    //where they fell, and damage the player who has since
+                    //respawned there.
+                    m_History.Forget(victim.Player);
+
+                    if (m_Mode == nullptr)
+                    {
+                        m_Match.TeleportPlayer(victim.Player, m_Spawn);
+                        m_Match.PlayerForWrite(victim.Player).SetVerticalVelocity(0.0f);
+                        victim.Health = m_Rules.StartingHealth;
+                    }
+                    else
+                    {
+                        //Dead where they fell, at zero health, until the mode
+                        //respawns them - which restores the health.
+                        m_Match.SetAlive(victim.Player, false);
+                        m_Mode->OnKilled(*this, victim.Player, shooter.Player);
+                    }
+                }
             }
         }
     }
@@ -726,6 +805,7 @@ void MatchServer::SendSnapshots()
         entry.VerticalVelocity = character.VerticalVelocity();
         entry.Grounded = character.Grounded();
         entry.Crouched = character.Crouched();
+        entry.Alive = m_Match.IsAlive(player);
 
         //Angles live on the client record rather than on the character, because
         //CharacterController does not store them - they arrive in the input and
@@ -777,4 +857,38 @@ std::uint8_t MatchServer::HealthOf(PlayerId player) const
         [player](const Client& candidate) { return candidate.Player == player; });
 
     return found == m_Clients.end() ? 0 : found->Health;
+}
+
+bool MatchServer::IsAlive(PlayerId player) const
+{
+    return m_Match.IsAlive(player);
+}
+
+void MatchServer::Respawn(PlayerId player, const glm::vec3& position)
+{
+    if (!m_Match.HasPlayer(player))
+        return;
+
+    m_Match.TeleportPlayer(player, position);
+    m_Match.PlayerForWrite(player).SetVerticalVelocity(0.0f);
+    m_Match.SetAlive(player, true);
+
+    //A fresh life: nothing from before it may be rewound into.
+    m_History.Forget(player);
+
+    for (Client& client : m_Clients)
+        if (client.Player == player)
+            client.Health = m_Rules.StartingHealth;
+}
+
+void MatchServer::Kill(PlayerId player)
+{
+    m_Match.SetAlive(player, false);
+    m_History.Forget(player);
+}
+
+void MatchServer::ResetWorld()
+{
+    //Empty until the edit log can be walked back to the map; see the match
+    //rules plan, which gives this its own task.
 }
