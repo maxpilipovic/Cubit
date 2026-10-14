@@ -39,6 +39,8 @@ namespace CubitGame
         void Record(EventKind kind, Team side, PlayerId player);
         void PlaceIntelsHome(const World& world);
         void DropIntelOf(GameModeHost& host, PlayerId player);
+        void StepIntels(GameModeHost& host);
+        bool Touches(const GameModeHost& host, PlayerId player, const glm::vec3& point) const;
         void Changed() { m_Changed = true; }
 
         CtfRules m_Rules;
@@ -50,5 +52,6 @@ namespace CubitGame
 
         //Server-only: never sent.
         std::map<PlayerId, std::uint64_t> m_ProtectedUntil;
+        std::array<std::uint64_t, 2> m_DroppedAt{};   //the tick each intel was dropped, by owner
     };
 }

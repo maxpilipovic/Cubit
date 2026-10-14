@@ -3,6 +3,7 @@
 #include "CtfMode.h"
 #include "FakeHost.h"
 
+#include "Cubit/Voxel/CharacterController.h"
 #include "Cubit/Voxel/TerrainGen.h"
 
 using namespace CubitGame;
@@ -277,4 +278,180 @@ TEST_CASE("The intel's home is on top of each fort")
         CHECK(intel.HomeSpot.y == doctest::Approx(1.0f));   //on the floor at y 0
         CHECK(intel.Position == intel.HomeSpot);
     }
+}
+
+namespace
+{
+    //Stand a player's box so its feet are on the spot.
+    void StandAt(FakeHost& host, PlayerId player, const glm::vec3& spot)
+    {
+        host.Place(player, spot + glm::vec3(0.0f, CharacterConfig{}.HalfExtents.y, 0.0f));
+    }
+
+    const Intel& IntelOf(const CtfMode& mode, Team owner) { return mode.State().Intels[IndexOf(owner)]; }
+}
+
+TEST_CASE("An enemy takes the intel by touching it, but not in warmup")
+{
+    Match m;
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Carried);
+    CHECK(IntelOf(m.Mode, Team::Green).Carrier == m.Blue);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::PickedUp);
+}
+
+TEST_CASE("A player cannot take their own intel")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Blue).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Blue).Status == IntelStatus::Home);
+}
+
+TEST_CASE("Carrying it home scores a capture and sends it back")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Blue).HomeSpot + glm::vec3(2.0f, 0.0f, 0.0f));
+    m.Host.Run(m.Mode, 1);
+
+    CHECK(m.Mode.State().Captures[IndexOf(Team::Blue)] == 1);
+    CHECK(m.Mode.State().Find(m.Blue)->Captures == 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::Captured);
+}
+
+TEST_CASE("Three captures win")
+{
+    Match m;
+    m.Begin();
+    for (int i = 0; i < 3; ++i)
+    {
+        StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+        m.Host.Run(m.Mode, 1);
+        StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Blue).HomeSpot);
+        m.Host.Run(m.Mode, 1);
+    }
+    CHECK(m.Mode.State().Stage == Phase::Ended);
+    CHECK(m.Mode.State().Winner == Team::Blue);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::MatchWon);
+}
+
+TEST_CASE("The carrier's death drops it where they fell; the owner's touch returns it")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+
+    const glm::vec3 fell(30.5f, 1.0f, 16.5f);
+    StandAt(m.Host, m.Blue, fell);
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Dropped);
+    CHECK(glm::distance(IntelOf(m.Mode, Team::Green).Position, fell) < 0.01f);
+
+    StandAt(m.Host, m.Green, fell);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::Returned);
+}
+
+TEST_CASE("A dropped intel an enemy touches is taken again")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    const glm::vec3 fell(30.5f, 1.0f, 16.5f);
+    StandAt(m.Host, m.Blue, fell);
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+
+    //Blue respawns and walks back to it.
+    m.Host.Run(m.Mode, Quick().RespawnDelayTicks + 1);
+    StandAt(m.Host, m.Blue, fell);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Carried);
+}
+
+TEST_CASE("An untouched dropped intel goes home after the timeout")
+{
+    CtfRules rules = Quick();
+    rules.DroppedReturnTicks = 100;
+    Match m(rules);
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    StandAt(m.Host, m.Blue, glm::vec3(30.5f, 1.0f, 16.5f));
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+    StandAt(m.Host, m.Green, glm::vec3(50.5f, 1.0f, 2.5f));   //away from it
+
+    m.Host.Run(m.Mode, rules.DroppedReturnTicks - 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Dropped);
+    m.Host.Run(m.Mode, 2);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+}
+
+TEST_CASE("Leaving or switching while carrying drops it")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    m.Host.Leave(m.Mode, m.Blue);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Dropped);
+}
+
+TEST_CASE("Switching teams while carrying drops it")
+{
+    Match m;
+    const PlayerId c = m.Host.Join(m.Mode);
+    m.Begin();
+
+    //The third player makes their side the bigger one, so their switch is granted.
+    const Team big = TeamOf(m.Mode, c);
+    const Team enemy = Other(big);
+    StandAt(m.Host, c, IntelOf(m.Mode, enemy).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    REQUIRE(IntelOf(m.Mode, enemy).Status == IntelStatus::Carried);
+
+    const std::uint8_t command[] = { SwitchTeamCommand };
+    m.Mode.OnCommand(m.Host, c, command);
+    CHECK(TeamOf(m.Mode, c) == enemy);
+    CHECK(IntelOf(m.Mode, enemy).Status == IntelStatus::Dropped);
+}
+
+TEST_CASE("A drop below the world goes straight home")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    m.Host.Place(m.Blue, glm::vec3(30.5f, -20.0f, 16.5f));
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+}
+
+TEST_CASE("The dead cannot take or return an intel")
+{
+    Match m;
+    m.Begin();
+    m.Host.Kill(m.Blue);
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
 }

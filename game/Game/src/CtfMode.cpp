@@ -6,6 +6,7 @@
 #include "Cubit/Voxel/TerrainGen.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace CubitGame
@@ -40,8 +41,9 @@ namespace CubitGame
         Changed();
     }
 
-    void CtfMode::OnLeave(GameModeHost&, PlayerId player)
+    void CtfMode::OnLeave(GameModeHost& host, PlayerId player)
     {
+        DropIntelOf(host, player);
         std::erase_if(m_State.Players, [player](const PlayerStats& s) { return s.Player == player; });
         m_ProtectedUntil.erase(player);
         Changed();
@@ -85,6 +87,7 @@ namespace CubitGame
         if (after - left > 1)
             return;
 
+        DropIntelOf(host, player);
         stats->Side = to;
         host.Kill(player);
         QueueRespawn(host, player);
@@ -125,9 +128,117 @@ namespace CubitGame
         m_ProtectedUntil[player] = host.Tick() + m_Rules.SpawnProtectionTicks;
     }
 
-    void CtfMode::DropIntelOf(GameModeHost&, PlayerId)
+    bool CtfMode::Touches(const GameModeHost& host, PlayerId player, const glm::vec3& point) const
     {
-        //Filled in with the intel itself.
+        if (!host.IsAlive(player))
+            return false;
+
+        const CharacterController& body = host.Match().Player(player);
+        const glm::vec3 lo = body.Position() - body.HalfExtents();
+        const glm::vec3 hi = body.Position() + body.HalfExtents();
+        const glm::vec3 nearest = glm::clamp(point, lo, hi);
+        return glm::distance(nearest, point) <= m_Rules.PickupRadius;
+    }
+
+    void CtfMode::DropIntelOf(GameModeHost& host, PlayerId player)
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            Intel& intel = m_State.Intels[i];
+            if (intel.Status != IntelStatus::Carried || intel.Carrier != player)
+                continue;
+
+            const glm::vec3 feet = host.Match().HasPlayer(player)
+                ? host.Match().Player(player).Position()
+                    - glm::vec3(0.0f, host.Match().Player(player).HalfExtents().y, 0.0f)
+                : intel.Position;
+
+            intel.Carrier = InvalidPlayer;
+            if (feet.y < 0.0f)
+            {
+                intel.Status = IntelStatus::Home;
+                intel.Position = intel.HomeSpot;
+                Record(EventKind::Returned, TeamAt(i), InvalidPlayer);
+            }
+            else
+            {
+                intel.Status = IntelStatus::Dropped;
+                intel.Position = feet;
+                m_DroppedAt[i] = host.Tick();
+            }
+            Changed();
+        }
+    }
+
+    void CtfMode::StepIntels(GameModeHost& host)
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            Intel& intel = m_State.Intels[i];
+            const Team owner = TeamAt(i);
+
+            if (intel.Status == IntelStatus::Carried)
+            {
+                const CharacterController& carrier = host.Match().Player(intel.Carrier);
+
+                //The server tracks where it is; it is deliberately not broadcast every tick.
+                intel.Position = carrier.Position() + glm::vec3(0.0f, carrier.HalfExtents().y, 0.0f);
+
+                //Home: within the base radius of the carrier's own intel's spot.
+                const glm::vec3 home = m_State.Intels[IndexOf(Other(owner))].HomeSpot;
+                const glm::vec3 at = carrier.Position();
+                const bool inBase = glm::distance(glm::vec2(at.x, at.z), glm::vec2(home.x, home.z)) <= m_Rules.BaseRadius
+                    && std::abs(at.y - home.y) <= m_Rules.BaseRadius;
+
+                if (inBase)
+                {
+                    const Team scorer = Other(owner);
+                    ++m_State.Captures[IndexOf(scorer)];
+                    if (PlayerStats* s = m_State.Find(intel.Carrier)) ++s->Captures;
+                    Record(EventKind::Captured, scorer, intel.Carrier);
+                    intel.Status = IntelStatus::Home;
+                    intel.Carrier = InvalidPlayer;
+                    intel.Position = intel.HomeSpot;
+
+                    if (static_cast<int>(m_State.Captures[IndexOf(scorer)]) >= m_Rules.CapturesToWin)
+                    {
+                        EndMatch(host, scorer);
+                        return;
+                    }
+                }
+                continue;
+            }
+
+            if (intel.Status == IntelStatus::Dropped && host.Tick() - m_DroppedAt[i] >= m_Rules.DroppedReturnTicks)
+            {
+                intel.Status = IntelStatus::Home;
+                intel.Position = intel.HomeSpot;
+                Record(EventKind::Returned, owner, InvalidPlayer);
+                continue;
+            }
+
+            for (const PlayerStats& stats : m_State.Players)
+            {
+                if (!Touches(host, stats.Player, intel.Position))
+                    continue;
+
+                if (stats.Side != owner)
+                {
+                    intel.Status = IntelStatus::Carried;
+                    intel.Carrier = stats.Player;
+                    Record(EventKind::PickedUp, owner, stats.Player);
+                    break;
+                }
+
+                if (intel.Status == IntelStatus::Dropped)
+                {
+                    intel.Status = IntelStatus::Home;
+                    intel.Position = intel.HomeSpot;
+                    Record(EventKind::Returned, owner, stats.Player);
+                    break;
+                }
+            }
+        }
     }
 
     void CtfMode::Record(EventKind kind, Team side, PlayerId player)
@@ -242,6 +353,9 @@ namespace CubitGame
                 Changed();
             }
         }
+
+        if (m_State.Stage == Phase::Active)
+            StepIntels(host);
     }
 
     bool CtfMode::TakeStateChanged()
