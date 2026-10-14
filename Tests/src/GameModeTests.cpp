@@ -400,3 +400,32 @@ TEST_CASE("The dead cannot shoot or edit")
     CHECK(duel.Match.Server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
     CHECK(duel.Match.Server.EditLog().empty());
 }
+
+TEST_CASE("Resetting the world restores every edited cell, for clients and joiners")
+{
+    Rig rig;
+    PeerId peerA = InvalidPeer;
+    MatchClient a(rig.Network.AddClient(peerA), GoodLoader());
+    rig.Step({ &a }, 10);
+
+    const BlockEdit dug{ glm::ivec3(4, 0, 4), BlockId{ 0 } };
+    const BlockEdit built{ glm::ivec3(6, 1, 6), BlockId{ 3 } };
+    rig.Server.ApplyEdits(std::vector<BlockEdit>{ dug, built });
+    rig.Step({ &a }, 3);
+    REQUIRE(a.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 0 });
+
+    rig.Server.ResetWorld();
+    rig.Step({ &a }, 3);
+
+    CHECK(rig.Server.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+    CHECK(rig.Server.Match().GetWorld().GetBlock(6, 1, 6) == BlockId{ 0 });
+    CHECK(a.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+    CHECK(a.Match().GetWorld().GetBlock(6, 1, 6) == BlockId{ 0 });
+    CHECK(rig.Server.EditLog().empty());
+
+    //A joiner after the reset is told of no edits at all.
+    PeerId peerB = InvalidPeer;
+    MatchClient b(rig.Network.AddClient(peerB), GoodLoader());
+    rig.Step({ &a, &b }, 10);
+    CHECK(b.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
+}

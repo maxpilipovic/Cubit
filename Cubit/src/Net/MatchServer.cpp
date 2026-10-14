@@ -889,6 +889,22 @@ void MatchServer::Kill(PlayerId player)
 
 void MatchServer::ResetWorld()
 {
-    //Empty until the edit log can be walked back to the map; see the match
-    //rules plan, which gives this its own task.
+    //Every cell the log has touched, back to what the map held there. The map's
+    //own blocks cannot hang unsupported, so no collapse check follows.
+    std::vector<BlockEdit> restore;
+    restore.reserve(m_MapBlock.size());
+    for (const auto& [cell, block] : m_MapBlock)
+        restore.push_back(BlockEdit{ cell, block });
+
+    std::vector<BlockEdit> changed;
+    changed.reserve(restore.size());
+    for (const BlockEdit& edit : restore)
+        if (ApplyBlockEdit(m_Match.GetWorld(), edit).has_value())
+            changed.push_back(edit);
+
+    m_EditLog.clear();
+    m_LogIndex.clear();
+    m_MapBlock.clear();
+
+    Broadcast(changed);
 }
