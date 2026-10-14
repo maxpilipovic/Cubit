@@ -101,10 +101,44 @@ namespace CubitGame
         Walk(player, feet, level, volume, out);
     }
 
+    void SoundCues::MatchEvents(const std::deque<MatchEvent>& events, Team local,
+        std::vector<CueToPlay>& out)
+    {
+        for (const MatchEvent* event : m_Match.Take(events))
+        {
+            switch (event->Kind)
+            {
+            case EventKind::Captured:
+                //Good or bad news only to somebody on a team.
+                if (local != Team::None)
+                    out.push_back({ event->Side == local ? Cue::TeamCaptured : Cue::EnemyCaptured, false });
+                break;
+            case EventKind::PickedUp:
+                //Side is the intel's owner, so this is this team's own being
+                //taken.
+                if (local != Team::None && event->Side == local)
+                    out.push_back({ Cue::IntelTaken, false });
+                break;
+            case EventKind::Returned:
+                out.push_back({ Cue::IntelReturned, false });
+                break;
+            case EventKind::MatchStarted:
+                out.push_back({ Cue::MatchStart, false });
+                break;
+            case EventKind::MatchWon:
+            case EventKind::Draw:
+                out.push_back({ Cue::MatchEnd, false });
+                break;
+            }
+        }
+    }
+
     void SoundCues::SkipHistory(const std::deque<MatchClient::ShotReport>& shots,
-        const std::deque<MatchClient::ShownEdit>& edits)
+        const std::deque<MatchClient::ShownEdit>& edits,
+        const std::deque<MatchEvent>& events)
     {
         m_Shots.SkipTo(shots);
         m_Edits.SkipTo(edits);
+        m_Match.SkipTo(events);
     }
 }

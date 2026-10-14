@@ -252,6 +252,12 @@ void ScreenOverlay::FillScreen(const glm::vec4& colour) const
         colour);
 }
 
+void ScreenOverlay::FillRect(float x, float y, float width, float height,
+    const glm::vec4& colour) const
+{
+    DrawQuad(*m_White, x, y, width, height, glm::vec2(0.0f), glm::vec2(1.0f), colour);
+}
+
 void ScreenOverlay::Resize(std::uint32_t width, std::uint32_t height)
 {
     if (width == 0 || height == 0)

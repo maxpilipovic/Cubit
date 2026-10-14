@@ -22,8 +22,8 @@
 #endif
 
 //Screen-space drawing for an on-screen readout: text in the 5x7 debug font or in
-//a real font the caller supplies, a crosshair, a full-screen wash, and any
-//textured quad.
+//a real font the caller supplies, a crosshair, a full-screen wash, a solid
+//rectangle, and any textured quad.
 //
 //The plumbing an on-screen readout needs - a pixel-space camera, a unit quad, a
 //shader that samples one glyph out of an atlas, and the debug font's own atlas -
@@ -89,6 +89,9 @@ public:
 
     //Covers the whole surface, for an underwater wash or a fade.
     void FillScreen(const glm::vec4& colour) const;
+
+    //A solid rectangle in pixel space, y up, for panels behind text.
+    void FillRect(float x, float y, float width, float height, const glm::vec4& colour) const;
 
     //Keeps the projection matched to a resized framebuffer. Zero in either
     //dimension is ignored: a minimised window reports one.

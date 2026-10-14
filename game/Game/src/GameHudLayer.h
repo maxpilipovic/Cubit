@@ -5,12 +5,17 @@
 #include "Cubit/Renderer/FontAtlas.h"
 #include "Cubit/Renderer/ScreenOverlay.h"
 
+#include "MatchHud.h"
+#include "MatchModels.h"
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 //Values the game publishes for the overlay to display.
 struct GameHudState
@@ -53,6 +58,17 @@ struct GameHudState
     //connected, and empty otherwise - it only ever follows the server's word.
     std::uint8_t Health = 0;
     std::string ShotLabel;
+
+    //The match. Every line is empty when there is nothing to say - in
+    //single-player, before the server's state arrives - and an empty line is
+    //not drawn. CentreLine is the respawn countdown or the carrier's reminder;
+    //Feed is the recent events, oldest first.
+    std::string ScoreLine, PhaseLine, CentreLine, TeamLine;
+    std::vector<std::string> Feed;
+    std::vector<CubitGame::ScoreRow> Scoreboard;
+
+    //Whether the scoreboard is up: true while Tab is held.
+    bool ShowScoreboard = false;
 };
 
 //Draws the game's readout on top of the rendered scene.
@@ -94,7 +110,13 @@ public:
             m_Overlay.FillScreen(UnderwaterTint);
 
         m_Overlay.DrawCrosshair();
-        DrawReadout();
+        const float readoutBottom = DrawReadout();
+        DrawMatch(readoutBottom);
+
+        //Only with a match to score: the score line is empty in single-player,
+        //which keeps Tab there drawing nothing at all.
+        if (m_State->ShowScoreboard && !m_State->ScoreLine.empty())
+            DrawScoreboard();
 
         m_Overlay.End();
     }
@@ -130,8 +152,15 @@ private:
     //Half the baked height, which lands close to the debug font's old size.
     static constexpr float HudTextScale = 0.5f;
 
-    //Draws the debug lines down from the top-left corner.
-    void DrawReadout() const
+    //The scoreboard: a dark panel this fraction of the screen each way, with
+    //this player's own row in yellow.
+    static constexpr float ScoreboardSize = 0.6f;
+    static inline const glm::vec4 ScoreboardPanel{ 0.0f, 0.0f, 0.0f, 0.6f };
+    static inline const glm::vec4 LocalRowColour{ 1.0f, 0.9f, 0.3f, 1.0f };
+
+    //Draws the debug lines down from the top-left corner, and returns the
+    //baseline of the last one, so what goes under it knows where to start.
+    float DrawReadout() const
     {
         const float lineHeight = m_Font.LineHeight() * HudTextScale;
         const float margin = ScreenOverlay::Margin;
@@ -186,7 +215,7 @@ private:
         //Single-player draws nothing below this point, which is what keeps the
         //readout identical to the pre-networking one.
         if (!m_State->Connected && !m_State->Rejected && !m_State->Disconnected)
-            return;
+            return y;
 
         //A refused handshake has to be visible on screen, not only in the log:
         //the log scrolls past behind a fullscreen window, and "nothing is
@@ -196,7 +225,7 @@ private:
         if (m_State->Rejected)
         {
             m_Overlay.DrawText(m_Font, "NOT CONNECTED", margin, y, HudTextScale);
-            return;
+            return y;
         }
 
         //The server stopped or the connection was lost. The world stays on
@@ -205,7 +234,7 @@ private:
         if (m_State->Disconnected)
         {
             m_Overlay.DrawText(m_Font, "DISCONNECTED", margin, y, HudTextScale);
-            return;
+            return y;
         }
 
         m_Overlay.DrawText(m_Font, "CONNECTED " + std::to_string(m_State->PlayersInMatch),
@@ -222,6 +251,109 @@ private:
         {
             y -= lineHeight;
             m_Overlay.DrawText(m_Font, m_State->ShotLabel, margin, y, HudTextScale);
+        }
+
+        return y;
+    }
+
+    //Draws `text` with its middle at `centreX`.
+    void DrawCentred(std::string_view text, float centreX, float y,
+        const glm::vec4& colour = glm::vec4(1.0f)) const
+    {
+        const float width = ScreenOverlay::MeasureText(m_Font, text, HudTextScale);
+        m_Overlay.DrawText(m_Font, text, centreX - width * 0.5f, y, HudTextScale, colour);
+    }
+
+    //The match's lines: the score and phase centred at the top, the centre
+    //line just above the crosshair, the team under the readout, and the event
+    //feed down the top right. Each only when it has something to say.
+    void DrawMatch(float readoutBottom) const
+    {
+        const float lineHeight = m_Font.LineHeight() * HudTextScale;
+        const float margin = ScreenOverlay::Margin;
+        const float width = static_cast<float>(m_Overlay.Width());
+        const float height = static_cast<float>(m_Overlay.Height());
+        const float top = height - margin - lineHeight;
+
+        if (!m_State->ScoreLine.empty())
+            DrawCentred(m_State->ScoreLine, width * 0.5f, top);
+
+        if (!m_State->PhaseLine.empty())
+            DrawCentred(m_State->PhaseLine, width * 0.5f, top - lineHeight);
+
+        //Above the crosshair, which reaches 12 pixels up from the middle.
+        if (!m_State->CentreLine.empty())
+            DrawCentred(m_State->CentreLine, width * 0.5f, height * 0.5f + lineHeight * 1.5f);
+
+        if (!m_State->TeamLine.empty())
+            m_Overlay.DrawText(m_Font, m_State->TeamLine, margin, readoutBottom - lineHeight,
+                HudTextScale);
+
+        float y = top;
+        for (const std::string& line : m_State->Feed)
+        {
+            const float lineWidth = ScreenOverlay::MeasureText(m_Font, line, HudTextScale);
+            m_Overlay.DrawText(m_Font, line, width - margin - lineWidth, y, HudTextScale);
+            y -= lineHeight;
+        }
+    }
+
+    //A panel over the middle of the screen with each team's players in their
+    //own column: name, kills, deaths and captures, this player's row picked
+    //out in yellow.
+    void DrawScoreboard() const
+    {
+        const float lineHeight = m_Font.LineHeight() * HudTextScale;
+        const float margin = ScreenOverlay::Margin;
+        const float width = static_cast<float>(m_Overlay.Width());
+        const float height = static_cast<float>(m_Overlay.Height());
+
+        const float panelWidth = width * ScoreboardSize;
+        const float panelHeight = height * ScoreboardSize;
+        const float panelX = (width - panelWidth) * 0.5f;
+        const float panelY = (height - panelHeight) * 0.5f;
+        m_Overlay.FillRect(panelX, panelY, panelWidth, panelHeight, ScoreboardPanel);
+
+        const float columnWidth = panelWidth * 0.5f;
+        const float headerY = panelY + panelHeight - margin - lineHeight;
+
+        //Where each field of a row starts, as a fraction of its column.
+        constexpr float KillsAt = 0.55f;
+        constexpr float DeathsAt = 0.70f;
+        constexpr float CapturesAt = 0.85f;
+
+        const auto drawRow = [&](float x, float y, const std::string& name,
+            const std::string& kills, const std::string& deaths, const std::string& captures,
+            const glm::vec4& colour)
+        {
+            m_Overlay.DrawText(m_Font, name, x, y, HudTextScale, colour);
+            m_Overlay.DrawText(m_Font, kills, x + columnWidth * KillsAt, y, HudTextScale, colour);
+            m_Overlay.DrawText(m_Font, deaths, x + columnWidth * DeathsAt, y, HudTextScale, colour);
+            m_Overlay.DrawText(m_Font, captures, x + columnWidth * CapturesAt, y, HudTextScale, colour);
+        };
+
+        std::array<float, 2> rowY{ headerY - lineHeight, headerY - lineHeight };
+
+        for (int i = 0; i < 2; ++i)
+        {
+            const CubitGame::Team team = CubitGame::TeamAt(i);
+            const float x = panelX + margin + columnWidth * static_cast<float>(i);
+            drawRow(x, headerY, i == 0 ? "BLUE" : "GREEN", "K", "D", "C",
+                CubitGame::TeamColour(team));
+        }
+
+        for (const CubitGame::ScoreRow& row : m_State->Scoreboard)
+        {
+            if (row.Side == CubitGame::Team::None)
+                continue;
+
+            const int column = CubitGame::IndexOf(row.Side);
+            const float x = panelX + margin + columnWidth * static_cast<float>(column);
+            drawRow(x, rowY[column], "PLAYER " + std::to_string(row.Player),
+                std::to_string(row.Kills), std::to_string(row.Deaths),
+                std::to_string(row.Captures),
+                row.Local ? LocalRowColour : glm::vec4(1.0f));
+            rowY[column] -= lineHeight;
         }
     }
 

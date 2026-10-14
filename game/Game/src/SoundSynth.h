@@ -21,10 +21,16 @@ namespace CubitGame
         Crumble,
         Footstep,
         HitConfirm,
-        KillConfirm
+        KillConfirm,
+        TeamCaptured,
+        EnemyCaptured,
+        IntelTaken,
+        IntelReturned,
+        MatchStart,
+        MatchEnd
     };
 
-    constexpr int CueCount = 8;
+    constexpr int CueCount = 14;
 
     //How many different footsteps a walk cycles through.
     constexpr int FootstepVariants = 4;

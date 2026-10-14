@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CtfState.h"
 #include "NewEvents.h"
 #include "SoundSynth.h"
 
@@ -83,10 +84,18 @@ namespace CubitGame
         void WalkInferred(PlayerId player, const glm::vec3& feet, float volume,
             std::vector<CueToPlay>& out);
 
+        //A UI sound for every new match event, heard from `local`'s side: a
+        //capture is good or bad news by who scored, and an intel being taken
+        //is only news when it is this team's own. Team::None hears neither:
+        //only what is news to everyone.
+        void MatchEvents(const std::deque<MatchEvent>& events, Team local,
+            std::vector<CueToPlay>& out);
+
         //Marks the histories as already heard. For joining: what happened
         //before this client arrived is not news.
         void SkipHistory(const std::deque<MatchClient::ShotReport>& shots,
-            const std::deque<MatchClient::ShownEdit>& edits);
+            const std::deque<MatchClient::ShownEdit>& edits,
+            const std::deque<MatchEvent>& events);
 
     private:
         struct Gait
@@ -97,6 +106,7 @@ namespace CubitGame
 
         NewEvents m_Shots;
         NewEvents m_Edits;
+        NewEvents m_Match;
         std::map<PlayerId, Gait> m_Gaits;
         int m_Steps = 0;
     };

@@ -10,12 +10,16 @@
 #include "Cubit/Voxel/VoxLoader.h"
 #include "Cubit/Voxel/VoxWriter.h"
 
+#include "CtfState.h"
 #include "DeathAnnouncer.h"
 #include "GameHudLayer.h"
 #include "GameOptions.h"
 #include "GameRules.h"
 #include "GameSettings.h"
 #include "Maps.h"
+#include "MatchHud.h"
+#include "MatchModels.h"
+#include "NewEvents.h"
 #include "SoundCues.h"
 #include "SoundSynth.h"
 
@@ -25,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -168,6 +173,15 @@ namespace
     //sit under everybody else's.
     constexpr float OwnFootstepVolume = 0.5f;
 
+    //How long a match event stays in the feed, in server ticks, and how many
+    //lines it shows at once.
+    constexpr std::uint64_t FeedTicks = 5 * CubitGame::TicksPerSecond;
+    constexpr std::size_t MaxFeedLines = 4;
+
+    //What the centre of the screen says while this player carries the enemy's
+    //intel: the one thing they must not forget.
+    constexpr const char* CarryingLine = "YOU HAVE THE INTEL - RETURN TO BASE";
+
     //A remote player's box half-height at a pose's crouch amount, which
     //MatchClient lerps across the tick a crouch happened on. The pose's
     //position is the box centre, so its feet are this far below it.
@@ -238,6 +252,16 @@ public:
         m_PlayerModelDepth = static_cast<float>(model.Size.x);
         m_PlayerModelWidth = static_cast<float>(model.Size.z);
         m_PlayerMesh = std::make_unique<Mesh>(ModelMesher::Build(model));
+
+        //The same figure in each team's colour, and each team's intel. Built
+        //whether or not a match ever arrives: four small meshes, once.
+        for (int i = 0; i < 2; ++i)
+        {
+            m_TeamMeshes[i] = std::make_unique<Mesh>(
+                ModelMesher::Build(CubitGame::TeamModel(model, CubitGame::TeamAt(i))));
+            m_IntelMeshes[i] = std::make_unique<Mesh>(
+                ModelMesher::Build(CubitGame::IntelModel(CubitGame::TeamAt(i))));
+        }
 
         //The world starts with every chunk dirty, so the first render meshes it.
         //A game that cannot load its map has nothing to do, so this
@@ -311,6 +335,7 @@ public:
             // like, not proof there isn't one being made.
             m_Client->SetInput(input);
             m_Client->Step(timestep.GetSeconds());
+            ReadMatchState();
 
             m_LocalPlayer = m_Client->LocalPlayer();
 
@@ -357,7 +382,125 @@ public:
         m_HudState->StepsPerFrame = m_StepsThisFrame;
         m_StepsThisFrame = 0;
 
+        //Held, not pressed: the scoreboard shows for as long as Tab is down.
+        m_HudState->ShowScoreboard = Input::IsKeyPressed(KeyCode::Tab);
+
         AnnounceDeaths();
+        PublishMatch();
+    }
+
+    //Decodes the match state when the server has sent a new one. Once per
+    //change, not once per step: the bytes are only replaced when it changes.
+    void ReadMatchState()
+    {
+        if (m_Client->GameStateSerial() == m_CtfSerial)
+            return;
+
+        m_CtfSerial = m_Client->GameStateSerial();
+        m_Ctf = CubitGame::DecodeCtfState(m_Client->GameState());
+
+        if (m_Ctf)
+        {
+            m_CtfBroken = false;
+            return;
+        }
+
+        //Bytes this build cannot read: a server from another version, most
+        //likely. Said once, not once per state the server sends.
+        if (!m_CtfBroken)
+            CB_ERROR("Could not read the match state the server sent");
+
+        m_CtfBroken = true;
+    }
+
+    //The local player's team, or Team::None when there is no match state or
+    //the roster does not name this player yet.
+    CubitGame::Team LocalTeam() const
+    {
+        if (!m_Client || !m_Ctf)
+            return CubitGame::Team::None;
+
+        const CubitGame::PlayerStats* stats = m_Ctf->Find(m_Client->LocalPlayer());
+        return stats != nullptr ? stats->Side : CubitGame::Team::None;
+    }
+
+    //Whether the server says the local player is dead. False until there is a
+    //local player at all: an id the roster does not know is "not alive" to
+    //MatchState, and that is not the same as having died.
+    bool LocalDead() const
+    {
+        return m_Client && HaveLocalPlayer() && !m_Client->IsAlive(m_Client->LocalPlayer());
+    }
+
+    //Writes the match's lines, feed and scoreboard into the HUD state. All of
+    //them empty when not connected or when there is no match.
+    void PublishMatch()
+    {
+        GameHudState& hud = *m_HudState;
+        hud.ScoreLine.clear();
+        hud.PhaseLine.clear();
+        hud.CentreLine.clear();
+        hud.TeamLine.clear();
+        hud.Scoreboard.clear();
+
+        if (!m_Client || !m_Client->Connected())
+        {
+            hud.Feed.clear();
+            return;
+        }
+
+        if (m_CtfBroken)
+            hud.PhaseLine = "NO MATCH STATE";
+
+        if (!m_Ctf)
+            return;
+
+        const CubitGame::CtfState& state = *m_Ctf;
+        const PlayerId local = m_Client->LocalPlayer();
+        const std::uint64_t now = m_Client->ServerTick();
+        const CubitGame::Team team = LocalTeam();
+
+        hud.ScoreLine = CubitGame::ScoreLine(state);
+        hud.PhaseLine = CubitGame::PhaseLine(state, now);
+
+        const CubitGame::PlayerStats* stats = state.Find(local);
+        if (LocalDead())
+        {
+            if (stats != nullptr)
+                hud.CentreLine = CubitGame::RespawnLine(*stats, now);
+        }
+        else
+        {
+            for (const CubitGame::Intel& intel : state.Intels)
+                if (intel.Status == CubitGame::IntelStatus::Carried && intel.Carrier == local)
+                    hud.CentreLine = CarryingLine;
+        }
+
+        if (team == CubitGame::Team::Blue)
+            hud.TeamLine = "TEAM BLUE";
+        else if (team == CubitGame::Team::Green)
+            hud.TeamLine = "TEAM GREEN";
+
+        //The first state is the one Welcome carried, and what it already holds
+        //happened before this client arrived - the same reason PlaySounds
+        //skips the histories it joins to.
+        if (!m_FeedJoined)
+        {
+            m_FeedEvents.SkipTo(state.Events);
+            m_FeedJoined = true;
+        }
+
+        for (const CubitGame::MatchEvent* event : m_FeedEvents.Take(state.Events))
+            m_Feed.emplace_back(CubitGame::EventLine(*event, team), now + FeedTicks);
+
+        while (!m_Feed.empty() && (m_Feed.size() > MaxFeedLines || m_Feed.front().second <= now))
+            m_Feed.pop_front();
+
+        hud.Feed.clear();
+        for (const auto& entry : m_Feed)
+            hud.Feed.push_back(entry.first);
+
+        hud.Scoreboard = CubitGame::ScoreboardRows(state, local);
     }
 
     //Publishes one death for each new killing ruling the server sends.
@@ -399,7 +542,9 @@ public:
             //before it had a player are the match's past, not this frame's.
             if (!m_HeardHistory)
             {
-                m_Cues.SkipHistory(m_Client->RecentShots(), m_Client->RecentEdits());
+                const std::deque<CubitGame::MatchEvent> noEvents;
+                m_Cues.SkipHistory(m_Client->RecentShots(), m_Client->RecentEdits(),
+                    m_Ctf ? m_Ctf->Events : noEvents);
                 m_HeardHistory = true;
             }
 
@@ -414,6 +559,9 @@ public:
 
             m_Cues.Shots(m_Client->RecentShots(), m_LocalPlayer, locate, m_PendingCues);
             m_Cues.Edits(m_Client->RecentEdits(), m_PendingCues);
+
+            if (m_Ctf)
+                m_Cues.MatchEvents(m_Ctf->Events, LocalTeam(), m_PendingCues);
 
             for (const auto& [player, character] : Match_().Players())
             {
@@ -470,6 +618,7 @@ public:
         // a later flush would draw these lines in screen space.
         DrawTargetedBlockOutline();
         DrawRemotePlayers(alpha);
+        DrawIntels(alpha);
         DrawShots();
         PlaySounds(alpha);
         DebugDraw::Flush(m_CameraController.GetCamera(), glm::translate(glm::mat4(1.0f), WorldOffset));
@@ -718,6 +867,10 @@ private:
             if (player == m_LocalPlayer)
                 continue;
 
+            //The dead keep their place in the roster but are not in the world.
+            if (!m_Client->IsAlive(player))
+                continue;
+
             //From the interpolation ring rather than from the character, which
             //holds whatever the last snapshot said and steps between packets.
             //The character is still what supplies the size: how big a player is
@@ -754,7 +907,63 @@ private:
             transform = glm::translate(transform,
                 glm::vec3(-0.5f * m_PlayerModelDepth, 0.0f, -0.5f * m_PlayerModelWidth));
 
-            m_Scene.DrawMesh(*m_PlayerMesh, transform, BrightnessAt(pose.Position));
+            m_Scene.DrawMesh(MeshFor(player), transform, BrightnessAt(pose.Position));
+        }
+    }
+
+    //A player's figure in their team's colour, or the plain one when there is
+    //no match or the roster has not given them a team.
+    const Mesh& MeshFor(PlayerId player) const
+    {
+        if (!m_Ctf)
+            return *m_PlayerMesh;
+
+        const CubitGame::PlayerStats* stats = m_Ctf->Find(player);
+        if (stats == nullptr || stats->Side == CubitGame::Team::None)
+            return *m_PlayerMesh;
+
+        return *m_TeamMeshes[CubitGame::IndexOf(stats->Side)];
+    }
+
+    //Draws each team's intel where it lies, or above whoever carries it.
+    //
+    //A carried intel is never drawn from its Position: the server does not
+    //resend the state every tick it moves, so that is where it was picked up,
+    //not where it is. It rides the carrier's interpolated pose instead, which
+    //is also what makes it move as smoothly as they do.
+    void DrawIntels(float alpha)
+    {
+        if (!m_Client || !m_Ctf)
+            return;
+
+        for (int i = 0; i < 2; ++i)
+        {
+            const CubitGame::Intel& intel = m_Ctf->Intels[i];
+            glm::vec3 position = intel.Position;
+
+            if (intel.Status == CubitGame::IntelStatus::Carried)
+            {
+                //You know you have it, and it would sit in your eyes.
+                if (intel.Carrier == m_LocalPlayer)
+                    continue;
+
+                //A carrier this client cannot place has nowhere to draw it.
+                if (!Match_().HasPlayer(intel.Carrier))
+                    continue;
+
+                const MatchClient::RemotePose pose = m_Client->PoseOf(intel.Carrier, alpha);
+                const float halfHeight = PoseHalfHeight(
+                    Match_().Player(intel.Carrier).Config(), pose.Crouch);
+                position = pose.Position + glm::vec3(0.0f, halfHeight, 0.0f);
+            }
+
+            //The model is 6 voxels on a side, so a tenth of that is 0.6 blocks,
+            //and the offset puts its bottom centre on the position.
+            glm::mat4 transform = glm::translate(glm::mat4(1.0f),
+                WorldOffset + position - glm::vec3(0.3f, 0.0f, 0.3f));
+            transform = glm::scale(transform, glm::vec3(0.1f));
+
+            m_Scene.DrawMesh(*m_IntelMeshes[i], transform, BrightnessAt(position));
         }
     }
 
@@ -778,9 +987,19 @@ private:
     //What the player is asking for this instant: the movement keys held, the
     //camera's aim, and jump. One place, because a shot has to send the same
     //aim a step would.
+    //
+    //The dead ask for nothing but where they look: the server does not step
+    //them, so predicting a move would only be taken back.
     CharacterInput ReadInput()
     {
         CharacterInput input;
+        if (LocalDead())
+        {
+            input.Yaw = m_CameraController.GetYaw();
+            input.Pitch = m_CameraController.GetPitch();
+            return input;
+        }
+
         input.Move = ReadWalkInput();
         input.Yaw = m_CameraController.GetYaw();
         input.Pitch = m_CameraController.GetPitch();
@@ -875,7 +1094,7 @@ private:
         // It also leaves both edit paths below byte-for-byte as they were.
         if (button == MouseCode::Middle)
         {
-            if (!HaveLocalPlayer())
+            if (!HaveLocalPlayer() || LocalDead())
                 return false;
 
             FireShot();
@@ -883,6 +1102,10 @@ private:
         }
 
         if (button != MouseCode::Left && button != MouseCode::Right)
+            return false;
+
+        //The dead do not dig or build.
+        if (LocalDead())
             return false;
 
         const PerspectiveCamera& camera = m_CameraController.GetCamera();
@@ -1118,6 +1341,15 @@ private:
             return true;
         }
 
+        //The server decides whether the switch is allowed; this only asks.
+        if (event.GetKeyCode() == KeyCode::F2 && m_Client)
+        {
+            const std::uint8_t cmd[] = { CubitGame::SwitchTeamCommand };
+            m_Client->SendCommand(cmd);
+            CB_INFO("Asked to switch team");
+            return true;
+        }
+
         const int key = static_cast<int>(event.GetKeyCode());
         const int first = static_cast<int>(KeyCode::D1);
         if (key >= first && key < first + PlaceableBlockCount)
@@ -1177,6 +1409,23 @@ private:
     float m_PlayerModelHeight = 0.0f;
     float m_PlayerModelDepth = 0.0f;
     float m_PlayerModelWidth = 0.0f;
+
+    //The same figure in each team's colour, and each team's intel, indexed by
+    //CubitGame::IndexOf.
+    std::array<std::unique_ptr<Mesh>, 2> m_TeamMeshes;
+    std::array<std::unique_ptr<Mesh>, 2> m_IntelMeshes;
+
+    //The match, as last decoded from the server's state. Empty in
+    //single-player, before the state arrives, and when it could not be read -
+    //which m_CtfBroken records, so the HUD can say so.
+    std::optional<CubitGame::CtfState> m_Ctf;
+    std::uint64_t m_CtfSerial = 0;
+    bool m_CtfBroken = false;
+
+    //The event feed: each line and the server tick it leaves at, oldest first.
+    std::deque<std::pair<std::string, std::uint64_t>> m_Feed;
+    CubitGame::NewEvents m_FeedEvents;
+    bool m_FeedJoined = false;
 
     BlockId m_PlaceBlock = BlockId{2};
     glm::vec3 m_Spawn{ 0.0f };

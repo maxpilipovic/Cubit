@@ -216,6 +216,59 @@ namespace CubitGame
             AddTone(samples, 1800.0f, 1800.0f, 1.0f, 0.025f, Frames(0.08f));
             return Finish(std::move(samples), 0.4f);
         }
+
+        SoundClip TeamCaptured()
+        {
+            //Three rising blips: good news.
+            std::vector<float> samples(Frames(0.3f), 0.0f);
+            AddTone(samples, 800.0f, 800.0f, 1.0f, 0.03f);
+            AddTone(samples, 1200.0f, 1200.0f, 1.0f, 0.03f, Frames(0.1f));
+            AddTone(samples, 1600.0f, 1600.0f, 1.0f, 0.04f, Frames(0.2f));
+            return Finish(std::move(samples), 0.5f);
+        }
+
+        SoundClip EnemyCaptured()
+        {
+            //Two falling tones: bad news.
+            std::vector<float> samples(Frames(0.3f), 0.0f);
+            AddTone(samples, 900.0f, 900.0f, 1.0f, 0.04f);
+            AddTone(samples, 600.0f, 600.0f, 1.0f, 0.06f, Frames(0.12f));
+            return Finish(std::move(samples), 0.5f);
+        }
+
+        SoundClip IntelTaken()
+        {
+            //Two quick pips, the same pitch, as an alarm.
+            std::vector<float> samples(Frames(0.14f), 0.0f);
+            AddTone(samples, 1000.0f, 1000.0f, 1.0f, 0.02f);
+            AddTone(samples, 1000.0f, 1000.0f, 1.0f, 0.02f, Frames(0.07f));
+            return Finish(std::move(samples), 0.45f);
+        }
+
+        SoundClip IntelReturned()
+        {
+            std::vector<float> samples(Frames(0.2f), 0.0f);
+            AddTone(samples, 700.0f, 700.0f, 1.0f, 0.06f);
+            return Finish(std::move(samples), 0.45f);
+        }
+
+        SoundClip MatchStart()
+        {
+            //A horn: a long, slowly dying low tone.
+            std::vector<float> samples(Frames(0.6f), 0.0f);
+            AddTone(samples, 440.0f, 440.0f, 1.0f, 0.4f);
+            return Finish(std::move(samples), 0.8f);
+        }
+
+        SoundClip MatchEnd()
+        {
+            //A major chord, held.
+            std::vector<float> samples(Frames(0.8f), 0.0f);
+            AddTone(samples, 330.0f, 330.0f, 1.0f, 0.5f);
+            AddTone(samples, 415.0f, 415.0f, 1.0f, 0.5f);
+            AddTone(samples, 494.0f, 494.0f, 1.0f, 0.5f);
+            return Finish(std::move(samples), 0.6f);
+        }
     }
 
     const char* CueName(Cue cue)
@@ -230,6 +283,12 @@ namespace CubitGame
         case Cue::Footstep:    return "footstep";
         case Cue::HitConfirm:  return "hit confirm";
         case Cue::KillConfirm: return "kill confirm";
+        case Cue::TeamCaptured:  return "team captured";
+        case Cue::EnemyCaptured: return "enemy captured";
+        case Cue::IntelTaken:    return "intel taken";
+        case Cue::IntelReturned: return "intel returned";
+        case Cue::MatchStart:    return "match start";
+        case Cue::MatchEnd:      return "match end";
         }
 
         return "unknown";
@@ -247,6 +306,12 @@ namespace CubitGame
         case Cue::Footstep:    return Footstep(seed);
         case Cue::HitConfirm:  return HitConfirm();
         case Cue::KillConfirm: return KillConfirm();
+        case Cue::TeamCaptured:  return TeamCaptured();
+        case Cue::EnemyCaptured: return EnemyCaptured();
+        case Cue::IntelTaken:    return IntelTaken();
+        case Cue::IntelReturned: return IntelReturned();
+        case Cue::MatchStart:    return MatchStart();
+        case Cue::MatchEnd:      return MatchEnd();
         }
 
         return {};

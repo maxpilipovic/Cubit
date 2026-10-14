@@ -290,10 +290,14 @@ TEST_CASE("Joining a match does not replay what happened before")
     const std::deque<MatchClient::ShownEdit> edits{
         Shown(9, { BlockEdit{ glm::ivec3(1, 1, 1), BlockId{ 0 } } }) };
 
-    cues.SkipHistory(shots, edits);
+    const std::deque<CubitGame::MatchEvent> events{
+        CubitGame::MatchEvent{ 3, CubitGame::EventKind::MatchStarted, CubitGame::Team::None, InvalidPlayer } };
+
+    cues.SkipHistory(shots, edits, events);
 
     cues.Shots(shots, Me, Where, out);
     cues.Edits(edits, out);
+    cues.MatchEvents(events, CubitGame::Team::Blue, out);
     CHECK(out.empty());
 
     //What comes after is heard.
@@ -301,6 +305,27 @@ TEST_CASE("Joining a match does not replay what happened before")
     later.push_back(Shot(7, Them));
     cues.Shots(later, Me, Where, out);
     CHECK(Count(out, Cue::Gunshot) == 1);
+}
+
+TEST_CASE("Match events sound from the local team's side, each once")
+{
+    SoundCues cues;
+    std::vector<CueToPlay> out;
+    std::deque<CubitGame::MatchEvent> events{
+        CubitGame::MatchEvent{ 1, CubitGame::EventKind::Captured, CubitGame::Team::Blue, 3 },
+        CubitGame::MatchEvent{ 2, CubitGame::EventKind::Captured, CubitGame::Team::Green, 4 },
+        CubitGame::MatchEvent{ 3, CubitGame::EventKind::PickedUp, CubitGame::Team::Blue, 4 } };
+
+    cues.MatchEvents(events, CubitGame::Team::Blue, out);
+    REQUIRE(out.size() == 3);
+    CHECK(out[0].Sound == Cue::TeamCaptured);
+    CHECK(out[1].Sound == Cue::EnemyCaptured);
+    CHECK(out[2].Sound == Cue::IntelTaken);
+    CHECK_FALSE(out[0].Positioned);
+
+    out.clear();
+    cues.MatchEvents(events, CubitGame::Team::Blue, out);
+    CHECK(out.empty());
 }
 
 TEST_CASE("A remote player walks when their height holds steady")
