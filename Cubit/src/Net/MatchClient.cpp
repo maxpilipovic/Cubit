@@ -354,10 +354,6 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             m_Match.AddPlayer(entry.Player, entry.Position);
         }
 
-        //Mirrored for everybody, the local player included: a dead player is
-        //not stepped, and that has to be as true of prediction as of the server.
-        m_Match.SetAlive(entry.Player, entry.Alive);
-
         //The local player is predicted, not overwritten: reconcile against
         //this snapshot and move on before the generic SetState below can
         //stomp the replayed position with the authoritative one. HasPlayer is
@@ -368,9 +364,33 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             m_LocalHealth = entry.Health;
             m_ReportedSpare = entry.SpareInputs;
             m_ReportedAck = entry.LastInputTick;
+
+            //Dead is the server's to say. While dead there is nothing to
+            //predict: take its position and stop. The first snapshot alive
+            //again is a respawn - a teleport, not a correction to smooth.
+            //Read before it is overwritten, which is why the local player's
+            //alive bit is mirrored here and not with everybody else's below.
+            const bool wasAlive = m_Match.IsAlive(entry.Player);
+            m_Match.SetAlive(entry.Player, entry.Alive);
+
+            if (!entry.Alive || !wasAlive)
+            {
+                m_Match.PlayerForWrite(entry.Player).SetState(entry.Position, entry.Position,
+                    entry.VerticalVelocity, entry.Grounded, entry.Crouched);
+
+                while (!m_Unacked.empty() && m_Unacked.front().Tick <= entry.LastInputTick)
+                    m_Unacked.pop_front();
+                continue;
+            }
+
             Reconcile(entry);
             continue;
         }
+
+        //Mirrored for every remote player. The local player's is set above: a
+        //dead player is not stepped, and that has to be as true of prediction
+        //as of the server.
+        m_Match.SetAlive(entry.Player, entry.Alive);
 
         //The previous position is the last one this client knew about. Nothing
         //currently renders a remote character's PreviousPosition - drawing

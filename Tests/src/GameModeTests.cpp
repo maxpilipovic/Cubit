@@ -429,3 +429,51 @@ TEST_CASE("Resetting the world restores every edited cell, for clients and joine
     rig.Step({ &a, &b }, 10);
     CHECK(b.Match().GetWorld().GetBlock(4, 0, 4) == BlockId{ 1 });
 }
+
+TEST_CASE("A client neither predicts nor corrects while dead, and a respawn is a teleport")
+{
+    Rig rig;
+    PeerId peer = InvalidPeer;
+    MatchClient client(rig.Network.AddClient(peer), GoodLoader());
+    rig.Step({ &client }, 60);
+    const PlayerId player = client.LocalPlayer();
+
+    rig.Server.Kill(player);
+    rig.Step({ &client }, 10);
+    CHECK_FALSE(client.IsAlive(player));
+
+    //Walking while dead moves nothing on either side.
+    const glm::vec3 where = client.Match().Player(player).Position();
+    for (int i = 0; i < 30; ++i)
+    {
+        CharacterInput walk;
+        walk.Move = glm::vec2(0.0f, 1.0f);
+        client.SetInput(walk);
+        client.Step(FrameClock::FixedStepSeconds);
+        rig.Server.Step(FrameClock::FixedStepSeconds);
+    }
+    CHECK(client.Match().Player(player).Position() == where);
+
+    const std::uint64_t correctionsBefore = client.Corrections().Count;
+    rig.Server.Respawn(player, Elsewhere);
+    rig.Step({ &client }, 10);
+
+    CHECK(client.IsAlive(player));
+    CHECK(glm::distance(client.Match().Player(player).Position(), Elsewhere) < 0.5f);
+    CHECK(client.Corrections().Count == correctionsBefore);
+}
+
+TEST_CASE("The client knows the server's tick")
+{
+    Rig rig;
+    PeerId peer = InvalidPeer;
+    MatchClient client(rig.Network.AddClient(peer), GoodLoader());
+    rig.Step({ &client }, 20);
+
+    //Once more on its own. A client polls at the start of its own Step, so the
+    //snapshot the server has just sent is not read until then.
+    client.SetInput(CharacterInput{});
+    client.Step(FrameClock::FixedStepSeconds);
+
+    CHECK(client.ServerTick() == rig.Server.Tick());
+}
