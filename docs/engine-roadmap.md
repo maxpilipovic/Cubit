@@ -1,6 +1,6 @@
 # Cubit Engine Roadmap
 
-_Last updated: 2026-09-16_
+_Last updated: 2026-10-14_
 
 A living view of what the Cubit engine has, what it still needs before the game, and
 the order we intend to finish it in. The punch list directly below is the current plan;
@@ -26,6 +26,10 @@ first:
 - B7a records what audio left alone.
 
 What comes next is section D, the match-rules arc.
+
+**Status 2026-10-14: the match-rules arc is done.** D1 (capture the intel) and D5
+(team-aware spawning) are ticked, and B3a (team colours) went in with them. What the arc
+left open is D1a; the user still owes a match played by hand.
 
 ### A. Wrong today — bugs and robustness
 
@@ -384,9 +388,19 @@ What comes next is section D, the match-rules arc.
   app and looking at a frame. The original entry follows. There is no `Mesh` type and
   no model loading; remote players are `DebugDraw` wireframe boxes (`DrawRemotePlayers`,
   `Sandbox.cpp:570`). Player models, a held tool and team colours all need it.
-- [ ] **B3a. Team colours.** B3 named this and did not deliver it. `ModelMesher` bakes
-  each model's own palette colours into its vertices; there is no way to tint or swap
-  a palette per team, and nothing chooses one.
+- [x] **B3a. Team colours.** **Done 2026-10-14, with D1.** Not the tint the spec was first
+  designed around (a tint uniform plus a palette mask, which would have been a shader
+  change): the player model is **meshed twice at load, once per team, with palette entry 2
+  (the torso) swapped for the team colour** (`CubitGame::TeamModel`, in
+  `game/Game/src/MatchModels.h`). `ModelMesher` already bakes palette colours, so this
+  needed no engine or shader change and costs nothing per draw. `DrawRemotePlayers` picks
+  the mesh from the player's team in the match state, falls back to the plain model when
+  there is no state or no team, and draws nobody who is dead. A game test checks the swap
+  changes entry 2 and nothing else. Checked by running: from either client, a Blue player
+  wears a blue shirt and a Green player a green one, with skin, face and legs unchanged
+  (screenshots from the D1 run, below). The original entry follows. B3 named this and did
+  not deliver it. `ModelMesher` bakes each model's own palette colours into its vertices;
+  there is no way to tint or swap a palette per team, and nothing chooses one.
 - [ ] **B3b. A first-person held tool.** B3 named this and did not deliver it. Nothing
   draws anything in the local player's own view beyond the crosshair outline; a held
   tool needs its own model and its own placement in view space, not world space.
@@ -761,15 +775,111 @@ What comes next is section D, the match-rules arc.
 Not engine work, recorded here so they are not lost. They belong to the match-rules arc
 or just after it.
 
-- [ ] **D1. Match rules:** teams, spawn ownership, match state (warmup, active, end), one
-  objective, a scoreboard, and syncing all of it to joiners. Scope doc GAM-01–05, NET-06,
-  NET-07.
+- [x] **D1. Match rules:** **Done 2026-10-14: capture the intel**, in fourteen tasks
+  recorded in `docs/superpowers/plans/2026-09-27-match-rules-ctf.md`, against the spec
+  `docs/superpowers/specs/2026-09-27-match-rules-ctf-design.md`. `Server.exe` plays it.
+  - **The engine gained a hook and knows nothing of what it means.** `GameMode` and
+    `GameModeHost` (`Cubit/include/Cubit/Net/GameMode.h`): `MatchServer` takes an optional
+    game-supplied mode and calls it at join, leave, damage, kill, command and every tick.
+    **A null mode keeps the old behaviour exactly** — a joiner appears at the constructor's
+    spawn and a kill respawns on the same tick — so every existing construction site and
+    test is unchanged. The engine names no team, intel or phase.
+  - **Dead is a state.** `MatchState` holds who is alive. A dead player is not stepped,
+    cannot be shot, is out of the rewind history and has edits and shots refused, but their
+    inputs are still acknowledged. The snapshot's flag byte carries an alive bit (the entry
+    stays 37 bytes); `MatchClient` mirrors it for every player, the local one included, and
+    reads the local player's previous alive state first, so the first snapshot alive again
+    is taken as a respawn teleport rather than a correction.
+  - **Protocol 8.** `GameState` (10) carries the mode's bytes to everyone when the mode says
+    they changed; `GameCommand` (11) carries a client's bytes to the mode; `Welcome` carries
+    the current state, so a late joiner starts from the match as it stands (NET-07). Both
+    state paths are capped at 4096 bytes. `MatchServer::ResetWorld` puts every edited cell
+    back as one batch.
+  - **The rules are the game's:** `CtfRules`, `CtfState` (with its own versioned encoding)
+    and `CtfMode` in `game/Game/src`. Joiners balance onto the smaller team and F2 asks to
+    switch; warmup until both teams have a player, a 10 s countdown, first to 3 captures or
+    the most after 20 minutes, a 15 s result, then the same map resets. The intel is picked
+    up by an enemy, carried, dropped where its carrier dies, returned by an owner's touch or
+    after 30 s, and captured at the carrier's own home spot. Respawns wait 5 s, with 2 s of
+    spawn protection and no friendly fire.
+  - **The client shows it:** team colours (B3a), the two intels as 0.6 m cubes, a score
+    line and phase line at the top, a centre line (`YOU HAVE THE INTEL - RETURN TO BASE`,
+    `RESPAWN IN n`), the team under the debug readout, an event feed top right, a Tab
+    scoreboard, and six synthesised cues. While dead, input stops and the camera stays
+    where you fell.
+  - **Decided during execution:**
+    - The server does not resend the match state every tick an intel is carried. It
+      broadcasts on pickup, capture, drop and return only. A client draws a carried intel
+      from its carrier — `PoseOf` for a remote carrier, and not at all for the local one,
+      who knows they have it — never from the state's stored position, which goes stale.
+      It sits on top of the carrier's head, not on their back as the spec said.
+    - `MatchClient::ServerTick()` already existed and was kept. It trails the server by
+      about one tick, and the HUD's countdowns read it as it is.
+    - The dropped-intel timeout test uses its own 100-tick return time: the plan's version
+      ran 1799 ticks inside a 1000-tick test match, which had ended and reset first.
+    - Team colours are a palette-swapped mesh per team, not the tint first designed; see B3a.
+  - **Tests:** the engine suite went from 649 to 669 cases and the game suite from 44 to 80,
+    all passing. The engine covers the mode calls, dead players, the alive bit, commands,
+    state reaching every client and a late joiner, `ResetWorld`, and no correction at a
+    respawn; the game covers balancing, switching, spawning, every phase, every intel
+    rule, the state's encoding, the HUD's text and the scoreboard's rows.
+  - **Checked by running, 2026-10-14:** a server and two clients, with temporary triggers
+    (removed before the commit) that shortened the match to 60 s, forced a pickup at tick
+    600, moved the players into each other's view, and killed the carrier at tick 1200.
+    All three processes exited 0 in each of the three runs. What the screenshots showed:
+    the score line `BLUE 0 - 0 GREEN` centred at the top with `STARTS IN 1`, the clock,
+    then `DRAW` under it; the team line under the debug readout and the feed top right,
+    none of them overlapping; a Blue carrier with the green intel on top of its head, seen
+    from the Green client, while the carrier's own screen showed `YOU HAVE THE INTEL -
+    RETURN TO BASE` and no intel; the dropped intel on the floor where the carrier died,
+    with the dead client's camera held there under `RESPAWN IN 4` and its body not drawn
+    on the other client; the intel back at home, sitting on the fort floor; the
+    scoreboard panel with both columns in team colours and the local row in yellow; and
+    after the reset both players back at their bases counting down again. The only
+    corrections logged were at the triggers' own mid-life teleports and at the match
+    reset (see D1a). F2, Tab and the sounds cannot be driven by a script, so those wait
+    for a hand-played match.
 - [ ] **D2. Tool slots.** Dig, place and fire are three mouse buttons; the scope doc wants a
   shovel, a build tool and a weapon that switch cleanly. PLY-04, PLY-05, PLY-07.
 - [ ] **D3. Ammo, reload and spread** for the hitscan weapon. PLY-03.
 - [ ] **D4. Forts that scale with the map.** `FortEdgeOffset = 8` is absolute
   (`TerrainGen.cpp:15`): on the 512-wide map the forts are 10-block specks at the edges.
-- [ ] **D5. Team-aware spawning.** One authored spawn column for everybody.
+- [x] **D5. Team-aware spawning.** **Done 2026-10-14, with D1.** `TerrainGen::FortCentres`
+  exposes the two fort centres the generator already computed, so the game places bases
+  where the forts are rather than on a second copy of the arithmetic. Blue owns the low-x
+  fort and Green the high-x one. Every spawn runs `FindSpawn` near the team's fort centre
+  against the current world, so a dug-out base still spawns (GAM-02); if nothing is found
+  the search widens to the map centre and logs, and a player is never left unspawned.
+  Game tests cover the spawn landing at your own base after the delay and the search
+  still working once the base is dug out. In the run, Blue spawned at 8.5, 15.9, 256.5 and
+  Green at 503.5, 15.9, 256.5, with no spawn warning in the server log. The original entry
+  follows. One authored spawn column for everybody.
+- [ ] **D1a. What D1 recorded rather than did.**
+  - **The match reset counts a correction.** `CtfMode::ResetMatch` kills and respawns each
+    player on the same tick, so no snapshot ever shows them dead and the client takes the
+    move home as a correction, not a respawn teleport — against the spec's "nothing
+    counted as a correction". Seen in both full runs: the Green client, standing 4.5 m
+    from its spawn when the match ended, logged one 4.47 m correction at the reset. It is
+    a snap either way, so it shows only in the statistics, but the fix belongs in the rule
+    (a tick dead before the respawn) or in a reset flag the client can read.
+  - **Team switching has no cooldown.** A player on the larger side can switch back and
+    forth.
+  - **A dead client still runs `MatchClient`'s local predict step.** `GameApp` sends no
+    movement while dead, so nothing moves, but the client still predicts and queues.
+  - **`GameApp.cpp` is about 1576 lines.** Its match presentation (`PublishMatch`, the
+    match members, `DrawIntels`) is the obvious thing to extract.
+  - **Warning C4275 on engine headers.** `MatchServer` now derives from `GameModeHost`,
+    which is not exported, and the game's projects warn on it; the `Transport` subclasses
+    warn the same way. Export the interfaces or silence it the way C4251 is.
+  - **The forts' colours fight the teams'.** The map's low-x fort, Blue's, is red, and the
+    high-x one, Green's, is blue, so a Green player stands in a blue fort. `TerrainGen`
+    content, which D4 will touch anyway.
+  - **A team spawns on its own intel.** The spawn and the intel's home are both the fort's
+    centre column, so a defender respawns standing on the intel, and the attacker who
+    reaches it does so in the middle of the enemy's spawn. A design question for the first
+    real matches.
+  - **Still owed: a real match played by hand.** F2, Tab and the six sounds have never been
+    used by a person.
 
 ## What Cubit is today
 

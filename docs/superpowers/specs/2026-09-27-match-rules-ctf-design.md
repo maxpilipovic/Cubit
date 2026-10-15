@@ -1,7 +1,8 @@
 # Match rules: capture the intel — design (roadmap D1, with B3a and D5)
 
-**Date:** 2026-09-27. **Status:** approved in conversation, section by section; this
-records it. An implementation plan follows in `docs/superpowers/plans/`.
+**Date:** 2026-09-27. **Status:** implemented 2026-10-14, by
+`docs/superpowers/plans/2026-09-27-match-rules-ctf.md`, with the deviations listed at the
+end of this document. Approved in conversation, section by section; this records it.
 
 ## Problem
 
@@ -313,3 +314,30 @@ The client reads the event history with the same serial reader the audio work bu
 - Kill cams.
 - Team chat.
 - A real crouch pose or intel model (content).
+
+## Deviations, recorded during implementation
+
+Where what was built differs from what this document says. Decisions the document left
+open — that the server broadcasts the state only on pickup, capture, drop and return,
+that `MatchClient::ServerTick()` already existed and was kept, the timeout test's own
+return time, and the alive bit mirrored for the local player too — are recorded under D1
+in `docs/engine-roadmap.md`.
+
+- **Team colours** are a palette-swapped mesh per team, not a tint uniform and mask. This
+  was already changed above, in Stage 3, before the plan was written.
+- **A carried intel is drawn on top of its carrier's head, not on their back**, and from
+  the carrier, never from the state: a remote carrier's interpolated pose, and not at all
+  when the local player carries it. The state's stored position for a carried intel is
+  not resent as it moves, so it is stale by design.
+- **The `Welcome` message's game state is capped at 4096 bytes**, the same cap as
+  `GameState`. A decoder refuses a larger one on either path; this document capped only
+  `GameState`.
+- **The event history has a sixth kind, `MatchStarted`**, which the state bytes above do
+  not list. It drives the "The match has started" feed line and the match-start sound.
+- **Feed wording follows the reader's team.** "Your intel was taken" and "Your team took
+  the Green intel" rather than "Green took your intel", and "Your intel was returned" or
+  "The Green intel was returned" for a return.
+- **Not as specified, found by running, and open:** a match reset kills and respawns each
+  player on the same tick, so no snapshot shows them dead and the client counts the move
+  home as a correction, where "Dead is a state" says a respawn counts none. Recorded as
+  D1a in `docs/engine-roadmap.md`.

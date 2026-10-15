@@ -9,7 +9,10 @@ it lands. The target is an Ace of Spades style multiplayer FPS: destructible ter
 building, shooting, and team-based matches.
 
 The engine builds as a DLL (`Cubit`) and knows no game rules: health, damage, shot
-range, fire rate and dig reach are a `MatchRules` value the game supplies. `Sandbox` is
+range, fire rate and dig reach are a `MatchRules` value the game supplies, and a match's
+rules are a `GameMode` the game hands the server: the server calls it at join, leave,
+damage, kill, command and every tick, and carries its state to clients as bytes it never
+reads. With no mode, the server plays the free-for-all it always did. `Sandbox` is
 the harness that exercises the engine — a map, a free camera, editing, save and reload,
 and the timing readouts. The game itself lives under `game/`: `GameApp` is the player's
 executable, `Server` is a headless authoritative match server, `MapGen` writes map
@@ -29,6 +32,28 @@ on it, with the screen washing blue and hazing out while you are under. A wall o
 high is walked up rather than into, so terrain, stairs you dig, and the river's banks
 are all climbable on foot; jumping is for gaps and for anything taller. The current map
 is a 512x64x512 battlefield.
+
+Connected to a server, that is a match: capture the intel, Blue against Green. Each team
+has a fort and an intel; you take the other team's intel from their fort and carry it back
+to your own to score, and the first team to three captures wins.
+
+**The match**
+
+- Joiners are balanced onto the smaller team, and spawn at their own fort; `F2` asks to
+  switch sides. Players wear their team's colour
+- Warmup until both teams have a player, a 10 s countdown, then the match: first to 3
+  captures, or the most captures after 20 minutes, with a draw on a tie. The result shows
+  for 15 s and the same map resets, every dug and built block included
+- The intel is picked up by touching it, rides on its carrier's head, drops where its
+  carrier dies, and goes home when a defender touches it or after 30 s untouched
+- Dead is a state: you wait 5 s with the camera where you fell, then respawn at your fort
+  with 2 s of protection. There is no friendly fire
+- A HUD shows the score, the phase or the clock, your team, an event feed, and what you
+  should be doing (`YOU HAVE THE INTEL - RETURN TO BASE`, `RESPAWN IN 3`). Holding `Tab`
+  shows the scoreboard: kills, deaths and captures by team
+- Captures, a stolen intel, a returned one, and the start and end of a match each have a
+  sound
+- A player who joins mid-match is sent the match as it stands
 
 **Platform and core loop**
 
@@ -126,7 +151,10 @@ is a 512x64x512 battlefield.
   snapshot by replaying what the server has not yet acknowledged, and draws other
   players interpolated between snapshots
 - Hitscan shooting with lag compensation: the server rewinds everyone to the instant the
-  shooter saw. Three hits kill, and death respawns instantly
+  shooter saw. Three hits kill. Without a game mode, death respawns instantly; with one,
+  the player is dead until the mode respawns them
+- A `GameMode` hook: the game's rules, called by the server, with their state sent to
+  every client and to joiners as opaque bytes, and the clients' commands back the same way
 - A joining client receives every cell that differs from the map, and a server can be
   stopped cleanly
 - A client whose inputs have piled up on the server — a lag spike, a fast clock —
@@ -175,7 +203,8 @@ a block, right click places one, `1`–`8` pick the colour, and middle click fir
 undoes the last block edit, along with anything that fell because of it. `B`
 (single-player) blows a radius-3 ball out of the terrain where you aim, as one batch that
 `U` undoes whole. `F5` saves the edited world, `F9` restores it — a
-checkpoint pair for authoring a map by playing it.
+checkpoint pair for authoring a map by playing it. In a match, `F2` switches team and
+holding `Tab` shows the scoreboard.
 
 ## Building
 
@@ -224,8 +253,10 @@ GameApp.exe --connect 127.0.0.1
 ```
 
 Both read the map from `assets/` in the working directory, which the build copies next
-to each executable, so run each from its own output directory. A client checks the
-map's hash against the server's and refuses to join on a mismatch. The server listens on port 27015 and takes a map path as an argument; `--port` changes
+to each executable, so run each from its own output directory. The server plays capture
+the intel; it needs a player on each team before the countdown starts. The server turns
+away a client speaking another protocol version (this is version 8), and a client checks
+the map's hash against the server's and refuses to join on a mismatch. The server listens on port 27015 and takes a map path as an argument; `--port` changes
 the port on either side. `--latency <ms>` (round trip) and `--loss <percent>` add a
 simulated bad network to either end, which is how to see prediction and lag
 compensation working on one machine. `--duration <seconds>` stops the server by itself,
@@ -265,19 +296,22 @@ the executable, so both `--map mine.vox` and `--map assets/maps/starter.vox` wor
 ## Tests
 
 There are two suites, divided by what a failing test would point at. `Tests` is the
-engine's — 613 cases, one skipped by default because it only writes a test fixture on
+engine's — 669 cases, plus one skipped by default because it only writes a test fixture on
 request — covering everything that can be checked without a GPU or a window: chunk and
 world storage, meshing and its face counts, ambient occlusion and light sampling,
 sky-light propagation, raycasting, collision, character movement, frustum culling,
 `.vox` loading and writing, baking a TrueType font into an atlas, parsing settings
 files, the generated terrain's invariants, the wire protocol, and the netcode end to
 end under simulated latency and loss — prediction, corrections, predicted edits, lag
-compensation and input delay. The crash handler is tested by running the test
-executable itself as a child process that crashes on purpose. `GameTests` is the
-game's — 30 cases — covering the numbers the game states for itself, when a death is
-announced, its settings policy, that the shipped font bakes and covers printable
-ASCII and that its license ships beside it, and that the maps it ships and their spawn
-point are what the engine generates.
+compensation and input delay — and the `GameMode` hook: dead players, game state reaching
+every client and a joiner, commands, and putting the world back. The crash handler is
+tested by running the test executable itself as a child process that crashes on purpose.
+`GameTests` is the game's — 80 cases — covering the numbers the game states for itself,
+when a death is announced, its settings policy, that the shipped font bakes and covers
+printable ASCII and that its license ships beside it, that the maps it ships and their
+spawn point are what the engine generates, and capture the intel against a fake server:
+team balancing and switching, spawning, every phase, every intel rule, the match state's
+encoding, the HUD's text, the scoreboard's rows and the team colours.
 Both suites run automatically after building, so a failing test breaks the build.
 
 Rendering, windowing, and input are not unit tested. Those are checked by running an
@@ -349,8 +383,9 @@ meshing.
 Deliberately out of scope: per-block textures (blocks are palette colours by design)
 and LOD and streaming (maps are a fixed known size).
 
-After the engine, the game: teams, match state, an objective and a scoreboard; tool
-slots for digging, building and shooting; and ammunition.
+The first piece of the game is in: teams, match state, an objective and a scoreboard,
+as capture the intel. Next are tool slots for digging, building and shooting, and
+ammunition.
 
 The rule the project follows is to build only what the game needs, and to prove each
 system in the sandbox before the game layer depends on it.
