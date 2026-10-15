@@ -175,6 +175,9 @@ namespace
         rules.CountdownTicks = 10;
         rules.TimeLimitTicks = 1000;
         rules.EndScreenTicks = 20;
+
+        //No network to outlast here. The hold at its real length has its own tests.
+        rules.ResetHoldTicks = 1;
         return rules;
     }
 
@@ -193,7 +196,8 @@ namespace
             Green = Blue == a ? b : a;
         }
 
-        void Begin() { Host.Run(Mode, Quick().CountdownTicks + 2); }
+        //Into the match, and past the hold that starts it, so both are alive.
+        void Begin() { Host.Run(Mode, Quick().CountdownTicks + 2 + Quick().ResetHoldTicks); }
     };
 }
 
@@ -243,10 +247,25 @@ TEST_CASE("The time limit ends the match on captures, a draw when level")
 {
     Match m;
     m.Begin();
-    m.Host.Run(m.Mode, Quick().TimeLimitTicks + 1);
+
+    //Blue is holding Green's intel when the time runs out.
+    m.Host.Place(m.Blue, m.Mode.State().Intels[IndexOf(Team::Green)].HomeSpot
+        + glm::vec3(0.0f, CharacterConfig{}.HalfExtents.y, 0.0f));
+    m.Host.Run(m.Mode, 1);
+    REQUIRE(m.Mode.State().Intels[IndexOf(Team::Green)].Status == IntelStatus::Carried);
+
+    m.Host.Run(m.Mode, Quick().TimeLimitTicks);
     CHECK(m.Mode.State().Stage == Phase::Ended);
     CHECK(m.Mode.State().Winner == Team::None);
     CHECK(m.Mode.State().Events.back().Kind == EventKind::Draw);
+
+    //The end screen shows both intels home, not one still carried.
+    for (const Intel& intel : m.Mode.State().Intels)
+    {
+        CHECK(intel.Status == IntelStatus::Home);
+        CHECK(intel.Carrier == InvalidPlayer);
+        CHECK(intel.Position == intel.HomeSpot);
+    }
 }
 
 TEST_CASE("After the end screen the world, scores and intels reset and warmup begins")
@@ -454,4 +473,160 @@ TEST_CASE("The dead cannot take or return an intel")
     StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
     m.Host.Run(m.Mode, 1);
     CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+}
+
+TEST_CASE("A carried intel whose carrier is dead is dropped, even if nothing said so")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    REQUIRE(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Carried);
+
+    //The host's Kill, which tells the mode nothing.
+    m.Host.Kill(m.Blue);
+    m.Host.Run(m.Mode, 1);
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Dropped);
+    CHECK(IntelOf(m.Mode, Team::Green).Carrier == InvalidPlayer);
+}
+
+TEST_CASE("An intel dropped in mid-air falls to the ground below")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+
+    //Killed at the top of a jump, feet six blocks over the floor.
+    StandAt(m.Host, m.Blue, glm::vec3(30.5f, 7.0f, 16.5f));
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Dropped);
+    CHECK(glm::distance(IntelOf(m.Mode, Team::Green).Position, glm::vec3(30.5f, 1.0f, 16.5f)) < 0.01f);
+}
+
+TEST_CASE("An intel dropped over a hole to the bottom of the world goes home")
+{
+    Match m;
+    m.Begin();
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+
+    m.Host.Terrain().SetBlock(30, 0, 16, BlockId{ 0 });
+    StandAt(m.Host, m.Blue, glm::vec3(30.5f, 4.0f, 16.5f));
+    m.Host.Run(m.Mode, 1);
+    m.Host.RuleKill(m.Mode, m.Blue, m.Green);
+
+    CHECK(IntelOf(m.Mode, Team::Green).Status == IntelStatus::Home);
+    CHECK(m.Mode.State().Events.back().Kind == EventKind::Returned);
+}
+
+namespace
+{
+    //Quick, but with the hold at its real length and longer than the countdown,
+    //so a reset's hold is not cut short by the next match starting.
+    CtfRules RealHold()
+    {
+        CtfRules rules = Quick();
+        rules.ResetHoldTicks = CtfRules{}.ResetHoldTicks;
+        rules.CountdownTicks = rules.ResetHoldTicks * 3;
+        return rules;
+    }
+}
+
+TEST_CASE("The match starts with everyone dead for the hold, then at their own base")
+{
+    const CtfRules rules = RealHold();
+    Match m(rules);
+
+    //Warmup left them anywhere: both across the map at the other team's base.
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot + glm::vec3(2.0f, 0.0f, 0.0f));
+    StandAt(m.Host, m.Green, IntelOf(m.Mode, Team::Blue).HomeSpot + glm::vec3(2.0f, 0.0f, 0.0f));
+
+    m.Host.Run(m.Mode, 1 + rules.CountdownTicks);
+    REQUIRE(m.Mode.State().Stage == Phase::Active);
+    const std::uint64_t started = m.Host.Now;
+
+    //Dead on the tick it starts, and for the whole hold: not one snapshot of
+    //the move home is a living player's.
+    CHECK_FALSE(m.Host.IsAlive(m.Blue));
+    CHECK_FALSE(m.Host.IsAlive(m.Green));
+    CHECK(m.Mode.State().Find(m.Blue)->RespawnTick == started + rules.ResetHoldTicks);
+    m.Host.Run(m.Mode, rules.ResetHoldTicks - 1);
+    CHECK_FALSE(m.Host.IsAlive(m.Blue));
+
+    m.Host.Run(m.Mode, 1);
+    for (PlayerId p : { m.Blue, m.Green })
+    {
+        CHECK(m.Host.IsAlive(p));
+        CHECK(DistanceFromBase(m.Host, p, TeamOf(m.Mode, p)) < 8.0f);
+        CHECK(m.Mode.State().Find(p)->Deaths == 0);
+    }
+}
+
+TEST_CASE("A reset holds everyone dead for the hold, then spawns them at their own base")
+{
+    const CtfRules rules = RealHold();
+    Match m(rules);
+    m.Host.Run(m.Mode, 1 + rules.CountdownTicks + rules.ResetHoldTicks);
+    REQUIRE(m.Mode.State().Stage == Phase::Active);
+
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot + glm::vec3(2.0f, 0.0f, 0.0f));
+    while (m.Mode.State().Stage != Phase::Ended)
+        m.Host.Run(m.Mode, 1);
+    while (m.Mode.State().Stage == Phase::Ended)
+        m.Host.Run(m.Mode, 1);
+    const std::uint64_t reset = m.Host.Now;
+
+    CHECK_FALSE(m.Host.IsAlive(m.Blue));
+    CHECK_FALSE(m.Host.IsAlive(m.Green));
+    CHECK(m.Mode.State().Find(m.Blue)->RespawnTick == reset + rules.ResetHoldTicks);
+    CHECK(m.Mode.State().Find(m.Blue)->Deaths == 0);
+
+    m.Host.Run(m.Mode, rules.ResetHoldTicks);
+    REQUIRE(m.Mode.State().Stage == Phase::Countdown);
+    for (PlayerId p : { m.Blue, m.Green })
+    {
+        CHECK(m.Host.IsAlive(p));
+        CHECK(DistanceFromBase(m.Host, p, TeamOf(m.Mode, p)) < 8.0f);
+    }
+}
+
+TEST_CASE("When the last player leaves, the match goes back to warmup")
+{
+    Match m;
+    m.Begin();
+
+    //A capture on the board, and an intel in hand.
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Green).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    StandAt(m.Host, m.Blue, IntelOf(m.Mode, Team::Blue).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    StandAt(m.Host, m.Green, IntelOf(m.Mode, Team::Blue).HomeSpot);
+    m.Host.Run(m.Mode, 1);
+    REQUIRE(m.Mode.State().Captures[IndexOf(Team::Blue)] == 1);
+    REQUIRE(IntelOf(m.Mode, Team::Blue).Status == IntelStatus::Carried);
+
+    m.Host.Leave(m.Mode, m.Blue);
+    CHECK(m.Host.Resets == 0);   //someone is still here
+    CHECK(m.Mode.State().Stage == Phase::Active);
+
+    m.Host.Leave(m.Mode, m.Green);
+    CHECK(m.Host.Resets == 1);
+    CHECK(m.Mode.State().Stage == Phase::Warmup);
+    CHECK(m.Mode.State().StageEndTick == 0);
+    CHECK(m.Mode.State().Captures == std::array<std::uint8_t, 2>{ 0, 0 });
+    CHECK(m.Mode.State().Winner == Team::None);
+    for (const Intel& intel : m.Mode.State().Intels)
+    {
+        CHECK(intel.Status == IntelStatus::Home);
+        CHECK(intel.Position == intel.HomeSpot);
+    }
+    CHECK(m.Mode.TakeStateChanged());
+
+    //The next one in finds warmup, not the old clock running.
+    m.Host.Join(m.Mode);
+    m.Host.Run(m.Mode, 1);
+    CHECK(m.Mode.State().Stage == Phase::Warmup);
 }

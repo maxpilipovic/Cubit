@@ -42,7 +42,7 @@ namespace CubitGame
         std::uint64_t RespawnTick = 0;
     };
 
-    //One team's intel. `Owner` is the team it belongs to.
+    //One team's intel. The team it belongs to is its index in CtfState::Intels.
     struct Intel
     {
         IntelStatus Status = IntelStatus::Home;

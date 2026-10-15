@@ -36,8 +36,10 @@ namespace CubitGame
         void StartMatch(GameModeHost& host);
         void EndMatch(GameModeHost& host, Team winner);
         void ResetMatch(GameModeHost& host);
+        void HoldThenSpawnEveryone(GameModeHost& host);
         void Record(EventKind kind, Team side, PlayerId player);
         void PlaceIntelsHome(const World& world);
+        void SendIntelsHome();
         void DropIntelOf(GameModeHost& host, PlayerId player);
         void StepIntels(GameModeHost& host);
         bool Touches(const GameModeHost& host, PlayerId player, const glm::vec3& point) const;

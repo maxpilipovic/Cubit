@@ -11,6 +11,19 @@
 
 namespace CubitGame
 {
+    namespace
+    {
+        //The height of the top face of the first solid block at or below
+        //`fromY` in the column, or nothing when the column is empty that far down.
+        std::optional<int> GroundBelow(const World& world, int x, int z, int fromY)
+        {
+            for (int y = std::min(fromY, world.GetHeight() - 1); y >= 0; --y)
+                if (world.IsBlockSolid(x, y, z))
+                    return y + 1;
+            return std::nullopt;
+        }
+    }
+
     CtfMode::CtfMode(const CtfRules& rules, const glm::ivec3& mapSize, std::uint32_t seed)
         : m_Rules(rules), m_MapSize(mapSize), m_Bases(TerrainGen::FortCentres(mapSize)),
           m_Random(seed * 2654435761u + 1u)
@@ -46,6 +59,18 @@ namespace CubitGame
         DropIntelOf(host, player);
         std::erase_if(m_State.Players, [player](const PlayerStats& s) { return s.Player == player; });
         m_ProtectedUntil.erase(player);
+
+        //The last one out: the next joiner starts a match of their own, not
+        //the score, the clock and the holes this one left behind.
+        if (m_State.Players.empty())
+        {
+            host.ResetWorld();
+            m_State.Captures = { 0, 0 };
+            m_State.Winner = Team::None;
+            PlaceIntelsHome(host.Match().GetWorld());
+            m_State.Stage = Phase::Warmup;
+            m_State.StageEndTick = 0;
+        }
         Changed();
     }
 
@@ -153,8 +178,15 @@ namespace CubitGame
                     - glm::vec3(0.0f, host.Match().Player(player).HalfExtents().y, 0.0f)
                 : intel.Position;
 
+            //It falls to the ground below, and with no ground below it falls
+            //out of the world: straight home.
+            const std::optional<int> ground = feet.y < 0.0f
+                ? std::nullopt
+                : GroundBelow(host.Match().GetWorld(), static_cast<int>(std::floor(feet.x)),
+                    static_cast<int>(std::floor(feet.z)), static_cast<int>(std::floor(feet.y)));
+
             intel.Carrier = InvalidPlayer;
-            if (feet.y < 0.0f)
+            if (!ground.has_value())
             {
                 intel.Status = IntelStatus::Home;
                 intel.Position = intel.HomeSpot;
@@ -163,7 +195,7 @@ namespace CubitGame
             else
             {
                 intel.Status = IntelStatus::Dropped;
-                intel.Position = feet;
+                intel.Position = glm::vec3(feet.x, static_cast<float>(*ground), feet.z);
                 m_DroppedAt[i] = host.Tick();
             }
             Changed();
@@ -179,6 +211,15 @@ namespace CubitGame
 
             if (intel.Status == IntelStatus::Carried)
             {
+                //Every way a carrier stops carrying drops it already; this is
+                //the guard for one that was missed, rather than reading a
+                //player who is not there.
+                if (!host.IsAlive(intel.Carrier))
+                {
+                    DropIntelOf(host, intel.Carrier);
+                    continue;
+                }
+
                 const CharacterController& carrier = host.Match().Player(intel.Carrier);
 
                 //The server tracks where it is; it is deliberately not broadcast every tick.
@@ -255,9 +296,7 @@ namespace CubitGame
         for (int i = 0; i < 2; ++i)
         {
             const glm::ivec2 base = m_Bases[i];
-            int top = 0;
-            for (int y = world.GetHeight() - 1; y >= 0; --y)
-                if (world.IsBlockSolid(base.x, y, base.y)) { top = y + 1; break; }
+            const int top = GroundBelow(world, base.x, base.y, world.GetHeight() - 1).value_or(0);
 
             Intel& intel = m_State.Intels[i];
             intel.HomeSpot = glm::vec3(base.x + 0.5f, static_cast<float>(top), base.y + 0.5f);
@@ -276,6 +315,7 @@ namespace CubitGame
         for (PlayerStats& stats : m_State.Players)
             stats.Kills = stats.Deaths = stats.Captures = 0;
         PlaceIntelsHome(host.Match().GetWorld());
+        HoldThenSpawnEveryone(host);
         Record(EventKind::MatchStarted, Team::None, InvalidPlayer);
     }
 
@@ -284,6 +324,7 @@ namespace CubitGame
         m_State.Stage = Phase::Ended;
         m_State.StageEndTick = host.Tick() + m_Rules.EndScreenTicks;
         m_State.Winner = winner;
+        SendIntelsHome();
         Record(winner == Team::None ? EventKind::Draw : EventKind::MatchWon, winner, InvalidPlayer);
     }
 
@@ -293,14 +334,35 @@ namespace CubitGame
         m_State.Captures = { 0, 0 };
         m_State.Winner = Team::None;
         for (PlayerStats& stats : m_State.Players)
-        {
             stats.Kills = stats.Deaths = stats.Captures = 0;
-            host.Kill(stats.Player);
-            Spawn(host, stats.Player);
-        }
+        HoldThenSpawnEveryone(host);
         PlaceIntelsHome(host.Match().GetWorld());
         m_State.Stage = Phase::Warmup;
         m_State.StageEndTick = 0;
+        Changed();
+    }
+
+    void CtfMode::HoldThenSpawnEveryone(GameModeHost& host)
+    {
+        //Dead now, at base after the hold: the respawn loop in Step spawns them.
+        //Not on this tick - see ResetHoldTicks. The host's Kill, not a ruled
+        //one, so nobody is charged a death.
+        for (PlayerStats& stats : m_State.Players)
+        {
+            host.Kill(stats.Player);
+            stats.RespawnTick = host.Tick() + m_Rules.ResetHoldTicks;
+        }
+        Changed();
+    }
+
+    void CtfMode::SendIntelsHome()
+    {
+        for (Intel& intel : m_State.Intels)
+        {
+            intel.Status = IntelStatus::Home;
+            intel.Carrier = InvalidPlayer;
+            intel.Position = intel.HomeSpot;
+        }
         Changed();
     }
 

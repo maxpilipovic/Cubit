@@ -18,6 +18,15 @@ namespace CubitGame
         std::uint64_t SpawnProtectionTicks = 2 * TicksPerSecond;
         std::uint64_t DroppedReturnTicks = 30 * TicksPerSecond;
 
+        //How long everyone stays dead when the match starts or resets, before
+        //they appear at base. A respawn on the tick of the kill shows no client
+        //a dead snapshot, so each counts the move home as a correction. It has
+        //to outlast a round trip plus the server's input queue: inputs sent
+        //before a client saw itself dead reach the server after the respawn
+        //and must find the player still dead. And the one dead snapshot is on
+        //the unreliable channel, so several of them are needed, not one.
+        std::uint64_t ResetHoldTicks = 1 * TicksPerSecond;
+
         //Metres from the intel to the nearest point of a player's box.
         float PickupRadius = 1.5f;
 
