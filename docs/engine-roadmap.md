@@ -855,22 +855,25 @@ or just after it.
   Green at 503.5, 15.9, 256.5, with no spawn warning in the server log. The original entry
   follows. One authored spawn column for everybody.
 - [ ] **D1a. What D1 recorded rather than did.**
-  - **The match reset counts a correction.** `CtfMode::ResetMatch` kills and respawns each
-    player on the same tick, so no snapshot ever shows them dead and the client takes the
-    move home as a correction, not a respawn teleport — against the spec's "nothing
-    counted as a correction". Seen in both full runs: the Green client, standing 4.5 m
-    from its spawn when the match ended, logged one 4.47 m correction at the reset. It is
-    a snap either way, so it shows only in the statistics, but the fix belongs in the rule
-    (a tick dead before the respawn) or in a reset flag the client can read.
+  - _Fixed 2026-10-14, in the final review's fix pass:_ the match reset's correction (the
+    reset and now the match start hold everyone dead for `CtfRules::ResetHoldTicks`, a
+    second, before the respawn at base. A single tick dead, which this entry used to
+    suggest, would not have fixed it: inputs a client sent before it saw itself dead
+    reach the server after the respawn, and the one dead snapshot can be lost on the
+    unreliable channel), a respawn not replaying unacknowledged inputs, a remote drawn at
+    their body for 100 ms after respawning, an emptied server keeping its match, an
+    intel left hanging in mid-air, one left carried through the end screen, and C4275 on
+    `MatchServer`. A game test now plays a whole match over the loopback and checks that
+    neither client counts a correction.
+  - **Warmup edits carry into the match.** The world is reset at the end of a match, not
+    at its start, so whatever was dug or built in warmup is there when it goes active.
   - **Team switching has no cooldown.** A player on the larger side can switch back and
     forth.
-  - **A dead client still runs `MatchClient`'s local predict step.** `GameApp` sends no
-    movement while dead, so nothing moves, but the client still predicts and queues.
   - **`GameApp.cpp` is about 1576 lines.** Its match presentation (`PublishMatch`, the
     match members, `DrawIntels`) is the obvious thing to extract.
-  - **Warning C4275 on engine headers.** `MatchServer` now derives from `GameModeHost`,
-    which is not exported, and the game's projects warn on it; the `Transport` subclasses
-    warn the same way. Export the interfaces or silence it the way C4251 is.
+  - **C4275 on the `Transport` subclasses** (`EnetTransport`, `LoopbackTransport`,
+    `SimulatedTransport`), which derive from the unexported `Transport`. Silence it beside
+    C4251 as `MatchServer.h` now does.
   - **The forts' colours fight the teams'.** The map's low-x fort, Blue's, is red, and the
     high-x one, Green's, is blue, so a Green player stands in a blue fort. `TerrainGen`
     content, which D4 will touch anyway.

@@ -165,6 +165,7 @@ the client decodes too), and `CtfMode.h/.cpp`.
 | Base (capture) radius | 4 blocks horizontal, 4 vertical, around own intel home |
 | Dropped intel returns after | 30 s |
 | Event history kept | 8 |
+| Held dead at the match start and reset | 1 s |
 
 All in ticks internally, at the 60 Hz step.
 
@@ -196,14 +197,18 @@ Friendly fire is off: `CanDamage` is false between teammates.
 - Kills are not counted, and the intel cannot be picked up.
 
 **Active**
+- It starts with everyone killed (no death counted) and respawned at their base after
+  about a second, wherever warmup left them.
 - The first team to 3 captures wins.
 - At 20 minutes the team with more captures wins; equal captures is a draw.
 - If a team empties, the match goes on, and that team simply cannot score.
 
 **End**
-- The result shows for 15 s.
+- The result shows for 15 s, with both intels home.
 - Then, in order: `ResetWorld()`, scores and stats cleared, both intels home, everyone
-  killed and respawned at their base at once, and back to warmup.
+  killed and respawned at their base after about a second, and back to warmup.
+- If the last player leaves at any point, the same reset happens at once: the next
+  joiner finds warmup, not the old score, clock and world.
 
 ### The intel
 
@@ -214,8 +219,9 @@ Friendly fire is off: `CanDamage` is false between teammates.
 - **Capture:** the carrier comes within the base radius of their own intel's home spot.
   This scores a capture for the team and one for the carrier, and sends the enemy intel
   home. Your own intel does not need to be at home.
-- **Drop:** the carrier dies, leaves or switches, and the intel falls at their feet. If
-  that is below the world, it goes home instead.
+- **Drop:** the carrier dies, leaves or switches, and the intel falls to the ground below
+  their feet. If there is no ground below, or they were below the world, it goes home
+  instead.
 - **Dropped:** an owning-team touch sends it home at once, an enemy touch picks it up,
   and 30 s untouched sends it home.
 
@@ -337,7 +343,17 @@ in `docs/engine-roadmap.md`.
 - **Feed wording follows the reader's team.** "Your intel was taken" and "Your team took
   the Green intel" rather than "Green took your intel", and "Your intel was returned" or
   "The Green intel was returned" for a return.
-- **Not as specified, found by running, and open:** a match reset kills and respawns each
-  player on the same tick, so no snapshot shows them dead and the client counts the move
-  home as a correction, where "Dead is a state" says a respawn counts none. Recorded as
-  D1a in `docs/engine-roadmap.md`.
+- **The reset respawns everyone after about a second, not at once, and the match start
+  now does the same** (`CtfRules::ResetHoldTicks`). Found by running: a respawn on the
+  tick of the kill shows no client a dead snapshot, so the client counts the move home as
+  a correction, where "Dead is a state" says a respawn counts none. One tick dead is not
+  enough under latency: inputs a client sent before it saw itself dead reach the server
+  after the respawn, and the single dead snapshot can be lost on the unreliable channel.
+  The start used to leave players wherever warmup put them; it now sends them home the
+  same way.
+- **Found in the final review, and fixed:** a server everyone leaves goes back to
+  warmup; a dropped intel falls to the ground rather than hanging where the carrier
+  died in mid-air; the end of a match sends both intels home; and an intel whose carrier
+  is dead or gone is dropped. On the client, a respawn replays the inputs the server has
+  not yet applied, and a remote player who respawns is drawn at the respawn point at
+  once, not where they died.
