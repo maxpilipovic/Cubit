@@ -111,7 +111,7 @@ struct WelcomeMessage
     std::vector<BlockEdit> Edits;
 
     //The game mode's own state, opaque to the wire, so a late joiner starts
-    //agreeing with everyone else about score, flags, whatever the mode keeps.
+    //agreeing with everyone else about scores, objectives, whatever the mode keeps.
     //Empty for a mode with nothing to say.
     std::vector<std::uint8_t> GameState;
 };
@@ -281,7 +281,7 @@ struct EditResultMessage
 //against a hostile or desynced peer claiming a blob the sender never meant -
 //a resource limit, not a protocol one, so raising it later is not a version
 //bump. State is the bigger of the two because it may describe a whole match
-//(score, flags, whatever a mode keeps); a command is one player's action and
+//(scores, objectives, whatever a mode keeps); a command is one player's action and
 //is sent far more often, so its cap stays small.
 constexpr std::size_t MaxGameStateBytes = 4096;
 constexpr std::size_t MaxGameCommandBytes = 64;

@@ -463,6 +463,77 @@ TEST_CASE("A client neither predicts nor corrects while dead, and a respawn is a
     CHECK(client.Corrections().Count == correctionsBefore);
 }
 
+TEST_CASE("A respawn replays the inputs the server has still to apply, and counts no correction")
+{
+    Rig rig;
+    PeerId peer = InvalidPeer;
+    MatchClient client(rig.Network.AddClient(peer), GoodLoader());
+    rig.Step({ &client }, 60);
+    const PlayerId player = client.LocalPlayer();
+
+    rig.Server.Kill(player);
+    rig.Step({ &client }, 10);
+    REQUIRE_FALSE(client.IsAlive(player));
+    const std::uint64_t correctionsBefore = client.Corrections().Count;
+
+    CharacterInput walk;
+    walk.Move = glm::vec2(0.0f, 1.0f);
+    auto clientStep = [&]()
+    {
+        client.SetInput(walk);
+        client.Step(FrameClock::FixedStepSeconds);
+    };
+
+    //Walking inputs the client sent while it still believed itself dead, queued
+    //at the server, which applies them to the player it has just respawned.
+    rig.Server.Respawn(player, Elsewhere);
+    for (int i = 0; i < 8; ++i)
+        clientStep();
+
+    for (int i = 0; i < 60; ++i)
+    {
+        rig.Server.Step(FrameClock::FixedStepSeconds);
+        clientStep();
+    }
+
+    REQUIRE(client.IsAlive(player));
+    CHECK(glm::distance(client.Match().Player(player).Position(), Elsewhere) > 1.0f);
+    CHECK(client.Corrections().Count == correctionsBefore);
+}
+
+TEST_CASE("A remote player who respawns is drawn at the respawn point, not where they died")
+{
+    Rig rig;
+    PeerId peerA = InvalidPeer, peerB = InvalidPeer;
+    MatchClient a(rig.Network.AddClient(peerA), GoodLoader());
+    MatchClient b(rig.Network.AddClient(peerB), GoodLoader());
+    rig.Step({ &a, &b }, 60);
+    const PlayerId player = a.LocalPlayer();
+    REQUIRE(b.Match().HasPlayer(player));
+
+    rig.Server.Kill(player);
+    rig.Step({ &a, &b }, 30);
+    REQUIRE_FALSE(b.IsAlive(player));
+    REQUIRE(glm::distance(b.PoseOf(player, 0.0f).Position, Elsewhere) > 5.0f);
+
+    rig.Server.Respawn(player, Elsewhere);
+
+    //Every frame from the first one that shows them alive again, at both ends
+    //of the interpolation: never the body's spot, never on the way from it.
+    int framesAlive = 0;
+    for (int step = 0; step < 20; ++step)
+    {
+        rig.Step({ &a, &b });
+        if (!b.IsAlive(player))
+            continue;
+
+        ++framesAlive;
+        CHECK(glm::distance(b.PoseOf(player, 0.0f).Position, Elsewhere) < 0.5f);
+        CHECK(glm::distance(b.PoseOf(player, 1.0f).Position, Elsewhere) < 0.5f);
+    }
+    CHECK(framesAlive > 10);
+}
+
 TEST_CASE("The client knows the server's tick")
 {
     Rig rig;

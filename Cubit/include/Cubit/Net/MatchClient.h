@@ -301,8 +301,12 @@ private:
     //and records the cell in `changed`, which needs a real relight and remesh.
     void ReplayEdit(std::uint64_t tick, std::vector<glm::ivec3>& changed);
 
-    //Writes the authoritative state in, replays what the server has not
-    //acknowledged, and decides whether the difference is worth showing.
+    //Writes the authoritative state in, with `previous` as the previous
+    //position, and replays on top of it what the server has not acknowledged.
+    //Counts nothing.
+    void Replay(const PlayerSnapshot& entry, const glm::vec3& previous);
+
+    //Replay, then decides whether the difference is worth showing.
     void Reconcile(const PlayerSnapshot& entry);
 
     //Ends the connection and latches Rejected.

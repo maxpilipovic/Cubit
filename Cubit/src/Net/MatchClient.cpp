@@ -373,13 +373,23 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
             const bool wasAlive = m_Match.IsAlive(entry.Player);
             m_Match.SetAlive(entry.Player, entry.Alive);
 
-            if (!entry.Alive || !wasAlive)
+            if (!entry.Alive)
             {
                 m_Match.PlayerForWrite(entry.Player).SetState(entry.Position, entry.Position,
                     entry.VerticalVelocity, entry.Grounded, entry.Crouched);
 
                 while (!m_Unacked.empty() && m_Unacked.front().Tick <= entry.LastInputTick)
                     m_Unacked.pop_front();
+                continue;
+            }
+
+            //A respawn. The inputs the server has not acknowledged yet are
+            //still to be applied, and to the respawned player, so they are
+            //replayed on top of the respawn point as any reconcile would - but
+            //nothing is counted, because a teleport is not a correction.
+            if (!wasAlive)
+            {
+                Replay(entry, entry.Position);
                 continue;
             }
 
@@ -390,7 +400,15 @@ void MatchClient::HandleSnapshot(std::span<const std::uint8_t> data)
         //Mirrored for every remote player. The local player's is set above: a
         //dead player is not stepped, and that has to be as true of prediction
         //as of the server.
+        const bool remoteWasAlive = m_Match.IsAlive(entry.Player);
         m_Match.SetAlive(entry.Player, entry.Alive);
+
+        //A remote respawn. The ring still holds where they lay dead, and PoseOf
+        //draws behind the newest sample, so without this they would show at the
+        //body for the interpolation delay and then streak across the map. With
+        //one sample left PoseOf holds it: they appear at the respawn point.
+        if (entry.Alive && !remoteWasAlive)
+            m_RemoteSamples[entry.Player].clear();
 
         //The previous position is the last one this client knew about. Nothing
         //currently renders a remote character's PreviousPosition - drawing
@@ -456,6 +474,33 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
     //again - and no test in this suite drives the client to that state at the
     //moment a correction lands. Recorded here per the plan rather than forcing
     //a contrived test to pin it.
+    Replay(entry, beforePrevious);
+
+    ++m_SnapshotsReconciled;
+
+    const float error = glm::distance(character.Position(), before);
+
+    if (error <= CorrectionThreshold)
+    {
+        //Thrown away WHOLE - position, previous position, velocity, grounded and crouched
+        //together. Keeping the predicted position while accepting the
+        //authoritative velocity would leave the character in a state neither
+        //machine ever simulated, and the next step would compound it.
+        character.SetState(before, beforePrevious, beforeVelocity, beforeGrounded, beforeCrouched);
+        return;
+    }
+
+    //Over the threshold: the replayed state stands, and the player snaps. There
+    //is no smoothing here on purpose - a snap is the one option with no new
+    //failure mode and the only one that is cleanly testable.
+    ++m_CorrectionCount;
+    m_CorrectionTotal += error;
+    m_CorrectionMax = std::max(m_CorrectionMax, error);
+}
+
+void MatchClient::Replay(const PlayerSnapshot& entry, const glm::vec3& previous)
+{
+    CharacterController& character = m_Match.PlayerForWrite(m_LocalPlayer);
     World& world = m_Match.GetWorld();
 
     //UNDO every edit this client predicted after the acknowledged tick, newest
@@ -471,7 +516,7 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
         world.SetBlockUnmarked(at.x, at.y, at.z, it->Beneath);
     }
 
-    character.SetState(entry.Position, beforePrevious, entry.VerticalVelocity, entry.Grounded,
+    character.SetState(entry.Position, previous, entry.VerticalVelocity, entry.Grounded,
         entry.Crouched);
 
     //Everything the server has confirmed is history now.
@@ -500,27 +545,6 @@ void MatchClient::Reconcile(const PlayerSnapshot& entry)
         world.MarkChunkDirtyAt(at.x, at.y, at.z);
         SkyLight::Repropagate(world, at.x, at.y, at.z);
     }
-
-    ++m_SnapshotsReconciled;
-
-    const float error = glm::distance(character.Position(), before);
-
-    if (error <= CorrectionThreshold)
-    {
-        //Thrown away WHOLE - position, previous position, velocity, grounded and crouched
-        //together. Keeping the predicted position while accepting the
-        //authoritative velocity would leave the character in a state neither
-        //machine ever simulated, and the next step would compound it.
-        character.SetState(before, beforePrevious, beforeVelocity, beforeGrounded, beforeCrouched);
-        return;
-    }
-
-    //Over the threshold: the replayed state stands, and the player snaps. There
-    //is no smoothing here on purpose - a snap is the one option with no new
-    //failure mode and the only one that is cleanly testable.
-    ++m_CorrectionCount;
-    m_CorrectionTotal += error;
-    m_CorrectionMax = std::max(m_CorrectionMax, error);
 }
 
 MatchClient::CorrectionStats MatchClient::Corrections() const

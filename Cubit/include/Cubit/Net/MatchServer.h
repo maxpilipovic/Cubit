@@ -24,6 +24,9 @@
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4251)
+//GameModeHost is a header-only interface with nothing to export, and the game
+//implements it too (its tests' FakeHost), so it stays unexported.
+#pragma warning(disable: 4275)
 #endif
 
 //The authority. Owns the only MatchState anybody is entitled to believe.
